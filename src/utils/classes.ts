@@ -19,13 +19,18 @@ class OfflineAnime {
   }
 
   public setTimeout() {
+    let isMaxTimeouts = false;
+
+    // Siuuuuuuuuuuuuuuuu
     if (this.maxTimeouts === 7) {
-      // Send a discord webhook to notify the user that the anime can not be found
-      
-      this.maxTimeouts = 0;}
+      this.maxTimeouts = 0;
+      isMaxTimeouts = true;
+    }
 
     this.maxTimeouts += 1;
     this.timeouts = this.maxTimeouts;
+
+    return isMaxTimeouts;
   }
   public resetTimeout() {
     this.timeouts = 0;

@@ -5,7 +5,11 @@ import Nyaa from "@nyaa/nyaa";
 import qbit from "@qbit/qbit";
 import pLimit from "p-limit";
 import "colors";
-import { handleWithDelay, sendWebHook } from "@scheduler/utils";
+import {
+  alertUser,
+  handleWithDelay,
+  sendAnimeDownloadedHook,
+} from "@scheduler/utils";
 import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB } from "@utils/index";
 import { interval } from "profile.json";
 import { arrayUnion, DocumentData } from "firebase/firestore";
@@ -91,7 +95,14 @@ class Scheduler {
         nyaaTorrent.episode
       );
       if (!isAdded) {
-        this.offlineAnimeDB[anime.mediaId].setTimeout();
+        const isMaxed = this.offlineAnimeDB[anime.mediaId].setTimeout();
+
+        if (isMaxed) {
+          alertUser(
+            anime.media.title.romaji,
+            anime.media.coverImage.extraLarge
+          );
+        }
         return;
       }
 
@@ -120,9 +131,8 @@ class Scheduler {
       ? Number(anime.media.coverImage.color.replace("#", "0x"))
       : 0x0997e3;
 
-    await sendWebHook(
+    await sendAnimeDownloadedHook(
       `**${anime.media.title.romaji}** is downloading!`, // Title
-      `https://anilist.co/anime/${anime.mediaId}`, // URL
       color, // Color
       anime.media.coverImage.extraLarge, // Image
       { name: "Title ID", value: anime.mediaId.toString() },
@@ -229,7 +239,12 @@ class Scheduler {
       return;
     } // Finish the function if successful
     else {
-      this.offlineAnimeDB[anime.mediaId].setTimeout();
+      let hasMaxed = this.offlineAnimeDB[anime.mediaId].setTimeout();
+      if (hasMaxed)
+        await alertUser(
+          anime.media.title.romaji,
+          anime.media.coverImage.extraLarge
+        );
       console.log(
         `❌ Failed to find ${anime.media.title.romaji}. Next run in ${
           this.offlineAnimeDB[anime.mediaId].timeouts * interval + interval

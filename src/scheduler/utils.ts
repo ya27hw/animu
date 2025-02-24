@@ -1,10 +1,20 @@
 import { MessageBuilder, Webhook } from "discord-webhook-node";
-import { webhook, interval } from "profile.json";
+import { webhook } from "profile.json";
 const hook: Webhook = new Webhook(webhook);
 
-async function sendWebHook(
+async function alertUser(anime: string, image: string) {
+  const msg: MessageBuilder = new MessageBuilder()
+    .setTitle("Anime Not Found")
+    .setColor(0xff0000)
+    .setDescription(
+      `Animu could not find ${anime}. Please double check the title and try again.`
+    )
+    .setImage(image);
+  await hook.send(msg);
+}
+
+async function sendAnimeDownloadedHook(
   title: string,
-  url: string,
   color: number,
   image: string,
   ...fields: Record<string, string>[]
@@ -70,4 +80,10 @@ async function handleWithDelay(this: any, anime: any): Promise<void> {
   return this.handleAnime(anime);
 }
 
-export { joinArr, getAnimeSeason, handleWithDelay, sendWebHook };
+export {
+  joinArr,
+  getAnimeSeason,
+  handleWithDelay,
+  sendAnimeDownloadedHook,
+  alertUser,
+};
