@@ -1,3 +1,26 @@
+import { MessageBuilder, Webhook } from "discord-webhook-node";
+import { webhook, interval } from "profile.json";
+const hook: Webhook = new Webhook(webhook);
+
+async function sendWebHook(
+  title: string,
+  url: string,
+  color: number,
+  image: string,
+  ...fields: Record<string, string>[]
+) {
+  const msg: MessageBuilder = new MessageBuilder()
+    .setTimestamp()
+    .setTitle(title)
+    .setColor(color)
+    .setImage(image);
+
+  for (const field of fields) {
+    msg.addField(field.name, field.value, true);
+  }
+
+  await hook.send(msg);
+}
 
 /**
  * Displays the the range of an array
@@ -47,4 +70,4 @@ async function handleWithDelay(this: any, anime: any): Promise<void> {
   return this.handleAnime(anime);
 }
 
-export { joinArr, getAnimeSeason, handleWithDelay };
+export { joinArr, getAnimeSeason, handleWithDelay, sendWebHook };
