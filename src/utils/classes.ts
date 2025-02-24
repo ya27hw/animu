@@ -19,7 +19,11 @@ class OfflineAnime {
   }
 
   public setTimeout() {
-    if (this.maxTimeouts === 4) this.maxTimeouts = 0;
+    if (this.maxTimeouts === 7) {
+      // Send a discord webhook to notify the user that the anime can not be found
+      
+      this.maxTimeouts = 0;}
+
     this.maxTimeouts += 1;
     this.timeouts = this.maxTimeouts;
   }
