@@ -1,23 +1,21 @@
-import cron from "cron";
+import { CronJob } from "cron";
 import Anilist from "@ani/anilist";
 import DB from "@db/db";
 import Nyaa from "@nyaa/nyaa";
 import qbit from "@qbit/qbit";
 import pLimit from "p-limit";
 import "colors";
-import { handleWithDelay, joinArr } from "@scheduler/utils";
+import { handleWithDelay, sendWebHook } from "@scheduler/utils";
 import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB } from "@utils/index";
-import { MessageBuilder, Webhook } from "discord-webhook-node";
-import { webhook, interval } from "profile.json";
+import { interval } from "profile.json";
 import { arrayUnion, DocumentData } from "firebase/firestore";
+import { on } from "events";
 
 class Scheduler {
-  private hook: Webhook; // Store discord webhook info
   private offlineAnimeDB: OfflineDB;
   private limit;
 
   constructor() {
-    this.hook = new Webhook(webhook);
     this.offlineAnimeDB = {};
     this.limit = pLimit(4);
   }
@@ -30,8 +28,9 @@ class Scheduler {
   public async run(cronTime: string): Promise<void> {
     let isRunning = false; // Lock to prevent overlapping jobs
 
-    new cron.CronJob(
+    const runJob = new CronJob(
       cronTime,
+
       async () => {
         if (isRunning) {
           console.log("❌ Previous job still running. Skipping this run.".blue);
@@ -41,8 +40,8 @@ class Scheduler {
         try {
           isRunning = true; // Lock the job execution
           console.log(
-            `===============Running scheduler at ${new Date().toLocaleString()}===============`
-              .white.bold
+            `>>>Running scheduler at ${new Date().toLocaleString()}<<<`.white
+              .bold
           ); // Log with current time
 
           await this.check(); // Execute the job
@@ -51,11 +50,9 @@ class Scheduler {
         } finally {
           isRunning = false; // Release the lock when done
         }
-      },
-      null,
-      true,
-      "Asia/Muscat"
+      }
     );
+    runJob.start();
   }
 
   /**
@@ -64,15 +61,10 @@ class Scheduler {
    * @returns void
    */
   public runClearOfflineDB(cronTime: string, mediaId?: string): void {
-    new cron.CronJob(
-      cronTime,
-      () => {
-        this.clearOfflineDB();
-      },
-      null,
-      true,
-      "Asia/Muscat"
-    );
+    const clearJob = new CronJob(cronTime, () => {
+      this.clearOfflineDB();
+    });
+    clearJob.start();
   }
 
   public clearOfflineDB(mediaId?: string) {
@@ -128,27 +120,24 @@ class Scheduler {
       ? Number(anime.media.coverImage.color.replace("#", "0x"))
       : 0x0997e3;
 
-    // Inform the user via discord
-    this.hook.send(
-      new MessageBuilder()
-        .setTimestamp()
-        .setTitle(`**${anime.media.title.romaji}** is downloading!`)
-        .setColor(color)
-        .addField("Title ID", anime.mediaId.toString(), true)
-        .addField("Episode(s)", downloadedEpisodes.join(", "), true)
-        .addField(
-          "Size",
-          nyaaTorrents.map((t) => t["nyaa:size"]).join(", "),
-          true
-        )
-        .addField(
-          "Seeders",
-          nyaaTorrents.map((t) => t["nyaa:seeders"]).join(", "),
-          true
-        )
-        .addField("Title", nyaaTorrents[0].title, true)
-        .setImage(anime.media.coverImage.extraLarge)
+    await sendWebHook(
+      `**${anime.media.title.romaji}** is downloading!`, // Title
+      `https://anilist.co/anime/${anime.mediaId}`, // URL
+      color, // Color
+      anime.media.coverImage.extraLarge, // Image
+      { name: "Title ID", value: anime.mediaId.toString() },
+      { name: "Episode(s)", value: downloadedEpisodes.join(", ") },
+      {
+        name: "Size",
+        value: nyaaTorrents.map((t) => t["nyaa:size"]).join(", "),
+      },
+      {
+        name: "Seeders",
+        value: nyaaTorrents.map((t) => t["nyaa:seeders"]).join(", "),
+      },
+      { name: "Title", value: nyaaTorrents[0].title }
     );
+
     // Update firestore
     await DB.modifyAnimeEntry(anime.mediaId.toString(), {
       "media.nextAiringEpisode": anime.media.nextAiringEpisode,
