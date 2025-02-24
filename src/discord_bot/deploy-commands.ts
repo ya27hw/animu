@@ -5,15 +5,21 @@ import fs from "fs";
 
 export async function deployCommands(commandsPath: string) {
   const commands: any[] = [];
-  const commandFiles = fs
-    .readdirSync(commandsPath)
+  const commandFiles = fs.readdirSync(commandsPath);
 
   for (const file of commandFiles) {
     const command = require(`${commandsPath}/${file}`);
-    commands.push(command.data.toJSON());
+    if ("data" in command && "execute" in command) {
+      commands.push(command.data.toJSON());
+    } else {
+      console.log(
+        `[WARNING] The command at ${commandsPath}/${file} is missing a required "data" or "execute" property.`
+          .red
+      );
+    }
   }
 
-  const rest = new REST({ version: "9" }).setToken(token);
+  const rest = new REST().setToken(token);
 
   rest
     .put(Routes.applicationGuildCommands(clientId, guildId), { body: commands })

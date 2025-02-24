@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from "@discordjs/builders";
-import { CommandInteraction } from "discord.js";
+import { CommandInteraction, MessageFlags } from "discord.js";
 import db from "@db/db";
 import schedule from "@scheduler/schedule";
 
@@ -20,7 +20,7 @@ module.exports = {
   async execute(interaction: CommandInteraction) {
     const options = interaction.options.data;
     const animeid = options.find((option) => option.name === "anime_id");
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await db.modifyAnimeEntry(animeid!.value as string, {
       downloadedEpisodes: [],
     });

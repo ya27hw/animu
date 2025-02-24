@@ -1,6 +1,6 @@
 // Sends users current anime list
 import { SlashCommandBuilder } from "@discordjs/builders";
-import { CommandInteraction } from "discord.js";
+import { CommandInteraction, MessageFlags } from "discord.js";
 import anilist from "@ani/anilist";
 
 module.exports = {
@@ -13,7 +13,7 @@ module.exports = {
    * @param  {CommandInteraction} interaction
    */
   async execute(interaction: CommandInteraction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const myAniList = await anilist.getAnimeUserList();
     if (myAniList.length === 0)
       await interaction.editReply({

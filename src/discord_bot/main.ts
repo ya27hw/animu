@@ -4,6 +4,7 @@ import {
   ActivityType,
   Client,
   Collection,
+  GatewayIntentBits,
   IntentsBitField,
 } from "discord.js";
 import { deployCommands } from "@discord/deploy-commands";
@@ -15,7 +16,7 @@ class DiscordBot {
   private status: Array<ActivityOptions>;
   private commandsPath: string;
   constructor() {
-    this.client = new Client({ intents: [IntentsBitField.Flags.Guilds] });
+    this.client = new Client({ intents: [GatewayIntentBits.Guilds] });
     this.commands = new Collection();
     this.status = [
       {
@@ -31,8 +32,7 @@ class DiscordBot {
   }
 
   private async setCommands() {
-    const commandFiles = fs
-      .readdirSync(this.commandsPath);
+    const commandFiles = fs.readdirSync(this.commandsPath);
 
     for (const file of commandFiles) {
       const command = require(`${this.commandsPath}/${file}`);

@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from "@discordjs/builders";
-import { CommandInteraction } from "discord.js";
+import { CommandInteraction, MessageFlags } from "discord.js";
 import db from "@db/db";
 
 module.exports = {
@@ -33,7 +33,7 @@ module.exports = {
     const starting_episode = options.find(
       (option) => option.name === "starting_episode"
     );
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const isAdded = await db.modifyAnimeEntry(animeid!.value as string, {
       "media.alternativeTitle": animealt!.value as string,
