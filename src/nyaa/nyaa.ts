@@ -65,11 +65,15 @@ class Nyaa {
     );
 
     console.log(
-      `🔍 Searching for ${anime.media.title.romaji} episode(s) ${episodeList}`
+      `🔍 Searching for ${anime.media.title.romaji} with ID ${anime.mediaId} episode(s) ${episodeList}`
         .green
     );
 
-    const airDates = await getEpisodeAirDates(anime.mediaId, episodeList, startingEpisode);
+    const airDates = await getEpisodeAirDates(
+      anime.mediaId,
+      episodeList,
+      startingEpisode
+    );
     if (!airDates) return null;
 
     if (anime.media.genres?.includes(triggerGenre)) {
@@ -110,7 +114,7 @@ class Nyaa {
     for (const episode of episodeList) {
       const formattedEpisode = episode.toString().padStart(2, "0");
       const rssResult = await this.fetchRSSFeed(
-        `${anime.media.title.romaji} ${formattedEpisode}`,
+        `${anime.media.title.romaji} "${formattedEpisode}"`,
         searchUrl
       );
 
