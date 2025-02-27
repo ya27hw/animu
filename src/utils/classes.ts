@@ -21,8 +21,8 @@ class OfflineAnime {
   public setTimeout() {
     let isMaxTimeouts = false;
 
-    // Siuuuuuuuuuuuuuuuu
-    if (this.maxTimeouts === 7) {
+    // Siuuuuuuuuuuuuuuuu (jk pessi better)
+    if (this.maxTimeouts === 10) {
       this.maxTimeouts = 0;
       isMaxTimeouts = true;
     }
