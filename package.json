@@ -26,7 +26,7 @@
     "discord-api-types": "^0.37.119",
     "discord-webhook-node": "^1.1.8",
     "discord.js": "^14.18.0",
-    "firebase": "11.3.1",
+    "firebase": "11.4.0",
     "p-limit": "3",
     "rss-parser": "^3.13.0",
     "string-similarity": "^4.0.4",
