@@ -42,7 +42,9 @@ function logNextRunTime(animeTitle: string, timeouts: number) {
   timeRemaining = Math.ceil(timeRemaining);
 
   console.log(
-    `❌ Failed to find ${animeTitle}. Next run in ${timeRemaining} minutes.`.red
+    `❌ Failed to find ${animeTitle}. Next run in ${timeRemaining} minutes. (At ${date.toFormat(
+      "HH:mm a"
+    )})`.red
   );
 }
 
