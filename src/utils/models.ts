@@ -3,7 +3,6 @@ import {
   proxyPort,
   proxyUsername,
   proxyPassword,
-  useProxy
 } from "profile.json";
 
 const proxy = {

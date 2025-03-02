@@ -1,8 +1,9 @@
+
 enum Resolution {
   SD = "480",
   HD = "720",
   FHD = "1080",
-  NONE = "0"
+  NONE = "0",
 }
 
 enum AnimeStatus {
