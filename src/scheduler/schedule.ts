@@ -8,6 +8,7 @@ import "colors";
 import {
   alertUser,
   handleWithDelay,
+  logNextRunTime,
   sendAnimeDownloadedHook,
 } from "@scheduler/utils";
 import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB } from "@utils/index";
@@ -245,10 +246,10 @@ class Scheduler {
           anime.media.title.romaji,
           anime.media.coverImage.extraLarge
         );
-      console.log(
-        `❌ Failed to find ${anime.media.title.romaji}. Next run in ${
-          this.offlineAnimeDB[anime.mediaId].timeouts * interval + interval
-        } minutes.`.red
+
+      logNextRunTime(
+        anime.media.title.romaji,
+        this.offlineAnimeDB[anime.mediaId].timeouts
       );
     }
 

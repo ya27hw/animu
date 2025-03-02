@@ -1,6 +1,9 @@
 import { MessageBuilder, Webhook } from "discord-webhook-node";
 import { webhook } from "profile.json";
 const hook: Webhook = new Webhook(webhook);
+import { CronTime } from "cron";
+import { DateTime } from "luxon";
+import { RUNTIMES } from "@utils/constants";
 
 async function alertUser(anime: string, image: string) {
   const msg: MessageBuilder = new MessageBuilder()
@@ -11,6 +14,36 @@ async function alertUser(anime: string, image: string) {
     )
     .setImage(image);
   await hook.send(msg);
+}
+
+function logNextRunTime(animeTitle: string, timeouts: number) {
+  const offpeakCronTimes = new CronTime(RUNTIMES.offPeak);
+  const peakCronTimes = new CronTime(RUNTIMES.peak);
+
+  let timeRemaining: number = 0;
+  let date: DateTime = DateTime.now();
+  console.log("Current time: " + date.toLocaleString());
+
+  for (let i = 0; i < timeouts; i++) {
+    // Check if the current time is in between 5am to 11am
+    const isOffPeakHours = date.hour >= 5 && date.hour <= 11;
+
+    let nextRunDate;
+    if (isOffPeakHours) nextRunDate = offpeakCronTimes.getNextDateFrom(date);
+    else nextRunDate = peakCronTimes.getNextDateFrom(date);
+
+    // Get minute difference
+    const minuteDiff = nextRunDate.diff(date, "minutes");
+
+    timeRemaining += minuteDiff.minutes;
+    date = nextRunDate;
+  }
+
+  timeRemaining = Math.ceil(timeRemaining);
+
+  console.log(
+    `❌ Failed to find ${animeTitle}. Next run in ${timeRemaining} minutes.`.red
+  );
 }
 
 async function sendAnimeDownloadedHook(
@@ -86,4 +119,5 @@ export {
   handleWithDelay,
   sendAnimeDownloadedHook,
   alertUser,
+  logNextRunTime,
 };

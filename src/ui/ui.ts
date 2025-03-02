@@ -1,6 +1,6 @@
 import DB from "@db/db";
 import schedule from "@scheduler/schedule";
-import { Command } from "@utils/index";
+import { Command, RUNTIMES } from "@utils/index";
 import readline from "readline";
 import { interval, offpeakInterval, token } from "profile.json";
 import discordBot from "@discord/main";
@@ -41,10 +41,11 @@ class ui {
     await DB.logIn();
     // Run every x minutes, from 12:00pm to 04:00am
     // Then run every 25 minutes, from 05:00am to 11:00am
-    await schedule.run(`*/${interval} 12-23,00-04 * * *`); // Peak hours
-    await schedule.run(`*/${offpeakInterval} 05-11 * * *`); // Off peak hours
-    schedule.runClearOfflineDB(`0 0 */1 * *`); // Clear the offlineDB every day
-  }  private async runSchedulerDiscord() {
+    await schedule.run(RUNTIMES.peak); // Peak hours
+    await schedule.run(RUNTIMES.offPeak); // Off peak hours
+    schedule.runClearOfflineDB(RUNTIMES.clearOfflineDB); // Clear the offlineDB every day
+  }
+  private async runSchedulerDiscord() {
     discordBot.start(token);
     this.runScheduler();
   }
