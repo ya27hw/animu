@@ -24,7 +24,7 @@ function logNextRunTime(animeTitle: string, timeouts: number) {
   let date: DateTime = DateTime.now();
   console.log("Current time: " + date.toLocaleString());
 
-  for (let i = 0; i < timeouts; i++) {
+  for (let i = 0; i <= timeouts; i++) {
     // Check if the current time is in between 5am to 11am
     const isOffPeakHours = date.hour >= 5 && date.hour <= 11;
 
