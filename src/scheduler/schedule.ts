@@ -22,7 +22,7 @@ class Scheduler {
 
   constructor() {
     this.offlineAnimeDB = {};
-    this.limit = pLimit(4);
+    this.limit = pLimit(5);
   }
 
   /**

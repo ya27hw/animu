@@ -7,7 +7,7 @@ import { RUNTIMES } from "@utils/constants";
 
 async function alertUser(anime: string, image: string) {
   const msg: MessageBuilder = new MessageBuilder()
-    .setTitle("Anime Not Found")
+    .setTitle("Anime Not Added")
     .setColor(0xff0000)
     .setDescription(`Animu could not add ${anime} to qBittorrent.`)
     .setImage(image);
@@ -108,7 +108,7 @@ function getAnimeSeason(animeEntry: string): number {
  * @returns Promise
  */
 async function handleWithDelay(this: any, anime: any): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await new Promise((resolve) => setTimeout(resolve, 2000));
   return this.handleAnime(anime);
 }
 

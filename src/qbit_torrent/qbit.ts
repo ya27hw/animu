@@ -114,7 +114,7 @@ class QbitTorrent {
 
       const response = await axios.post(
         authLink.toString(),
-        `sort=added_on&limit=10&reverse=true`,
+        `sort=added_on&limit=50&reverse=true`,
         {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
