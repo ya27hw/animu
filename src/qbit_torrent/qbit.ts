@@ -41,18 +41,28 @@ class QbitTorrent {
   }
 
   private async ensureAuthenticated() {
-    if (!this.sid || Date.now() > this.sid.expires) {
+    if (!this.sid || Date.now() >= this.sid.expires) {
       await this.authenticate();
     }
     return !!this.sid;
   }
 
-  // Function to add a torrent using the obtained SID
-  public async addTorrent(
+  public async addCheckTorrent(
     link: string,
     title: string,
     episode?: number
   ): Promise<boolean> {
+    title = episode ? `${title} - ${episode}` : title;
+    const added = await this.addTorrent(link, title);
+    if (!added) return false;
+    console.log("Added torrent:", title);
+
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    return await this.checkTorrent(title);
+  }
+
+  // Function to add a torrent using the obtained SID
+  private async addTorrent(link: string, title: string): Promise<boolean> {
     const authLink = new URL(qbit_url);
     authLink.pathname = "/api/v2/torrents/add";
 
@@ -68,7 +78,7 @@ class QbitTorrent {
         `urls=${encodeURIComponent(link)}&savepath=${encodeURIComponent(
           path.join(rootDir, title)
         )}&rename=${encodeURIComponent(
-          episode ? `${title} - ${episode}` : title
+          title
         )}&sequentialDownload=true&category=${encodeURIComponent("animu")}`,
         {
           headers: {
@@ -87,6 +97,36 @@ class QbitTorrent {
     } catch (error) {
       console.log(error);
 
+      return false;
+    }
+  }
+
+  private async checkTorrent(name: string): Promise<boolean> {
+    const authLink = new URL(qbit_url);
+    authLink.pathname = "/api/v2/torrents/info";
+
+    try {
+      const authenticated = await this.ensureAuthenticated();
+      if (!authenticated) {
+        console.error("Failed to authenticate.");
+        return false;
+      }
+
+      const response = await axios.post(
+        authLink.toString(),
+        `sort=added_on&limit=10&reverse=true`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Cookie: `SID=${this.sid?.SID}`,
+          },
+        }
+      );
+
+      const torrents = response.data;
+      return torrents.some((torrent: any) => name && torrent.name === name);
+    } catch (error) {
+      console.log("Error fetching torrent information:", error);
       return false;
     }
   }
