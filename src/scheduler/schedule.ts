@@ -90,20 +90,15 @@ class Scheduler {
     const downloadedEpisodes = new Array<number>();
     for (const nyaaTorrent of nyaaTorrents) {
       // Download torrent
-      const isAdded: boolean = await qbit.addTorrent(
+      const isAdded: boolean = await qbit.addCheckTorrent(
         nyaaTorrent.link,
         anime.media.title.romaji,
         nyaaTorrent.episode
       );
       if (!isAdded) {
         const isMaxed = this.offlineAnimeDB[anime.mediaId].setTimeout();
+        alertUser(anime.media.title.romaji, anime.media.coverImage.extraLarge);
 
-        if (isMaxed) {
-          alertUser(
-            anime.media.title.romaji,
-            anime.media.coverImage.extraLarge
-          );
-        }
         return;
       }
 
@@ -241,11 +236,6 @@ class Scheduler {
     } // Finish the function if successful
     else {
       let hasMaxed = this.offlineAnimeDB[anime.mediaId].setTimeout();
-      if (hasMaxed)
-        await alertUser(
-          anime.media.title.romaji,
-          anime.media.coverImage.extraLarge
-        );
 
       logNextRunTime(
         anime.media.title.romaji,
