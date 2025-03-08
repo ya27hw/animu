@@ -9,9 +9,7 @@ async function alertUser(anime: string, image: string) {
   const msg: MessageBuilder = new MessageBuilder()
     .setTitle("Anime Not Found")
     .setColor(0xff0000)
-    .setDescription(
-      `Animu could not find ${anime}. Please double check the title and try again.`
-    )
+    .setDescription(`Animu could not add ${anime} to qBittorrent.`)
     .setImage(image);
   await hook.send(msg);
 }
@@ -22,7 +20,6 @@ function logNextRunTime(animeTitle: string, timeouts: number) {
 
   let timeRemaining: number = 0;
   let date: DateTime = DateTime.now();
-  console.log("Current time: " + date.toLocaleString());
 
   for (let i = 0; i <= timeouts; i++) {
     // Check if the current time is in between 5am to 11am
