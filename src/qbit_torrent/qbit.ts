@@ -57,7 +57,7 @@ class QbitTorrent {
     console.log("Added torrent:", title);
 
     await new Promise((resolve) => setTimeout(resolve, 6000));
-    return await this.checkTorrent(title);
+    return await this.checkTorrent(episode ? `${title} - ${episode}` : title);
   }
 
   // Function to add a torrent using the obtained SID
