@@ -52,8 +52,7 @@ class QbitTorrent {
     title: string,
     episode?: number
   ): Promise<boolean> {
-    title = episode ? `${title} - ${episode}` : title;
-    const added = await this.addTorrent(link, title);
+    const added = await this.addTorrent(link, title, episode);
     if (!added) return false;
     console.log("Added torrent:", title);
 
@@ -62,7 +61,11 @@ class QbitTorrent {
   }
 
   // Function to add a torrent using the obtained SID
-  private async addTorrent(link: string, title: string): Promise<boolean> {
+  private async addTorrent(
+    link: string,
+    title: string,
+    episode?: number
+  ): Promise<boolean> {
     const authLink = new URL(qbit_url);
     authLink.pathname = "/api/v2/torrents/add";
 
@@ -78,7 +81,7 @@ class QbitTorrent {
         `urls=${encodeURIComponent(link)}&savepath=${encodeURIComponent(
           path.join(rootDir, title)
         )}&rename=${encodeURIComponent(
-          title
+          episode ? `${title} - ${episode}` : title
         )}&sequentialDownload=true&category=${encodeURIComponent("animu")}`,
         {
           headers: {
