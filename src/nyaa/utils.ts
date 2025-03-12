@@ -4,7 +4,7 @@ import anitomy from "anitomy-js";
 import anilist from "@ani/anilist";
 import { excludeReleaseGroups } from "profile.json";
 
-const pageNumberLimit: number = 5;
+const pageNumberLimit: number = 25;
 
 /**
  * Calculates the page number given an episode number

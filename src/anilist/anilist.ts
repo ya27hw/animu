@@ -67,7 +67,7 @@ class Anilist {
               romaji
               english
               }
-            airingSchedule(page: $page, perPage: 5) {
+            airingSchedule(page: $page, perPage: 25) {
               nodes {
                 airingAt
                 episode

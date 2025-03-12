@@ -108,7 +108,6 @@ function getAnimeSeason(animeEntry: string): number {
  * @returns Promise
  */
 async function handleWithDelay(this: any, anime: any): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 2000));
   return this.handleAnime(anime);
 }
 
