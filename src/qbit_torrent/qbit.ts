@@ -54,10 +54,21 @@ class QbitTorrent {
   ): Promise<boolean> {
     const added = await this.addTorrent(link, title, episode);
     if (!added) return false;
-    console.log("Added torrent:", title);
+    console.log(
+      `Added Torrent: ${episode ? `${title} - ${episode}` : title}`.bgBlue.white
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 6000));
-    return await this.checkTorrent(episode ? `${title} - ${episode}` : title);
+
+    const isChecked = await this.checkTorrent(
+      episode ? `${title} - ${episode}` : title
+    );
+    console.log(
+      `Torrent ${episode ? `${title} - ${episode}` : title} ${
+        isChecked ? "is" : "is not"
+      } checked.`.bgBlue.white
+    );
+    return isChecked;
   }
 
   // Function to add a torrent using the obtained SID
