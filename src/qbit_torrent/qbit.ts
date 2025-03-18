@@ -114,6 +114,40 @@ class QbitTorrent {
       return false;
     }
   }
+  // Delete torrent based on what the torrent is named
+  public async deleteTorrent(name: string): Promise<boolean> {
+    const authLink = new URL(qbit_url);
+    authLink.pathname = "/api/v2/torrents/delete";
+
+    try {
+      const authenticated = await this.ensureAuthenticated();
+      if (!authenticated) {
+        console.error("Failed to authenticate.");
+        return false;
+      }
+
+      const response = await axios.post(
+        authLink.toString(),
+        `hashes=${encodeURIComponent(name)}`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Cookie: `SID=${this.sid?.SID}`,
+          },
+        }
+      );
+
+      if (response.status === 200 && response.data === "Ok.") {
+        return true;
+      } else {
+        console.error("Unexpected response from qBittorrent:", response.data);
+        return false;
+      }
+    } catch (error) {
+      console.log("Error deleting torrent:", error);
+      return false;
+    }
+  }
 
   private async checkTorrent(name: string): Promise<boolean> {
     const authLink = new URL(qbit_url);
@@ -128,7 +162,7 @@ class QbitTorrent {
 
       const response = await axios.post(
         authLink.toString(),
-        `sort=added_on&limit=50&reverse=true`,
+        `sort=added_on&limit=250&reverse=true`,
         {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
