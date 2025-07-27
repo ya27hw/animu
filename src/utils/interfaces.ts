@@ -4,7 +4,7 @@
  */
 /*************************************************************************************** */
 
-import { AnimeFormat, AnimeStatus } from "@utils/enums";
+import { AnimeFormat, AnimeStatus, MediaRelation } from "@utils/enums";
 import { OfflineAnime } from "@utils/classes";
 
 // This interface is used to store the torrent information from an anime retrieved in Nyaa.
@@ -30,6 +30,18 @@ interface nextAiringEpisode {
 
 interface AiringSchedule {
   nodes: AiringScheduleNode[];
+}
+
+interface MediaRelations {
+  relationType: MediaRelation;
+  node: {
+    id: number;
+    episodes: number;
+    title: {
+      romaji: string;
+      english: string;
+    };
+  };
 }
 
 type AiringScheduleNode = {
@@ -111,4 +123,5 @@ export {
   AiringSchedule,
   qbitSID,
   NyaaRSSResult,
+  MediaRelations
 };
