@@ -37,4 +37,20 @@ enum SearchMode {
   TV_SHORT = "TV_SHORT",
 }
 
-export { Resolution, AnimeStatus, AnimeFormat, SearchMode };
+enum MediaRelation {
+  PREQUEL = "PREQUEL",
+  SEQUEL = "SEQUEL",
+  PARENT = "PARENT",
+  ADAPTION = "ADAPTATION",
+  SIDE_STORY = "SIDE_STORY",
+  CHARACTER = "CHARACTER",
+  SUMMARY = "SUMMARY",
+  ALTERNATIVE = "ALTERNATIVE",
+  SPIN_OFF = "SPIN_OFF",
+  OTHER = "OTHER", 
+  SOURCE = "SOURCE",
+  COMPILATION = "COMPILATION",
+  CONTAINS = "CONTAINS",
+}
+
+export { Resolution, AnimeStatus, AnimeFormat, SearchMode, MediaRelation };
