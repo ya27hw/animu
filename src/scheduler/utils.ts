@@ -4,6 +4,8 @@ const hook: Webhook = new Webhook(webhook);
 import { CronTime } from "cron";
 import { DateTime } from "luxon";
 import { RUNTIMES } from "@utils/constants";
+import anilist from "@ani/anilist";
+import { MediaRelation } from "@utils/enums";
 
 async function alertUser(anime: string, image: string) {
   const msg: MessageBuilder = new MessageBuilder()
@@ -78,16 +80,16 @@ function joinArr(array: any[]) {
 /**
  * @param  {string[]} ...animeEntry
  */
-function getAnimeSeason(animeEntry: string): number {
+function fixAnimeSeason(animeEntry: string) {
   /* Try to infer the season from the anime title
      
    *  Example:
-   * - Case 1 : Boku no Hero Academia             --> Season 1
-   * - Case 2 : Boku no Hero Academia 3           --> Season 3
+   * - Case 1 : Boku no Hero Academia             --> Season 1 (leave alone)
+   * - Case 2 : Boku no Hero Academia 3           --> Season 3 (This case is deemed too difficult to identify)
    * - Case 3 : Boku no Hero Academia S2          --> Season 2
    * - Case 4 : Boku no Hero Academia Season 5    --> Season 5
    * - Case 5 : Boku no Hero Academia Season IV   --> Season 4 (optional case)
-   * - Case 6 : Boku no Hero Academia 7th Season  --> Season 7 (s7 doesn't exist but who cares)
+   * - Case 6 : Boku no Hero Academia 7th Season  --> Season 7
    */
 
   const seasonRegex =
@@ -95,11 +97,46 @@ function getAnimeSeason(animeEntry: string): number {
   const seasonString = animeEntry.match(seasonRegex);
   // If found, extract the season number
   if (seasonString) {
-    const seasonNumber = seasonString[0].match(/\d+/);
-    return seasonNumber ? parseInt(seasonNumber[0]) : 0;
+    const regSeasonNumber = seasonString[0].match(/\d+/);
+    const seasonNumber = regSeasonNumber ? parseInt(regSeasonNumber[0]) : 0;
+
+    // return as number
+    return {
+      title: animeEntry.replace(seasonRegex, ""),
+      seasonCount: seasonNumber,
+    };
   }
 
-  return 1;
+  return {
+    title: animeEntry,
+    seasonCount: 1,
+  };
+}
+
+async function countPastRelations(
+  mediaId: number,
+  episodeOffset = 0,
+  seasonCount = 1
+) {
+  // Go through prequels, and accumulate the episodes and season couts.
+  const relations = await anilist.getPreviousRelations(mediaId);
+  // Sleep
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  if (!relations) return { episodeOffset: 0, seasonCount: 0 };
+  for (const relation of relations) {
+    if (relation.relationType === MediaRelation.PREQUEL) {
+      if (relation.node.episodes > 3) {
+        return countPastRelations(
+          relation.node.id,
+          episodeOffset + relation.node.episodes,
+          seasonCount + 1
+        );
+      } else {
+        return countPastRelations(relation.node.id, episodeOffset, seasonCount);
+      }
+    }
+  }
+  return { episodeOffset, seasonCount };
 }
 
 /**
@@ -113,9 +150,10 @@ async function handleWithDelay(this: any, anime: any): Promise<void> {
 
 export {
   joinArr,
-  getAnimeSeason,
+  fixAnimeSeason,
   handleWithDelay,
   sendAnimeDownloadedHook,
   alertUser,
   logNextRunTime,
+  countPastRelations,
 };
