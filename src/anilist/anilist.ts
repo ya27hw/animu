@@ -1,6 +1,6 @@
 import axios from "axios";
 import { aniUserName } from "profile.json";
-import { AiringSchedule, AniQuery } from "@utils/index";
+import { AiringSchedule, AniQuery, MediaRelations } from "@utils/index";
 import { bearerTokenAnilist, useProxy } from "profile.json";
 import { proxy } from "@utils/models";
 class Anilist {
@@ -47,13 +47,13 @@ class Anilist {
     return response.data;
   }
 
-/**
- * Retrieves the airing schedule for a specific anime by its ID.
- * @param {number} page - The page number for pagination.
- * @param {number} id - The ID of the anime.
- * @param {number} [perPage=5] - The number of entries per page, default is 5.
- * @returns {Promise<AiringSchedule | null>} - The airing schedule information, or null if an error occurs.
- */
+  /**
+   * Retrieves the airing schedule for a specific anime by its ID.
+   * @param {number} page - The page number for pagination.
+   * @param {number} id - The ID of the anime.
+   * @param {number} [perPage=5] - The number of entries per page, default is 5.
+   * @returns {Promise<AiringSchedule | null>} - The airing schedule information, or null if an error occurs.
+   */
 
   public async getAiringSchedule(
     page: number,
@@ -85,6 +85,40 @@ class Anilist {
       const response = await this.getData(query, variables);
       const data = response.data.data.Media.airingSchedule;
       return data as AiringSchedule;
+    } catch (error) {
+      console.error(error);
+      return null;
+    }
+  }
+
+  public async getPreviousRelations(mediaId: number) {
+    var query = `
+        query ($id: Int) {
+          Media(id: $id) {
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  episodes
+                  title {
+                    romaji
+                    english
+                  }
+                }
+              }
+            }
+          }
+        }
+    `;
+
+    var variables = {
+      id: mediaId,
+    };
+
+    try {
+      let response = await this.getData(query, variables);
+      return response.data.data.Media.relations.edges as MediaRelations[];
     } catch (error) {
       console.error(error);
       return null;
