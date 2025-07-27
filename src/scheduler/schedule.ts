@@ -7,6 +7,8 @@ import pLimit from "p-limit";
 import "colors";
 import {
   alertUser,
+  countPastRelations,
+  fixAnimeSeason,
   handleWithDelay,
   logNextRunTime,
   sendAnimeDownloadedHook,
@@ -243,35 +245,90 @@ class Scheduler {
       );
     }
 
-    // For new entries, sometimes you need to use a different title.
+    // For new entries, sometimes you need to use a different title. Anilist
+    // has some alternative titles we can use.
+
+    /* TODO: Handle animes that have 'Season 2 | 2nd Season | Part X | Cour X|'...
+             These can sometimes be simplified to just 'S2' etc... 
+             But that's not always the case, soemtimes we need to look through
+             past relations, as sometimes season number is not explicitly mentioned.
+             Examples from Summer '25 Season include:
+                Kaijuu 8-gou 2nd Season EP1 --> Kaijuu 8-gou EP13 (Kaijuu 8-gou S02E01 also gets a pass)
+                Dr. STONE: SCIENCE FUTURE Part 2 EP1 --> Dr. Stone S4 - 13 (past relations here need to be visited)
+                Kakkou no Iinazuke Season 2 --> Kakkou no Iinazuke S2 - 01 (Nyaa naming schema is inconsistent)
+             Animes with 'Part 2' or 'Cour 2' oftern continue from the previous 
+             season, with the episode number starting from where it left off. 
+             For now, we need to brute-force this by checking if we can find a title that works.
+             This is a bit of a hack, but it *should* work for now.
+    */
     if (
       !fireDBAnime.media.alternativeTitle &&
       downloadedEpisodes.length === 0
     ) {
-      // Get short name by seperating romaji title by colon
-      const shortName = anime.media.title.romaji.split(":")[0];
-      // Loop over synonyms and find the one that matches a nyaa hit
-      const synonyms = [anime.media.title.english, ...anime.media.synonyms];
-      if (shortName !== anime.media.title.romaji) synonyms.unshift(shortName);
-      for (const synonym of synonyms) {
-        if (!synonym) continue;
-        anime.media.title.romaji = synonym;
+      const ex3 = fixAnimeSeason(anime.media.title.romaji);
+      const ex2 = await countPastRelations(anime.mediaId);
+
+      const possibleCombinations = [
+        // First example
+        {
+          title: ex3.title,
+          episodeOffset: ex2.episodeOffset,
+        },
+        // Second example
+        {
+          title: `${ex3.title} S${ex2.seasonCount}`,
+          episodeOffset: ex2.episodeOffset,
+        },
+        // Third example
+        {
+          title: `${ex3.title} S${ex2.seasonCount}`,
+          episodeOffset: 0,
+        },
+      ];
+      for (const combination of possibleCombinations) {
+        anime.media.title.romaji = combination.title;
         const isValidTitle = await Nyaa.getTorrents(
           anime,
-          startEpisode,
-          endEpisode,
-          startingEpisode,
+          startEpisode + combination.episodeOffset,
+          endEpisode + combination.episodeOffset,
+          combination.episodeOffset,
           downloadedEpisodes
         );
         /* If we found a valid title, then we can stop looping.
            Add the title to firebase */
         if (isValidTitle) {
           DB.modifyAnimeEntry(anime.mediaId.toString(), {
-            "media.alternativeTitle": synonym,
+            "media.alternativeTitle": combination.title,
+            "media.startingEpisode": combination.episodeOffset,
           });
           break;
         }
       }
+
+      // // Get short name by seperating romaji title by colon
+      // const shortName = anime.media.title.romaji.split(":")[0];
+      // // Loop over synonyms and find the one that matches a nyaa hit
+      // const synonyms = [anime.media.title.english, ...anime.media.synonyms];
+      // if (shortName !== anime.media.title.romaji) synonyms.unshift(shortName);
+      // for (const synonym of synonyms) {
+      //   if (!synonym) continue;
+      //   anime.media.title.romaji = synonym;
+      //   const isValidTitle = await Nyaa.getTorrents(
+      //     anime,
+      //     startEpisode,
+      //     endEpisode,
+      //     startingEpisode,
+      //     downloadedEpisodes
+      //   );
+      //   /* If we found a valid title, then we can stop looping.
+      //      Add the title to firebase */
+      //   if (isValidTitle) {
+      //     DB.modifyAnimeEntry(anime.mediaId.toString(), {
+      //       "media.alternativeTitle": synonym,
+      //     });
+      //     break;
+      //   }
+      // }
     }
   }
 
