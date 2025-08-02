@@ -91,6 +91,13 @@ class Anilist {
     }
   }
 
+  /**
+   * Retrieves the previous relations of an anime by its media ID.
+   * The function queries the AniList API to fetch the media relations, such as prequels, sequels, etc.
+   * @param {number} mediaId - The ID of the anime for which to retrieve relations.
+   * @returns {Promise<MediaRelations[] | null>} - An array of media relations if successful, or null if an error occurs.
+   */
+
   public async getPreviousRelations(mediaId: number) {
     var query = `
         query ($id: Int) {
@@ -122,6 +129,47 @@ class Anilist {
     } catch (error) {
       console.error(error);
       return null;
+    }
+  }
+
+/*************  ✨ Windsurf Command ⭐  *************/
+  /**
+   * Retrieves the current watching list of the user specified in the profile.json
+   * @returns {Promise<any[]>} - The current watching list of the user
+   */
+/*******  0d702d57-f694-4e60-a322-08b5c859664d  *******/
+  public async getWatchingUserList(): Promise<any[]> {
+    const query = `query ($userName :String) {
+      MediaListCollection(userName: $userName, type: ANIME, status_in: CURRENT) {
+        lists {
+          name
+          entries {
+            progress
+            mediaId
+            media {
+              title {
+                romaji
+              }
+            }
+          }
+        }
+      }
+    }`;
+    var variables = {
+      userName: aniUserName,
+    };
+
+    // Errors can sometimes happen here, so we need to catch it
+    try {
+      let response = await this.getData(query, variables);
+      response =
+        response.data.data.MediaListCollection.lists.length > 0
+          ? response.data.data.MediaListCollection.lists[0].entries
+          : [];
+      return response;
+    } catch (e) {
+      console.error(e);
+      return [];
     }
   }
 

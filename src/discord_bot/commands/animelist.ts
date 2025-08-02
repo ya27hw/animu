@@ -14,7 +14,7 @@ module.exports = {
    */
   async execute(interaction: CommandInteraction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const myAniList = await anilist.getAnimeUserList();
+    const myAniList = await anilist.getWatchingUserList();
     if (myAniList.length === 0)
       await interaction.editReply({
         embeds: [
