@@ -132,12 +132,10 @@ class Anilist {
     }
   }
 
-/*************  ✨ Windsurf Command ⭐  *************/
   /**
    * Retrieves the current watching list of the user specified in the profile.json
    * @returns {Promise<any[]>} - The current watching list of the user
    */
-/*******  0d702d57-f694-4e60-a322-08b5c859664d  *******/
   public async getWatchingUserList(): Promise<any[]> {
     const query = `query ($userName :String) {
       MediaListCollection(userName: $userName, type: ANIME, status_in: CURRENT) {
