@@ -25,12 +25,17 @@ module.exports = {
           },
         ],
       });
-    else
+    else {
+      const orderedList = myAniList.sort((a, b) => {
+        if (a.media.title.romaji < b.media.title.romaji) return -1;
+        if (a.media.title.romaji > b.media.title.romaji) return 1;
+        return 0;
+      });
       await interaction.editReply({
         embeds: [
           {
             title: "Anime List",
-            description: myAniList
+            description: orderedList
               .map(
                 (anime) => `\`${anime.media.title.romaji}\` - ${anime.mediaId}`
               )
@@ -39,5 +44,6 @@ module.exports = {
           },
         ],
       });
+    }
   },
 };
