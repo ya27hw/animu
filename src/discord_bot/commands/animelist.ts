@@ -27,8 +27,16 @@ module.exports = {
       });
     else {
       const orderedList = myAniList.sort((a, b) => {
-        if (a.media.title.romaji < b.media.title.romaji) return -1;
-        if (a.media.title.romaji > b.media.title.romaji) return 1;
+        if (
+          a.media.title.romaji.toLowerCase() <
+          b.media.title.romaji.toLowerCase()
+        )
+          return -1;
+        if (
+          a.media.title.romaji.toLowerCase() >
+          b.media.title.romaji.toLowerCase()
+        )
+          return 1;
         return 0;
       });
       await interaction.editReply({
