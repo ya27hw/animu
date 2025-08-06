@@ -102,7 +102,7 @@ function fixAnimeSeason(animeEntry: string) {
 
     // return as number
     return {
-      title: animeEntry.replace(seasonRegex, ""),
+      title: animeEntry.replace(seasonRegex, "").trim(),
       seasonCount: seasonNumber,
     };
   }
