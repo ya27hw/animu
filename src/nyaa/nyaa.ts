@@ -54,11 +54,11 @@ class Nyaa {
    */
   public async getTorrents(
     anime: AniQuery,
-    animeTitle: string,
     startEpisode: number,
     endEpisode: number,
     startingEpisode: number,
-    downloadedEpisodes: number[]
+    downloadedEpisodes: number[],
+    altAnimeTitle?: string
   ): Promise<NyaaTorrent[] | null> {
     let searchUrl = nyaaUrl;
     const episodeList = getNumbers(
@@ -67,8 +67,10 @@ class Nyaa {
       downloadedEpisodes
     );
 
+    if (altAnimeTitle) anime.media.title.romaji = altAnimeTitle;
+
     console.log(
-      `🔍 Searching for ${animeTitle} with ID ${anime.mediaId} episode(s) ${episodeList}`
+      `🔍 Searching for ${anime.media.title.romaji} with ID ${anime.mediaId} episode(s) ${episodeList}`
         .green
     );
 
@@ -92,14 +94,14 @@ class Nyaa {
 
     if (searchMode === SearchMode.BATCH) {
       const rssResult = await this.fetchRSSFeed(
-        animeTitle,
+        anime.media.title.romaji,
         searchUrl
       );
 
       if (rssResult.status === 200 && rssResult.data?.length) {
         const bestTorrent = await this.getBestTorrent(
           rssResult.data,
-          animeTitle,
+          anime.media.title.romaji,
           searchMode,
           searchUrl === altNyaaUrl,
           airDates,
@@ -117,14 +119,14 @@ class Nyaa {
     for (const episode of episodeList) {
       const formattedEpisode = episode.toString().padStart(2, "0");
       const rssResult = await this.fetchRSSFeed(
-        `${animeTitle} "${formattedEpisode}"`,
+        `${anime.media.title.romaji} "${formattedEpisode}"`,
         searchUrl
       );
 
       if (rssResult.status === 200 && rssResult.data?.length) {
         const bestTorrent = await this.getBestTorrent(
           rssResult.data,
-          animeTitle,
+          anime.media.title.romaji,
           searchMode,
           searchUrl === altNyaaUrl,
           airDates,

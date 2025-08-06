@@ -226,7 +226,6 @@ class Scheduler {
     // Attempt to find the anime.
     let primaryTorrent = await Nyaa.getTorrents(
       anime,
-      anime.media.title.romaji,
       startEpisode,
       endEpisode,
       startingEpisode,
@@ -311,11 +310,11 @@ class Scheduler {
       for (const combo of possibleCombinations) {
         const result = await Nyaa.getTorrents(
           anime,
-          combo.title,
           startEpisode + combo.episodeOffset,
           endEpisode + combo.episodeOffset,
           startingEpisode + combo.episodeOffset,
-          downloadedEpisodes
+          downloadedEpisodes,
+          combo.title
         );
 
         if (result) {
