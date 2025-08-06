@@ -224,7 +224,7 @@ class Scheduler {
     }
 
     // Attempt to find the anime.
-    const isAnimeFound = await Nyaa.getTorrents(
+    let primaryTorrent = await Nyaa.getTorrents(
       anime,
       startEpisode,
       endEpisode,
@@ -232,23 +232,15 @@ class Scheduler {
       downloadedEpisodes
     );
 
-    if (isAnimeFound) {
-      await this.downloadTorrents(anime, ...isAnimeFound);
-      return;
-    } // Finish the function if successful
-    else {
-      let hasMaxed = this.offlineAnimeDB[anime.mediaId].setTimeout();
-
-      logNextRunTime(
-        anime.media.title.romaji,
-        this.offlineAnimeDB[anime.mediaId].timeouts
-      );
-    }
+    // Count total number of seeders
+    let primarySeedCount: number = primaryTorrent
+      ? primaryTorrent.reduce((acc, t) => acc + parseInt(t["nyaa:seeders"]), 0)
+      : 0;
 
     // For new entries, sometimes you need to use a different title. Anilist
     // has some alternative titles we can use.
 
-    /* TODO: Handle animes that have 'Season 2 | 2nd Season | Part X | Cour X|'...
+    /* IMPORTANT: Handle animes that have 'Season 2 | 2nd Season | Part X | Cour X|'...
              These can sometimes be simplified to just 'S2' etc... 
              But that's not always the case, soemtimes we need to look through
              past relations, as sometimes season number is not explicitly mentioned.
@@ -268,67 +260,99 @@ class Scheduler {
       const ex3 = fixAnimeSeason(anime.media.title.romaji);
       const ex2 = await countPastRelations(anime.mediaId);
 
-      const possibleCombinations = [
+      let possibleCombinations = [
         // First example
         {
           title: ex3.title,
           episodeOffset: ex2.episodeOffset,
         },
-        // Second example
+        // If the title is in English
         {
-          title: `${ex3.title} S${ex2.seasonCount}`,
-          episodeOffset: ex2.episodeOffset,
-        },
-        // Third example
-        {
-          title: `${ex3.title} S${ex2.seasonCount}`,
+          title: anime.media.title.english,
           episodeOffset: 0,
         },
       ];
-      for (const combination of possibleCombinations) {
-        anime.media.title.romaji = combination.title;
-        const isValidTitle = await Nyaa.getTorrents(
-          anime,
-          startEpisode + combination.episodeOffset,
-          endEpisode + combination.episodeOffset,
-          combination.episodeOffset,
-          downloadedEpisodes
+
+      // This is not required if the anime airing has just a season.
+      if (ex2.seasonCount > 1) {
+        possibleCombinations.push(
+          // Second example
+          {
+            title: `${ex3.title} S${ex2.seasonCount}`,
+            episodeOffset: ex2.episodeOffset,
+          },
+          // Third example
+          {
+            title: `${ex3.title} S${ex2.seasonCount}`,
+            episodeOffset: 0,
+          }
         );
-        /* If we found a valid title, then we can stop looping.
-           Add the title to firebase */
-        if (isValidTitle) {
-          DB.modifyAnimeEntry(anime.mediaId.toString(), {
-            "media.alternativeTitle": combination.title,
-            "media.startingEpisode": combination.episodeOffset,
-          });
-          break;
-        }
       }
 
-      // // Get short name by seperating romaji title by colon
-      // const shortName = anime.media.title.romaji.split(":")[0];
-      // // Loop over synonyms and find the one that matches a nyaa hit
-      // const synonyms = [anime.media.title.english, ...anime.media.synonyms];
-      // if (shortName !== anime.media.title.romaji) synonyms.unshift(shortName);
-      // for (const synonym of synonyms) {
-      //   if (!synonym) continue;
-      //   anime.media.title.romaji = synonym;
-      //   const isValidTitle = await Nyaa.getTorrents(
-      //     anime,
-      //     startEpisode,
-      //     endEpisode,
-      //     startingEpisode,
-      //     downloadedEpisodes
-      //   );
-      //   /* If we found a valid title, then we can stop looping.
-      //      Add the title to firebase */
-      //   if (isValidTitle) {
-      //     DB.modifyAnimeEntry(anime.mediaId.toString(), {
-      //       "media.alternativeTitle": synonym,
-      //     });
-      //     break;
-      //   }
-      // }
+      // Loop over synonyms, could be possible nyaa hits.
+      anime.media.synonyms.map((synonym) => {
+        possibleCombinations.push({
+          title: synonym,
+          episodeOffset: 0,
+        });
+      });
+
+      // Get short name by seperating romaji title by colon. Often useful as animes tend to have long names
+      const shortName = anime.media.title.romaji.split(":")[0];
+      if (shortName !== anime.media.title.romaji)
+        possibleCombinations.unshift({
+          title: shortName,
+          episodeOffset: 0,
+        });
+
+      let winningComboIndex = -1;
+      // Loop over EVERY possible combination. Find the one with the highest seed count
+      for (const combo of possibleCombinations) {
+        anime.media.title.romaji = combo.title;
+        const result = await Nyaa.getTorrents(
+          anime,
+          startEpisode + combo.episodeOffset,
+          endEpisode + combo.episodeOffset,
+          startingEpisode + combo.episodeOffset,
+          downloadedEpisodes
+        );
+
+        if (result) {
+          const seederCount = result.reduce(
+            (acc, t) => acc + parseInt(t["nyaa:seeders"]),
+            0
+          );
+
+          // Compare it to the seed count of the primary search
+          if (seederCount > primarySeedCount) {
+            primaryTorrent = result;
+            winningComboIndex = possibleCombinations.indexOf(combo);
+            primarySeedCount = seederCount;
+          }
+        }
+      }
+      // Modify the DB if the app found a title that yielded more seeders
+      if (winningComboIndex !== -1) {
+        const winningCombo = possibleCombinations[winningComboIndex];
+
+        DB.modifyAnimeEntry(anime.mediaId.toString(), {
+          "media.alternativeTitle": winningCombo.title,
+          "media.startingEpisode": winningCombo.episodeOffset,
+        });
+      }
+    }
+
+    if (primaryTorrent) {
+      await this.downloadTorrents(anime, ...primaryTorrent);
+      return;
+    } // Finish the function if successful
+    else {
+      this.offlineAnimeDB[anime.mediaId].setTimeout();
+
+      logNextRunTime(
+        anime.media.title.romaji,
+        this.offlineAnimeDB[anime.mediaId].timeouts
+      );
     }
   }
 

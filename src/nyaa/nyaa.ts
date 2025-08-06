@@ -42,13 +42,15 @@ class Nyaa {
    */
 
   /**
-   * Finds torrents for the given anime and episodes
+   * Finds torrents for the given anime with episode(s)
+   * Used in conjuction with getBestTorrent to find the torrent with the highest seeders
+   * and which closely resembles the title/episode
    * @param anime The anime object
    * @param startEpisode The starting episode number
    * @param endEpisode The ending episode number
    * @param startingEpisode The offset for the episode numbers
    * @param downloadedEpisodes The episodes that have already been downloaded
-   * @returns A list of torrents, or null if none are found
+   * @returns Torrent(s), each containg metadata of an episode, or null if none are found
    */
   public async getTorrents(
     anime: AniQuery,
@@ -222,6 +224,7 @@ class Nyaa {
 
   /**
    * Find the best matching torrent given the search query and the items in the RSS feed.
+   * Gives priority to torrents with more seeders
    * @param {NyaaTorrent[]} items The items in the RSS feed
    * @param {string} searchQuery The search query
    * @param {SearchMode} searchMode The search mode
