@@ -226,6 +226,7 @@ class Scheduler {
     // Attempt to find the anime.
     let primaryTorrent = await Nyaa.getTorrents(
       anime,
+      anime.media.title.romaji,
       startEpisode,
       endEpisode,
       startingEpisode,
@@ -308,9 +309,9 @@ class Scheduler {
       let winningComboIndex = -1;
       // Loop over EVERY possible combination. Find the one with the highest seed count
       for (const combo of possibleCombinations) {
-        anime.media.title.romaji = combo.title;
         const result = await Nyaa.getTorrents(
           anime,
+          combo.title,
           startEpisode + combo.episodeOffset,
           endEpisode + combo.episodeOffset,
           startingEpisode + combo.episodeOffset,
@@ -343,7 +344,6 @@ class Scheduler {
     }
 
     if (primaryTorrent) {
-      anime.media.title.romaji = primaryTorrent[0].title;
       await this.downloadTorrents(anime, ...primaryTorrent);
       return;
     } // Finish the function if successful
