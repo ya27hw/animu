@@ -343,6 +343,7 @@ class Scheduler {
     }
 
     if (primaryTorrent) {
+      anime.media.title.romaji = primaryTorrent[0].title;
       await this.downloadTorrents(anime, ...primaryTorrent);
       return;
     } // Finish the function if successful
