@@ -291,10 +291,11 @@ class Scheduler {
 
       // Loop over synonyms, could be possible nyaa hits.
       anime.media.synonyms.map((synonym) => {
-        possibleCombinations.push({
-          title: synonym,
-          episodeOffset: 0,
-        });
+        if (synonym.toLowerCase() !== anime.media.title.romaji.toLowerCase())
+          possibleCombinations.push({
+            title: synonym,
+            episodeOffset: 0,
+          });
       });
 
       // Get short name by seperating romaji title by colon. Often useful as animes tend to have long names
@@ -306,6 +307,20 @@ class Scheduler {
         });
 
       let winningComboIndex = -1;
+
+      // Remove duplicates
+      possibleCombinations = possibleCombinations.filter(
+        (value, index, self) =>
+          index ===
+          self.findIndex(
+            (t) =>
+              t.title.toLowerCase() === value.title.toLowerCase() &&
+              t.episodeOffset === value.episodeOffset
+          )
+      );
+
+      console.log(possibleCombinations);
+
       // Loop over EVERY possible combination. Find the one with the highest seed count
       for (const combo of possibleCombinations) {
         const result = await Nyaa.getTorrents(
@@ -316,6 +331,9 @@ class Scheduler {
           downloadedEpisodes,
           combo.title
         );
+
+        // Sleep
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
         if (result) {
           const seederCount = result.reduce(
