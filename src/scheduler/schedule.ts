@@ -98,7 +98,7 @@ class Scheduler {
         nyaaTorrent.episode
       );
       if (!isAdded) {
-        const isMaxed = this.offlineAnimeDB[anime.mediaId].setTimeout();
+        this.offlineAnimeDB[anime.mediaId].setTimeout();
         alertUser(anime.media.title.romaji, anime.media.coverImage.extraLarge);
 
         return;
@@ -319,17 +319,16 @@ class Scheduler {
           )
       );
 
-      console.log(possibleCombinations);
-
       // Loop over EVERY possible combination. Find the one with the highest seed count
       for (const combo of possibleCombinations) {
+        anime.media.title.romaji = combo.title;
+
         const result = await Nyaa.getTorrents(
           anime,
           startEpisode + combo.episodeOffset,
           endEpisode + combo.episodeOffset,
           startingEpisode + combo.episodeOffset,
-          downloadedEpisodes,
-          combo.title
+          downloadedEpisodes
         );
 
         // Sleep
@@ -352,6 +351,7 @@ class Scheduler {
       // Modify the DB if the app found a title that yielded more seeders
       if (winningComboIndex !== -1) {
         const winningCombo = possibleCombinations[winningComboIndex];
+        anime.media.title.romaji = winningCombo.title;
 
         DB.modifyAnimeEntry(anime.mediaId.toString(), {
           "media.alternativeTitle": winningCombo.title,

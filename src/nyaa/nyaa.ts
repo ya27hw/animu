@@ -57,8 +57,7 @@ class Nyaa {
     startEpisode: number,
     endEpisode: number,
     startingEpisode: number,
-    downloadedEpisodes: number[],
-    altAnimeTitle?: string
+    downloadedEpisodes: number[]
   ): Promise<NyaaTorrent[] | null> {
     let searchUrl = nyaaUrl;
     const episodeList = getNumbers(
@@ -66,8 +65,6 @@ class Nyaa {
       endEpisode,
       downloadedEpisodes
     );
-
-    if (altAnimeTitle) anime.media.title.romaji = altAnimeTitle;
 
     console.log(
       `🔍 Searching for ${anime.media.title.romaji} with ID ${anime.mediaId} episode(s) ${episodeList}`
@@ -268,7 +265,7 @@ class Nyaa {
         bestRating = rating;
         bestTorrent = item;
         // The criteria: If the rating is 3.88/4 or higher, then we've found a good enough torrent
-        // A perfect 4 isn't always required. Seeders are more important. Placing 4 as a threshold 
+        // A perfect 4 isn't always required. Seeders are more important. Placing 4 as a threshold
         if (bestRating >= 3.88) break;
       }
     }
