@@ -321,14 +321,13 @@ class Scheduler {
 
       // Loop over EVERY possible combination. Find the one with the highest seed count
       for (const combo of possibleCombinations) {
-        anime.media.title.romaji = combo.title;
-
         const result = await Nyaa.getTorrents(
           anime,
           startEpisode + combo.episodeOffset,
           endEpisode + combo.episodeOffset,
           startingEpisode + combo.episodeOffset,
-          downloadedEpisodes
+          downloadedEpisodes,
+          combo.title
         );
 
         // Sleep
