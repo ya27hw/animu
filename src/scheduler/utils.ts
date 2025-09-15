@@ -17,31 +17,40 @@ async function alertUser(anime: string, image: string) {
 }
 
 function logNextRunTime(animeTitle: string, timeouts: number) {
-  const offpeakCronTimes = new CronTime(RUNTIMES.offPeak);
-  const peakCronTimes = new CronTime(RUNTIMES.peak);
+  // Cache CronTime objects outside the loop for efficiency
+  const offpeakCron = new CronTime(RUNTIMES.offPeak);
+  const peakCron = new CronTime(RUNTIMES.peak);
 
-  let timeRemaining: number = 0;
-  let date: DateTime = DateTime.now();
+  let date = DateTime.now();
+  let totalMinutes = 0;
 
-  for (let i = 0; i <= timeouts; i++) {
-    // Check if the current time is in between 5am to 11am
-    const isOffPeakHours = date.hour >= 5 && date.hour <= 11;
+  // Precompute off-peak hours for quick comparison
+  const isOffPeak = (hour: number) => hour >= 5 && hour <= 11;
 
-    let nextRunDate;
-    if (isOffPeakHours) nextRunDate = offpeakCronTimes.getNextDateFrom(date);
-    else nextRunDate = peakCronTimes.getNextDateFrom(date);
+  // Use a single variable for nextRunDate to avoid repeated declarations
+  let nextRunDate: DateTime;
 
-    // Get minute difference
-    const minuteDiff = nextRunDate.diff(date, "minutes");
-
-    timeRemaining += minuteDiff.minutes;
+  // Unroll the loop for 0 timeouts (common case)
+  if (timeouts === 0) {
+    nextRunDate = isOffPeak(date.hour)
+      ? offpeakCron.getNextDateFrom(date)
+      : peakCron.getNextDateFrom(date);
+    totalMinutes = Math.ceil(nextRunDate.diff(date, "minutes").minutes);
     date = nextRunDate;
+  } else {
+    for (let i = 0; i <= timeouts; i++) {
+      nextRunDate = isOffPeak(date.hour)
+        ? offpeakCron.getNextDateFrom(date)
+        : peakCron.getNextDateFrom(date);
+      totalMinutes += nextRunDate.diff(date, "minutes").minutes;
+      date = nextRunDate;
+    }
+    totalMinutes = Math.ceil(totalMinutes);
   }
 
-  timeRemaining = Math.ceil(timeRemaining);
-
+  // Use template literals efficiently and avoid unnecessary computation
   console.log(
-    `❌ Failed to find ${animeTitle}. Next run in ${timeRemaining} minutes. (At ${date.toFormat(
+    `❌ Failed to find ${animeTitle}. Next run in ${totalMinutes} minutes. (At ${date.toFormat(
       "HH:mm a"
     )})`.red
   );
@@ -113,27 +122,19 @@ function fixAnimeSeason(animeEntry: string) {
   };
 }
 
-async function countPastRelations(
-  mediaId: number,
-  episodeOffset = 0,
-  seasonCount = 1
-) {
-  // Go through prequels, and accumulate the episodes and season couts.
+async function countPastRelations(mediaId: number, episodeOffset = 0, seasonCount = 1) {
   const relations = await anilist.getPreviousRelations(mediaId);
-  // Sleep
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise(res => setTimeout(res, 300));
   if (!relations) return { episodeOffset: 0, seasonCount: 0 };
-  for (const relation of relations) {
-    if (relation.relationType === MediaRelation.PREQUEL) {
-      if (relation.node.episodes > 3) {
-        return countPastRelations(
-          relation.node.id,
-          episodeOffset + relation.node.episodes,
-          seasonCount + 1
-        );
-      } else {
-        return countPastRelations(relation.node.id, episodeOffset, seasonCount);
-      }
+
+  for (const { relationType, node } of relations) {
+    if (relationType === MediaRelation.PREQUEL) {
+      const episodes = node.episodes > 3 ? node.episodes : 0;
+      return countPastRelations(
+        node.id,
+        episodeOffset + episodes,
+        seasonCount + (episodes ? 1 : 0)
+      );
     }
   }
   return { episodeOffset, seasonCount };
