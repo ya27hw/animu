@@ -117,14 +117,21 @@ function verifyQuery(
   airDates: AiringSchedule,
   ...episodes: number[]
 ): number {
-  const group = animeParsedData.release_group ?? "";
 
-  if (excludeReleaseGroups.includes(group)) return 0;
+  const group = (animeParsedData.release_group ?? "").trim().toLowerCase();
+  const isExcludedGroup = excludeReleaseGroups.map(g => g.toLowerCase())
+    .includes(group);
+  if (isExcludedGroup ||
+    animeParsedData.subtitles?.toLowerCase().includes("dub")) return 0;
 
-  if (animeParsedData.subtitles?.includes("Dub")) return 0;
+  const pubDate = new Date(nyaaPubDate);
+  if (Number.isNaN(pubDate.getTime())) return 0;
+  const pubEpoch = pubDate.getTime() / 1000;
 
-  const fileName = animeParsedData.file_name;
+  const fileName = animeParsedData.file_name ?? "";
   const parsedTitle = animeParsedData.anime_title;
+  const hasEpisodes = episodes.length > 0;
+
 
   const parsedResolution =
     resolution === Resolution.NONE
@@ -153,19 +160,25 @@ function verifyQuery(
 
   switch (searchMode) {
     case SearchMode.EPISODE:
+      if (!hasEpisodes) return 0;
+
       const parsedEpisode = animeParsedData.episode_number;
       if (!parsedEpisode) return 0; // Guard against empty episode
 
-      const episodeMatch = episodes[0] === parseInt(parsedEpisode); // Check if episode is similar
+      const wantedEpisode = episodes[0];
+      const episodeMatch = wantedEpisode === parseInt(parsedEpisode); // Check if episode is similar
 
       // Find pageNumber
       const pageNumber = airDates.nodes.findIndex(
-        (x) => x.episode === episodes[0]
+        (x) => x.episode === wantedEpisode
       );
+
+      if (pageNumber === -1) return 0;
+
 
       let airDateMatch =
         airDates.nodes[pageNumber].airingAt <
-        new Date(nyaaPubDate).getTime() / 1000; // Check if the episode date is similar
+        pubEpoch; // Check if the episode date is similar
 
       return (
         +episodeMatch +
@@ -176,34 +189,33 @@ function verifyQuery(
 
     case SearchMode.BATCH:
       const parsedReleaseInfo = animeParsedData.release_information;
-      let batchMatch = parsedReleaseInfo?.includes("Batch"); // Check if it is a batch
-      // Assign true to batchMatch if: It is 1 episode or if it is a batch
-      if (episodes[episodes.length - 1] === 1 || Number(batchMatch ?? false))
-        batchMatch = true;
-      else batchMatch = false;
+      // Check if it is a batch
+      const explicitBatch = parsedReleaseInfo?.toLowerCase().includes("batch");
+      const isSingleEpisode = hasEpisodes && episodes[episodes.length - 1] === 1;
+      const isBatch = explicitBatch || isSingleEpisode;
 
       /* Usually some batches don't explicitly specify that the torrent itself is a
          batch. This can be combated by proving there is no episode number to be parsed
          Therefore we assume this is a batch (to be tested further) */
       // const isEpisode = animeParsedData.episode_number;
 
-      airDateMatch =
-        airDates.nodes[airDates.nodes.length - 1].airingAt <
-        new Date(nyaaPubDate).getTime(); // Check if the episode date is similar
+      const airDateMatchBatch =
+        airDates.nodes.length > 0 &&
+        airDates.nodes[airDates.nodes.length - 1].airingAt < pubEpoch; // Check if the episode date is similar
 
-      const episodeRange = fileName.match(/\d+( *)[-~]( *)\d+/); // Check if the file name contains a range of episodes
+      const episodeRange = fileName.match(/\d+\s*[-~]\s*\d+/); // Check if the file name contains a range of episodes
       if (episodeRange)
         return (
           +verifyEpisodeRange(episodes, episodeRange) +
           +resolutionMatch +
-          +airDateMatch +
+          +airDateMatchBatch +
           titleMatch.bestMatch.rating
         ); // If so, check if the episode is in the range
 
       return (
-        +batchMatch +
+        +isBatch +
         +resolutionMatch +
-        +airDateMatch +
+        +airDateMatchBatch +
         titleMatch.bestMatch.rating
       ); // If not, check if it is a batch
 
