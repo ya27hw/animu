@@ -52,23 +52,33 @@ class QbitTorrent {
     title: string,
     episode?: number
   ): Promise<boolean> {
-    const added = await this.addTorrent(link, title, episode);
-    if (!added) return false;
-    console.log(
-      `Added Torrent: ${episode ? `${title} - ${episode}` : title}`.bgBlue.white
-    );
+    const maxAttempts = 5;
 
-    await new Promise((resolve) => setTimeout(resolve, 6000));
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Avoid rate limiting here
+      await new Promise(resolve => setTimeout(resolve, 2500));
 
-    const isChecked = await this.checkTorrent(
-      episode ? `${title} - ${episode}` : title
-    );
-    console.log(
-      `Torrent ${episode ? `${title} - ${episode}` : title} ${
-        isChecked ? "is" : "is not"
-      } checked.`.bgBlue.white
-    );
-    return isChecked;
+      const displayTitle = episode ? `${title} - ${episode}` : title;
+
+      const added = await this.addTorrent(link, title, episode);
+
+      if (!added) {
+        console.error(`Attempt ${attempt}: Failed to add torrent: ${displayTitle}`.bgRed.white);
+        continue;
+      }
+
+      console.log(`Added Torrent: ${displayTitle}`.bgBlue.white);
+
+      const isChecked = await this.checkTorrent(displayTitle);
+
+      if (isChecked) {
+        console.log(`Torrent ${displayTitle} is checked.`.bgBlue.white);
+        return true;
+      } else {
+        console.log(`Torrent ${displayTitle} is not checked.`.bgYellow.black);
+      }
+    }
+    return false;
   }
 
   // Function to add a torrent using the obtained SID
