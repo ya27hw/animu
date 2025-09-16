@@ -52,9 +52,9 @@ class QbitTorrent {
     title: string,
     episode?: number
   ): Promise<boolean> {
-    const maxAttempts = 5;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+   
+    // 5 attempts to add the torrent
+    for (let attempt = 1; attempt <= 5; attempt++) {
       // Avoid rate limiting here
       await new Promise(resolve => setTimeout(resolve, 2500));
 
