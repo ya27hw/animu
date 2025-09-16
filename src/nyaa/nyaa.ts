@@ -115,6 +115,7 @@ class Nyaa {
 
     for (const episode of episodeList) {
       const formattedEpisode = episode.toString().padStart(2, "0");
+      // Get information from Nyaa here.
       const rssResult = await this.fetchRSSFeed(
         `${animeTitle} ${formattedEpisode}`,
         searchUrl
