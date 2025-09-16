@@ -166,7 +166,7 @@ class Scheduler {
       const fireDBEntry = await DB.getByMediaId(`${anime.mediaId}`);
 
       if (!fireDBEntry) {
-        DB.addToDb(anime);
+        await DB.addToDb(anime);
         fireDBAnime = anime as DocumentData;
       } else fireDBAnime = fireDBEntry;
     } catch (error) {
@@ -175,6 +175,11 @@ class Scheduler {
     }
 
     if (!fireDBAnime) return; // Guard against null fireDBAnime (in case of error)
+
+    // Ensure offline DB entry exists before mutating
+    if (!this.offlineAnimeDB[anime.mediaId]) {
+      this.offlineAnimeDB[anime.mediaId] = new OfflineAnime([]);
+    }
 
     /* This is manually defined in the db by the user.
     Some animes usually have a 2nd season, but instead of starting from episode 1, they start from
@@ -197,7 +202,12 @@ class Scheduler {
     // NextAiringEpisode can be null if the anime is finished. So check for that
     const endEpisode = anime.media.nextAiringEpisode
       ? anime.media.nextAiringEpisode.episode - 1 + startingEpisode
-      : anime.media.episodes + startingEpisode;
+      : ((anime.media.episodes ?? 0) + startingEpisode);
+
+    // Guard invalid or empty windows
+    if (endEpisode <= startEpisode) {
+      return;
+    }
 
     // firestore (fs) downloaded episodes.
     const downloadedEpisodes: any[] = fireDBAnime.downloadedEpisodes || [];
@@ -290,7 +300,7 @@ class Scheduler {
       }
 
       // Loop over synonyms, could be possible nyaa hits.
-      anime.media.synonyms.map((synonym) => {
+      anime.media.synonyms.forEach((synonym) => {
         if (synonym.toLowerCase() !== anime.media.title.romaji.toLowerCase())
           possibleCombinations.push({
             title: synonym,
@@ -319,40 +329,45 @@ class Scheduler {
           )
       );
 
-      // Loop over EVERY possible combination. Find the one with the highest seed count
-      for (const combo of possibleCombinations) {
-        const result = await Nyaa.getTorrents(
-          anime,
-          startEpisode + combo.episodeOffset,
-          endEpisode + combo.episodeOffset,
-          startingEpisode + combo.episodeOffset,
-          downloadedEpisodes,
-          combo.title
-        );
-
-        // Sleep
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        if (result) {
-          const seederCount = result.reduce(
-            (acc, t) => acc + parseInt(t["nyaa:seeders"]),
+      // Bounded concurrency search across combinations and pick the highest seeder result
+      const comboLimit = pLimit(2);
+      const comboTasks = possibleCombinations.map((combo) =>
+        comboLimit(async () => {
+          const result = await Nyaa.getTorrents(
+            anime,
+            startEpisode + combo.episodeOffset,
+            endEpisode + combo.episodeOffset,
+            startingEpisode + combo.episodeOffset,
+            downloadedEpisodes,
+            combo.title
+          );
+          const seederCount = (result || []).reduce(
+            (acc, t) => acc + (parseInt(t["nyaa:seeders"], 10) || 0),
             0
           );
+          return { combo, result, seederCount };
+        })
+      );
 
-          // Compare it to the seed count of the primary search
-          if (seederCount > primarySeedCount) {
-            primaryTorrent = result;
-            winningComboIndex = possibleCombinations.indexOf(combo);
-            primarySeedCount = seederCount;
-          }
+      const results = await Promise.all(comboTasks);
+      const best = results.reduce<{ comboIndex: number; seederCount: number; result: NyaaTorrent[] | null }>((acc, curr, idx) => {
+        if (curr.seederCount > acc.seederCount) {
+          return { comboIndex: idx, seederCount: curr.seederCount, result: curr.result as any };
         }
+        return acc;
+      }, { comboIndex: -1, seederCount: primarySeedCount, result: primaryTorrent as any });
+
+      if (best.comboIndex !== -1 && best.seederCount > primarySeedCount) {
+        primaryTorrent = results[best.comboIndex].result || primaryTorrent;
+        winningComboIndex = best.comboIndex;
+        primarySeedCount = best.seederCount;
       }
       // Modify the DB if the app found a title that yielded more seeders
       if (winningComboIndex !== -1) {
         const winningCombo = possibleCombinations[winningComboIndex];
         anime.media.title.romaji = winningCombo.title;
 
-        DB.modifyAnimeEntry(anime.mediaId.toString(), {
+        await DB.modifyAnimeEntry(anime.mediaId.toString(), {
           "media.alternativeTitle": winningCombo.title,
           "media.startingEpisode": winningCombo.episodeOffset,
         });
