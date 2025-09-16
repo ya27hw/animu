@@ -55,8 +55,6 @@ class QbitTorrent {
    
     // 5 attempts to add the torrent
     for (let attempt = 1; attempt <= 5; attempt++) {
-      // Avoid rate limiting here
-      await new Promise(resolve => setTimeout(resolve, 2500));
 
       const displayTitle = episode ? `${title} - ${episode}` : title;
 
@@ -64,10 +62,13 @@ class QbitTorrent {
 
       if (!added) {
         console.error(`Attempt ${attempt}: Failed to add torrent: ${displayTitle}`.bgRed.white);
+        await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
 
       console.log(`Added Torrent: ${displayTitle}`.bgBlue.white);
+
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       const isChecked = await this.checkTorrent(displayTitle);
 
