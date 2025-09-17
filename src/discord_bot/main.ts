@@ -5,7 +5,6 @@ import {
   Client,
   Collection,
   GatewayIntentBits,
-  IntentsBitField,
 } from "discord.js";
 import { deployCommands } from "@discord/deploy-commands";
 import path from "path";

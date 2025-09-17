@@ -1,7 +1,7 @@
-import { SlashCommandBuilder } from "@discordjs/builders";
-import { CommandInteraction, MessageFlags } from "discord.js";
+
 import db from "@db/db";
 import schedule from "@scheduler/schedule";
+import {ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from "discord.js";
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -17,7 +17,7 @@ module.exports = {
    * Runs the command delete_entry, which deletes an anime entry/entries.
    * @param  {CommandInteraction} interaction - The interaction object
    */
-  async execute(interaction: CommandInteraction) {
+  async execute(interaction: ChatInputCommandInteraction) {
     const options = interaction.options.data;
     const animeid = options.find((option) => option.name === "anime_id");
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

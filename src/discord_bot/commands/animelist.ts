@@ -1,6 +1,5 @@
 // Sends users current anime list
-import { SlashCommandBuilder } from "@discordjs/builders";
-import { CommandInteraction, MessageFlags } from "discord.js";
+import { CommandInteraction, MessageFlags, SlashCommandBuilder } from "discord.js";
 import anilist from "@ani/anilist";
 
 module.exports = {

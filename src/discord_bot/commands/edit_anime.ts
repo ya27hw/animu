@@ -1,5 +1,5 @@
-import { SlashCommandBuilder } from "@discordjs/builders";
-import { CommandInteraction, MessageFlags } from "discord.js";
+// import { SlashCommandBuilder } from "@discordjs/builders";
+import {ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from "discord.js";
 import db from "@db/db";
 
 module.exports = {
@@ -24,7 +24,7 @@ module.exports = {
         .setDescription("The starting episode of the anime")
         .setRequired(false)
     ),
-  async execute(interaction: CommandInteraction) {
+  async execute(interaction : ChatInputCommandInteraction) {
     const options = interaction.options.data;
     const animeid = options.find((option) => option.name === "anime_id");
     const animealt = options.find(
