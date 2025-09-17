@@ -73,7 +73,7 @@ class QbitTorrent {
       const isChecked = await this.checkTorrent(displayTitle);
 
       if (isChecked) {
-        console.log(`Torrent ${displayTitle} is checked.`.bgBlue.white);
+        console.log(`Torrent ${displayTitle} is checked.`.bgWhite.black);
         return true;
       } else {
         console.log(`Torrent ${displayTitle} is not checked.`.bgYellow.black);

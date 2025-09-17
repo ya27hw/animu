@@ -179,7 +179,7 @@ function verifyQuery(
       let airDateMatch =
         airDates.nodes[pageNumber].airingAt <
         pubEpoch; // Check if the episode date is similar
-
+      
       return (
         +episodeMatch +
         +resolutionMatch +
