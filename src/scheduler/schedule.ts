@@ -20,11 +20,14 @@ import { on } from "events";
 
 class Scheduler {
   private offlineAnimeDB: OfflineDB;
-  private limit;
+  private limit: ReturnType<typeof pLimit>;
+  private cronJobs: Map<string, CronJob>;
+
 
   constructor() {
-    this.offlineAnimeDB = {};
     this.limit = pLimit(5);
+    this.offlineAnimeDB = {};
+    this.cronJobs = new Map();
   }
 
   /**
@@ -33,6 +36,12 @@ class Scheduler {
    * @returns {Promise<void>}
    */
   public async run(cronTime: string): Promise<void> {
+    const existingJob = this.cronJobs.get(cronTime);
+
+    if (existingJob) {
+      existingJob.stop();
+    }
+
     let isRunning = false; // Lock to prevent overlapping jobs
 
     const runJob = new CronJob(
@@ -59,6 +68,7 @@ class Scheduler {
         }
       }
     );
+    this.cronJobs.set(cronTime, runJob);
     runJob.start();
   }
 
@@ -75,7 +85,7 @@ class Scheduler {
   }
 
   public clearOfflineDB(mediaId?: string) {
-    if (mediaId) this.offlineAnimeDB[mediaId] = new OfflineAnime([]);
+    if (mediaId) delete this.offlineAnimeDB[mediaId]
     else this.offlineAnimeDB = {};
   }
 

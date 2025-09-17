@@ -15,6 +15,8 @@ class DiscordBot {
   private commands: Collection<unknown, unknown>;
   private status: Array<ActivityOptions>;
   private commandsPath: string;
+  private statusInterval?: NodeJS.Timeout;
+
   constructor() {
     this.client = new Client({ intents: [GatewayIntentBits.Guilds] });
     this.commands = new Collection();
@@ -51,7 +53,7 @@ class DiscordBot {
     });
 
     // Keep this bot alive by changing status
-    setInterval(() => {
+    this.statusInterval = setInterval(() => {
       let random = Math.floor(Math.random() * this.status.length);
       this.client.user!.setActivity(this.status[random]);
     }, 3600000);
@@ -73,6 +75,17 @@ class DiscordBot {
         });
       }
     });
+  }
+
+  /**
+   * stop
+   */
+  public stop() {
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+      this.statusInterval = undefined;
+    }
+    this.client.destroy();
   }
 }
 

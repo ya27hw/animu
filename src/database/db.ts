@@ -11,6 +11,7 @@ import {
   deleteDoc,
   doc,
   DocumentData,
+  Firestore,
   getDoc,
   getFirestore,
   setDoc,
@@ -21,7 +22,7 @@ import {
 class DB {
   private myProject: FirebaseApp;
   private static user: UserCredential;
-  private db;
+  private db : Firestore;
   constructor() {
     this.myProject = initializeApp(firebaseConfig);
     this.db = getFirestore(this.myProject);
