@@ -37,7 +37,6 @@ class QbitTorrent {
     } catch (error) {
       console.error("Error during authentication:", error);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
   }
 
   private async ensureAuthenticated() {
@@ -52,23 +51,24 @@ class QbitTorrent {
     title: string,
     episode?: number
   ): Promise<boolean> {
-   
+    const displayTitle = episode ? `${title} - ${episode}` : title;
+
     // 5 attempts to add the torrent
     for (let attempt = 1; attempt <= 5; attempt++) {
-
-      const displayTitle = episode ? `${title} - ${episode}` : title;
-
       const added = await this.addTorrent(link, title, episode);
 
       if (!added) {
-        console.error(`Attempt ${attempt}: Failed to add torrent: ${displayTitle}`.bgRed.white);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.error(
+          `Attempt ${attempt}: Failed to add torrent: ${displayTitle}`.bgRed
+            .white
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         continue;
       }
 
       console.log(`Added Torrent: ${displayTitle}`.bgBlue.white);
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       const isChecked = await this.checkTorrent(displayTitle);
 
