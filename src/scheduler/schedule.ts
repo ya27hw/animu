@@ -25,7 +25,7 @@ class Scheduler {
 
 
   constructor() {
-    this.limit = pLimit(5);
+    this.limit = pLimit(3);
     this.offlineAnimeDB = {};
     this.cronJobs = new Map();
   }
