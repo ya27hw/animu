@@ -101,6 +101,18 @@ function fixAnimeSeason(animeEntry: string) {
    * - Case 6 : Boku no Hero Academia 7th Season  --> Season 7
    */
 
+  const romanRegex = /\b(?:season\s*)?(II|III|IV)\b/i
+  const romanMatch = animeEntry.match(romanRegex);
+  if (romanMatch) {
+    const roman = romanMatch[0].toUpperCase();
+    const romanToSeason: Record<string, number> = { II: 2, III: 3, IV: 4 };
+
+    return {
+      title: animeEntry.replace(romanRegex, "").trim(),
+      seasonCount: romanToSeason[roman],
+    };
+  }
+
   const seasonRegex =
     /s0?\d{1}|season(.*)0?\d{1}|(\d+(st|nd|rd|th)(.*)season)|[^a-zA-Z0-9]0?\d{1}$/i;
   const seasonString = animeEntry.match(seasonRegex);
@@ -122,9 +134,13 @@ function fixAnimeSeason(animeEntry: string) {
   };
 }
 
-async function countPastRelations(mediaId: number, episodeOffset = 0, seasonCount = 1) {
+async function countPastRelations(
+  mediaId: number,
+  episodeOffset = 0,
+  seasonCount = 1
+) {
   const relations = await anilist.getPreviousRelations(mediaId);
-  await new Promise(res => setTimeout(res, 300));
+  await new Promise((res) => setTimeout(res, 300));
   if (!relations) return { episodeOffset: 0, seasonCount: 0 };
 
   for (const { relationType, node } of relations) {
@@ -141,7 +157,7 @@ async function countPastRelations(mediaId: number, episodeOffset = 0, seasonCoun
 }
 
 /**
- * Handles an anime with a delay of 1000ms to prevent hitting the rate limit
+ * Handles an anime with a delay of 2000ms to prevent hitting the rate limit
  * @param  {any} anime - Anime object to handle
  * @returns Promise
  */
