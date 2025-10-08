@@ -23,7 +23,6 @@ class Scheduler {
   private limit: ReturnType<typeof pLimit>;
   private cronJobs: Map<string, CronJob>;
 
-
   constructor() {
     this.limit = pLimit(3);
     this.offlineAnimeDB = {};
@@ -85,7 +84,7 @@ class Scheduler {
   }
 
   public clearOfflineDB(mediaId?: string) {
-    if (mediaId) delete this.offlineAnimeDB[mediaId]
+    if (mediaId) delete this.offlineAnimeDB[mediaId];
     else this.offlineAnimeDB = {};
   }
 
@@ -127,8 +126,6 @@ class Scheduler {
           nyaaTorrent.episode ? nyaaTorrent.episode : ""
         } at ${nyaaTorrent.link}`.green.bold
       );
-      // Wait for 2 seconds
-      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
     // Append to offlineDB, and remove the timeout
@@ -212,7 +209,7 @@ class Scheduler {
     // NextAiringEpisode can be null if the anime is finished. So check for that
     const endEpisode = anime.media.nextAiringEpisode
       ? anime.media.nextAiringEpisode.episode - 1 + startingEpisode
-      : ((anime.media.episodes ?? 0) + startingEpisode);
+      : (anime.media.episodes ?? 0) + startingEpisode;
 
     // Guard invalid or empty windows
     if (endEpisode <= startEpisode) {
@@ -339,10 +336,19 @@ class Scheduler {
           )
       );
 
+      console.log(
+        `Attempting combinations of ${
+          anime.media.title.romaji
+        } -> ${possibleCombinations.map(
+          (c) => `${c.title} : ${c.episodeOffset}`
+        )}`.green
+      );
+
       // Bounded concurrency search across combinations and pick the highest seeder result
       const comboLimit = pLimit(2);
       const comboTasks = possibleCombinations.map((combo) =>
         comboLimit(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
           const result = await Nyaa.getTorrents(
             anime,
             startEpisode + combo.episodeOffset,
@@ -360,12 +366,27 @@ class Scheduler {
       );
 
       const results = await Promise.all(comboTasks);
-      const best = results.reduce<{ comboIndex: number; seederCount: number; result: NyaaTorrent[] | null }>((acc, curr, idx) => {
-        if (curr.seederCount > acc.seederCount) {
-          return { comboIndex: idx, seederCount: curr.seederCount, result: curr.result as any };
+      const best = results.reduce<{
+        comboIndex: number;
+        seederCount: number;
+        result: NyaaTorrent[] | null;
+      }>(
+        (acc, curr, idx) => {
+          if (curr.seederCount > acc.seederCount) {
+            return {
+              comboIndex: idx,
+              seederCount: curr.seederCount,
+              result: curr.result as any,
+            };
+          }
+          return acc;
+        },
+        {
+          comboIndex: -1,
+          seederCount: primarySeedCount,
+          result: primaryTorrent as any,
         }
-        return acc;
-      }, { comboIndex: -1, seederCount: primarySeedCount, result: primaryTorrent as any });
+      );
 
       if (best.comboIndex !== -1 && best.seederCount > primarySeedCount) {
         primaryTorrent = results[best.comboIndex].result || primaryTorrent;
@@ -433,16 +454,13 @@ class Scheduler {
           ? anime.media.nextAiringEpisode.episode - 1
           : anime.media.episodes;
 
-        if (airingEpisodes === 0) {
-          continue;
-        }
+        if (airingEpisodes === 0) continue;
 
         if (
           episodesOffline[episodesOffline.length - 1] !==
           airingEpisodes + offlineAnime.starting_episode
-        ) {
+        )
           promises.push(anime);
-        }
       }
     }
 
