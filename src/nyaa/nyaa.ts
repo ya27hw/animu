@@ -117,7 +117,10 @@ class Nyaa {
       const formattedEpisode = episode.toString().padStart(2, "0");
       // Get information from Nyaa here.
       const rssResult = await this.fetchRSSFeed(
-        `${animeTitle} ${formattedEpisode}`,
+        // Note the episode is wrapped inside quotes.
+        // If the episode in the title has a prefix (Like EP01 or E01)
+        // Then nyaa will also include it in the search.
+        `${animeTitle} "${formattedEpisode}"`,
         searchUrl
       );
 
