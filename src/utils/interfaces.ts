@@ -52,7 +52,7 @@ type AiringScheduleNode = {
 // Helper interface for Media. It is used to define the title of the anime. This can be in 3 different forms.
 interface AniTitle {
   romaji: string;
-  english: string;
+  english?: string;
   native: string;
 }
 
