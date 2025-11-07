@@ -277,18 +277,19 @@ class Scheduler {
       const ex3 = fixAnimeSeason(anime.media.title.romaji);
       const ex2 = await countPastRelations(anime.mediaId);
 
-      let possibleCombinations = [
-        // First example
-        {
-          title: ex3.title,
-          episodeOffset: ex2.episodeOffset,
-        },
-        // If the title is in English
-        {
+      let possibleCombinations = [];
+
+      possibleCombinations.push({
+        title: ex3.title,
+        episodeOffset: 0,
+      });
+
+      if (anime.media.title.english) {
+        possibleCombinations.push({
           title: anime.media.title.english,
           episodeOffset: 0,
-        },
-      ];
+        });
+      }
 
       // This is not required if the anime airing has just a season.
       if (ex2.seasonCount > 1) {
@@ -307,13 +308,14 @@ class Scheduler {
       }
 
       // Loop over synonyms, could be possible nyaa hits.
-      anime.media.synonyms.forEach((synonym) => {
-        if (synonym.toLowerCase() !== anime.media.title.romaji.toLowerCase())
-          possibleCombinations.push({
-            title: synonym,
-            episodeOffset: 0,
-          });
-      });
+      if (anime.media.synonyms)
+        anime.media.synonyms.forEach((synonym) => {
+          if (synonym.toLowerCase() !== anime.media.title.romaji.toLowerCase())
+            possibleCombinations.push({
+              title: synonym,
+              episodeOffset: 0,
+            });
+        });
 
       // Get short name by seperating romaji title by colon. Often useful as animes tend to have long names
       const shortName = anime.media.title.romaji.split(":")[0];
