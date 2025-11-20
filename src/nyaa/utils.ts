@@ -117,12 +117,15 @@ function verifyQuery(
   airDates: AiringSchedule,
   ...episodes: number[]
 ): number {
-
   const group = (animeParsedData.release_group ?? "").trim().toLowerCase();
-  const isExcludedGroup = excludeReleaseGroups.map(g => g.toLowerCase())
+  const isExcludedGroup = excludeReleaseGroups
+    .map((g) => g.toLowerCase())
     .includes(group);
-  if (isExcludedGroup ||
-    animeParsedData.subtitles?.toLowerCase().includes("dub")) return 0;
+  if (
+    isExcludedGroup ||
+    animeParsedData.subtitles?.toLowerCase().includes("dub")
+  )
+    return 0;
 
   const pubDate = new Date(nyaaPubDate);
   if (Number.isNaN(pubDate.getTime())) return 0;
@@ -131,7 +134,6 @@ function verifyQuery(
   const fileName = animeParsedData.file_name ?? "";
   const parsedTitle = animeParsedData.anime_title;
   const hasEpisodes = episodes.length > 0;
-
 
   const parsedResolution =
     resolution === Resolution.NONE
@@ -175,11 +177,8 @@ function verifyQuery(
 
       if (pageNumber === -1) return 0;
 
+      let airDateMatch = airDates.nodes[pageNumber].airingAt < pubEpoch; // Check if the episode date is similar
 
-      let airDateMatch =
-        airDates.nodes[pageNumber].airingAt <
-        pubEpoch; // Check if the episode date is similar
-      
       return (
         +episodeMatch +
         +resolutionMatch +
@@ -189,10 +188,11 @@ function verifyQuery(
 
     case SearchMode.BATCH:
       const parsedReleaseInfo = animeParsedData.release_information;
-      // Check if it is a batch
+      // Check if it is a batch by checking if the release info contains the word batch
       const explicitBatch = parsedReleaseInfo?.toLowerCase().includes("batch");
-      const isSingleEpisode = hasEpisodes && episodes[episodes.length - 1] === 1;
-      const isBatch = explicitBatch || isSingleEpisode;
+      const isSingleEpisode =
+        hasEpisodes && episodes[episodes.length - 1] === 1;
+      const isBatch = explicitBatch || !isSingleEpisode;
 
       /* Usually some batches don't explicitly specify that the torrent itself is a
          batch. This can be combated by proving there is no episode number to be parsed
