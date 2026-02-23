@@ -445,6 +445,55 @@ class WebUI {
   }
 
   /**
+   * Formats PM2 JSON log lines into `timestamp message` for display.
+   * Falls back to the original line if parsing fails.
+   * @param content Raw tailed log content.
+   */
+  private formatLogContent(content: string): string {
+    if (!content) return content;
+
+    const lines = content.split(/\r?\n/);
+    const formatted = lines.map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+
+      try {
+        const parsed = JSON.parse(trimmed) as Record<string, any>;
+        if (!parsed || typeof parsed !== "object") return line;
+
+        const timestamp =
+          parsed.timestamp ||
+          parsed.time ||
+          parsed.date ||
+          parsed["log_date"] ||
+          parsed["@timestamp"] ||
+          "";
+
+        const message =
+          parsed.message ??
+          parsed.msg ??
+          parsed.data ??
+          parsed.log ??
+          parsed.err ??
+          "";
+
+        const tsText = timestamp ? String(timestamp) : "";
+        const msgText =
+          typeof message === "string" ? message : JSON.stringify(message);
+
+        if (!tsText && !msgText) return line;
+        if (!tsText) return msgText;
+        if (!msgText) return tsText;
+        return `${tsText} ${msgText}`;
+      } catch {
+        return line;
+      }
+    });
+
+    return formatted.join("\n");
+  }
+
+  /**
    * Builds the frontend payload for the logs viewer.
    * @param url Request URL with `name` and `lines` query params.
    */
@@ -460,7 +509,8 @@ class WebUI {
 
     const file = files[selected];
     const resolvedPath = await this.resolveLogFilePath(selected);
-    const content = await this.readLogTail(resolvedPath, lines);
+    const rawContent = await this.readLogTail(resolvedPath, lines);
+    const content = this.formatLogContent(rawContent);
 
     return {
       selected,
