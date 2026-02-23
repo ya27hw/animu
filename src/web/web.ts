@@ -408,11 +408,34 @@ class WebUI {
    * @param maxLines Number of trailing lines to return.
    */
   private async readLogTail(filePath: string, maxLines: number): Promise<string> {
+    const chunkSize = 64 * 1024;
     try {
-      const raw = await fs.readFile(filePath, "utf8");
-      const normalized = raw.replace(/\r\n/g, "\n");
-      const lines = normalized.split("\n");
-      return lines.slice(-maxLines).join("\n").trimEnd();
+      const handle = await fs.open(filePath, "r");
+      try {
+        const stat = await handle.stat();
+        if (stat.size === 0) return "";
+
+        let position = stat.size;
+        let text = "";
+        let newlineCount = 0;
+
+        while (position > 0 && newlineCount <= maxLines + 1) {
+          const readSize = Math.min(chunkSize, position);
+          position -= readSize;
+
+          const buffer = Buffer.alloc(readSize);
+          await handle.read(buffer, 0, readSize, position);
+
+          text = buffer.toString("utf8") + text;
+          newlineCount = (text.match(/\n/g) || []).length;
+        }
+
+        const normalized = text.replace(/\r\n/g, "\n");
+        const lines = normalized.split("\n");
+        return lines.slice(-maxLines).join("\n").trimEnd();
+      } finally {
+        await handle.close();
+      }
     } catch (error: any) {
       if (error && error.code === "ENOENT") {
         return `Log file not found: ${filePath}`;
