@@ -20,20 +20,47 @@ class Anilist {
    */
 
   private async getData(query: string, variables?: Object): Promise<any> {
-    return await axios(this.api, {
-      headers: {
-        Authorization: `Bearer ${bearerTokenAnilist}`, // Add the bearer token here
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      method: "post",
+    const baseHeaders: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+
+    const headersWithAuth = bearerTokenAnilist
+      ? {
+          ...baseHeaders,
+          Authorization: `Bearer ${bearerTokenAnilist}`,
+        }
+      : baseHeaders;
+
+    const requestConfig = {
+      method: "post" as const,
       data: {
         query,
         variables,
       },
       proxy: useProxy ? proxy : undefined,
       timeout: 10000,
-    });
+    };
+
+    try {
+      return await axios(this.api, {
+        headers: headersWithAuth,
+        ...requestConfig,
+      });
+    } catch (error: any) {
+      const status = error?.response?.status;
+
+      // AniList list queries are public; expired/invalid bearer tokens can fail
+      // even when the same query works anonymously.
+      if (bearerTokenAnilist && (status === 400 || status === 401)) {
+        return await axios(this.api, {
+          headers: baseHeaders,
+          ...requestConfig,
+        });
+      }
+
+      throw error;
+    }
   }
 
   /**
