@@ -2,8 +2,7 @@ import DB from "@db/db";
 import schedule from "@scheduler/schedule";
 import { Command, RUNTIMES } from "@utils/index";
 import readline from "readline";
-import { interval, offpeakInterval, token } from "profile.json";
-import discordBot from "@discord/main";
+import webUI from "../web/web";
 
 class ui {
   private commands: Command[];
@@ -45,9 +44,8 @@ class ui {
     await schedule.run(RUNTIMES.offPeak); // Off peak hours
     schedule.runClearOfflineDB(RUNTIMES.clearOfflineDB); // Clear the offlineDB every day
   }
-  private async runSchedulerDiscord() {
-    discordBot.start(token);
-    this.runScheduler();
+  private async runWebUi() {
+    webUI.start();
   }
 
   private async selectChoice(arg: number) {
@@ -63,12 +61,12 @@ class ui {
   }
 
   public async init(arg?: string) {
+    // Web UI should be available whenever the app starts.
+    webUI.start();
+
     this.addCommands("Run the Anime Scheduler (once)", this.runSchedulerOnce);
     this.addCommands("Run the Anime Scheduler", this.runScheduler);
-    this.addCommands(
-      "Run the Anime Scheduler AND Discord Bot (need creds)",
-      async () => await this.runSchedulerDiscord()
-    );
+    this.addCommands("Run Web UI only", async () => await this.runWebUi());
     this.addCommands("Exit", () => process.exit());
 
     // Check if arg is a number
