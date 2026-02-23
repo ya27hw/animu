@@ -143,6 +143,80 @@ class Nyaa {
     return foundTorrents.length ? foundTorrents : null;
   }
 
+  /**
+   * Searches Nyaa RSS for a single episode and returns ranked candidates.
+   * This reuses the same verification/ranking logic used by the scheduler.
+   * @param anime AniList anime entry
+   * @param episode Absolute episode number (including any offset already applied)
+   * @param startingEpisode Episode offset used by the scheduler
+   * @param altAnimeTitle Optional override title for querying Nyaa
+   */
+  public async searchEpisodeCandidates(
+    anime: AniQuery,
+    episode: number,
+    startingEpisode: number,
+    altAnimeTitle?: string
+  ): Promise<
+    Array<
+      NyaaTorrent & {
+        score: number;
+        parsedTitle?: string;
+      }
+    >
+  > {
+    let searchUrl = nyaaUrl;
+    const animeTitle = altAnimeTitle ? altAnimeTitle : anime.media.title.romaji;
+
+    if (anime.media.genres?.includes(triggerGenre)) {
+      searchUrl = altNyaaUrl;
+    }
+
+    const airDates = await getEpisodeAirDates(
+      anime.mediaId,
+      [episode],
+      startingEpisode
+    );
+    if (!airDates) return [];
+
+    const formattedEpisode = episode.toString().padStart(2, "0");
+    const rssResult = await this.fetchRSSFeed(
+      `${animeTitle} "${formattedEpisode}"`,
+      searchUrl
+    );
+
+    if (rssResult.status !== 200 || !rssResult.data?.length) return [];
+
+    const candidates = rssResult.data
+      .map((item) => {
+        const parsed = anitomy.parseSync(item.title);
+        const score = verifyQuery(
+          animeTitle,
+          parsed,
+          searchUrl === altNyaaUrl ? Resolution.NONE : (resolution as Resolution),
+          SearchMode.EPISODE,
+          item.pubDate,
+          airDates,
+          episode
+        );
+        return {
+          ...item,
+          episode,
+          score,
+          parsedTitle: parsed.anime_title,
+        };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (
+          (parseInt(b["nyaa:seeders"], 10) || 0) -
+          (parseInt(a["nyaa:seeders"], 10) || 0)
+        );
+      });
+
+    return candidates;
+  }
+
   private setParams(url: string, query: string): URL {
     const rssLink = new URL(url);
 
