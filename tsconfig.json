@@ -13,7 +13,6 @@
     "paths": {
       "@ani/*" : ["anilist/*"],
       "@db/*" : ["database/*"],
-      "@discord/*" : ["discord_bot/*"],
       "@nyaa/*" : ["nyaa/*"],
       "@qbit/*" : ["qbit_torrent/*"],
       "@scheduler/*" : ["scheduler/*"],
