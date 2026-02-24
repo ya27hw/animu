@@ -37,6 +37,7 @@ class ui {
 
   private async runScheduler() {
     console.log("Running the scheduler...");
+    webUI.start();
     await DB.logIn();
     // Run every x minutes, from 12:00pm to 04:00am
     // Then run every 25 minutes, from 05:00am to 11:00am
@@ -62,7 +63,6 @@ class ui {
 
   public async init(arg?: string) {
     // Web UI should be available whenever the app starts.
-    webUI.start();
 
     this.addCommands("Run the Anime Scheduler (once)", this.runSchedulerOnce);
     this.addCommands("Run the Anime Scheduler", this.runScheduler);
