@@ -159,6 +159,11 @@ class Scheduler {
       "media.status": anime.media.status,
       downloadedEpisodes: arrayUnion(...downloadedEpisodes),
     });
+
+    // Set anime to rewatching if all episodes are downloaded
+    if (downloadedEpisodes.length === anime.media.episodes) {
+      await Anilist.setAnimeToRewatching(anime.mediaId);
+    }
   }
   /**
    * Handles an anime series, decides which episodes to download,
