@@ -75,6 +75,35 @@ class Anilist {
   }
 
   /**
+   * Sets the anime status to rewatching by updating the user's list.
+   * This will happen if every episode has been downloaded.
+   * @param {number} mediaId - The media ID of the anime to set to rewatch
+   * @returns {Promise<boolean>} - Returns true if successful
+   */
+  public async setAnimeToRewatching(mediaId: number): Promise<boolean> {
+    const query = `
+    mutation SaveMediaListEntry($mediaId: Int, $status: MediaListStatus) {
+        SaveMediaListEntry(mediaId: $mediaId, status: $status) {
+            status
+          }
+      }
+    `;
+
+    const variables = {
+      mediaId: mediaId,
+      status: "REPEATING",
+    };
+
+    const response = await this.getData(query, variables);
+
+    if (response.data.data.SaveMediaListEntry.status === "REPEATING") {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  /**
    * Retrieves the airing schedule for a specific anime by its ID.
    * @param {number} page - The page number for pagination.
    * @param {number} id - The ID of the anime.
@@ -85,7 +114,7 @@ class Anilist {
   public async getAiringSchedule(
     page: number,
     id: number,
-    perPage: number = 5
+    perPage: number = 5,
   ): Promise<AiringSchedule | null> {
     const query = `
         query($id: Int, $page: Int) {
