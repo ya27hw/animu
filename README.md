@@ -1,5 +1,8 @@
 # animu
 <img width="1920" height="980" alt="Screenshot_20260301_174741" src="https://github.com/user-attachments/assets/f5ffa62b-a5f9-4a35-9637-46be21d5604a" />
+
+Special thanks to Uncle Sam 💙 for the webUI
+
 ## What is this project about?
 
 Conveniently downloads you the latest anime releases locally, without having to access a third-party site.
