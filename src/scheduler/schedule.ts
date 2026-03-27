@@ -14,7 +14,7 @@ import {
   sendAnimeDownloadedHook,
 } from "@scheduler/utils";
 import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB } from "@utils/index";
-import { interval } from "profile.json";
+import { interval, setCompletedToRewatching } from "profile.json";
 import { arrayUnion, DocumentData } from "firebase/firestore";
 import { on } from "events";
 
@@ -56,7 +56,7 @@ class Scheduler {
           isRunning = true; // Lock the job execution
           console.log(
             `>>>Running scheduler at ${new Date().toLocaleString()}<<<`.white
-              .bold
+              .bold,
           ); // Log with current time
 
           await this.check(); // Execute the job
@@ -65,7 +65,7 @@ class Scheduler {
         } finally {
           isRunning = false; // Release the lock when done
         }
-      }
+      },
     );
     this.cronJobs.set(cronTime, runJob);
     runJob.start();
@@ -92,25 +92,25 @@ class Scheduler {
    * Downloads the torrents, and updates the database
    * @param  {AniQuery} anime - The anime object
    * @param  {nyaaTorrents[]} ...nyaaTorrents - The anime torrents returned from nyaa.si
-   * @returns Promise<void>
+   * @returns Promise<number[] | null> - Downloaded episodes, or null if adding torrents failed
    */
   private async downloadTorrents(
     anime: AniQuery,
     ...nyaaTorrents: NyaaTorrent[]
-  ): Promise<void> {
+  ): Promise<number[] | null> {
     const downloadedEpisodes = new Array<number>();
     for (const nyaaTorrent of nyaaTorrents) {
       // Download torrent
       const isAdded: boolean = await qbit.addCheckTorrent(
         nyaaTorrent.link,
         anime.media.title.romaji,
-        nyaaTorrent.episode
+        nyaaTorrent.episode,
       );
       if (!isAdded) {
         this.offlineAnimeDB[anime.mediaId].setTimeout();
         alertUser(anime.media.title.romaji, anime.media.coverImage.extraLarge);
 
-        return;
+        return null;
       }
 
       // If we successfully added the torrent, then add it to the database later
@@ -118,13 +118,13 @@ class Scheduler {
       if (nyaaTorrent.episode) downloadedEpisodes.push(nyaaTorrent.episode);
       else
         downloadedEpisodes.push(
-          ...Array.from({ length: anime.media.episodes }, (_, i) => i + 1)
+          ...Array.from({ length: anime.media.episodes }, (_, i) => i + 1),
         );
 
       console.log(
         `⬇️  Downloading ${nyaaTorrent.title} ${
           nyaaTorrent.episode ? nyaaTorrent.episode : ""
-        } at ${nyaaTorrent.link}`.green.bold
+        } at ${nyaaTorrent.link}`.green.bold,
       );
     }
 
@@ -150,7 +150,7 @@ class Scheduler {
         name: "Seeders",
         value: nyaaTorrents.map((t) => t["nyaa:seeders"]).join(", "),
       },
-      { name: "Title", value: nyaaTorrents[0].title }
+      { name: "Title", value: nyaaTorrents[0].title },
     );
 
     // Update firestore
@@ -160,9 +160,63 @@ class Scheduler {
       downloadedEpisodes: arrayUnion(...downloadedEpisodes),
     });
 
-    // Set anime to rewatching if all episodes are downloaded
-    if (downloadedEpisodes.length === anime.media.episodes) {
-      await Anilist.setAnimeToRewatching(anime.mediaId);
+    return downloadedEpisodes;
+  }
+
+/**
+ * Checks if an anime should be set to rewatching status.
+ * @param {AniQuery} anime - The anime object
+ * @param {number[]} downloadedEpisodes - The downloaded episodes
+ * @returns {boolean} - True if the anime should be set to rewatching status
+ */
+  private shouldSetAnimeToRewatching(
+    anime: AniQuery,
+    downloadedEpisodes: number[],
+  ): boolean {
+    const downloadedCount = new Set(downloadedEpisodes).size;
+
+    return (
+      setCompletedToRewatching &&
+      anime.media.status === "FINISHED" &&
+      anime.media.episodes > 0 &&
+      downloadedCount >= anime.media.episodes
+    );
+  }
+
+  private async syncAnimeRewatchingStatus(
+    anime: AniQuery,
+    downloadedEpisodes: number[],
+  ): Promise<void> {
+    if (!this.shouldSetAnimeToRewatching(anime, downloadedEpisodes)) {
+      return;
+    }
+
+    await DB.modifyAnimeEntry(anime.mediaId.toString(), {
+      pendingRewatchingUpdate: true,
+    });
+
+    console.log(
+      `Downloaded all episodes for ${anime.media.title.romaji}. Setting to rewatching...`,
+    );
+
+    try {
+      const isUpdated = await Anilist.setAnimeToRewatching(anime.mediaId);
+
+      if (!isUpdated) {
+        console.error(
+          `Failed to set ${anime.media.title.romaji} to rewatching on AniList.`,
+        );
+        return;
+      }
+
+      await DB.modifyAnimeEntry(anime.mediaId.toString(), {
+        pendingRewatchingUpdate: false,
+      });
+    } catch (error) {
+      console.error(
+        `Failed to set ${anime.media.title.romaji} to rewatching on AniList:`,
+        error,
+      );
     }
   }
   /**
@@ -177,6 +231,7 @@ class Scheduler {
     try {
       const fireDBEntry = await DB.getByMediaId(`${anime.mediaId}`);
 
+      // Create FireDB entry if it doesn't exist
       if (!fireDBEntry) {
         await DB.addToDb(anime);
         fireDBAnime = anime as DocumentData;
@@ -187,6 +242,13 @@ class Scheduler {
     }
 
     if (!fireDBAnime) return; // Guard against null fireDBAnime (in case of error)
+
+    if (fireDBAnime.pendingRewatchingUpdate === undefined) {
+      fireDBAnime.pendingRewatchingUpdate = false;
+      await DB.modifyAnimeEntry(anime.mediaId.toString(), {
+        pendingRewatchingUpdate: false,
+      });
+    }
 
     // Ensure offline DB entry exists before mutating
     if (!this.offlineAnimeDB[anime.mediaId]) {
@@ -227,23 +289,32 @@ class Scheduler {
     // Make array of anime.progress until endEpisode
     const animeProgress: number[] = Array.from(
       { length: endEpisode - startEpisode },
-      (_, i) => i + startEpisode + 1
+      (_, i) => i + startEpisode + 1,
     );
 
     /* If progress is up to date, then skip
     Or if the user has downloaded all episodes, then skip */
     const isUpToDate = animeProgress.every((episode) =>
-      downloadedEpisodes.includes(episode)
+      downloadedEpisodes.includes(episode),
     );
 
     if (isUpToDate) {
       // If the user is up to date, then we can skip, and update the offlineDB
       this.offlineAnimeDB[anime.mediaId].episodes = downloadedEpisodes.sort(
-        (a, b) => a - b
+        (a, b) => a - b,
       );
+
+      if (fireDBAnime.pendingRewatchingUpdate === true) {
+        await this.syncAnimeRewatchingStatus(anime, downloadedEpisodes);
+      }
 
       return;
     }
+
+    // // If user has downloaded all episodes, and anime has finished airing, move anime to REWATCHING on anilist
+    // if (downloadedEpisodes.length === endEpisode) {
+    //   await Anilist.setAnimeToRewatching(anime.mediaId);
+    // }
 
     // Attempt to find the anime.
     let primaryTorrent = await Nyaa.getTorrents(
@@ -251,7 +322,7 @@ class Scheduler {
       startEpisode,
       endEpisode,
       startingEpisode,
-      downloadedEpisodes
+      downloadedEpisodes,
     );
 
     // Count total number of seeders
@@ -295,7 +366,6 @@ class Scheduler {
           episodeOffset: 0,
         });
       }
-
       // This is not required if the anime airing has just a season.
       if (ex2.seasonCount > 1) {
         possibleCombinations.push(
@@ -308,7 +378,7 @@ class Scheduler {
           {
             title: `${ex3.title} S${ex2.seasonCount}`,
             episodeOffset: 0,
-          }
+          },
         );
       }
 
@@ -339,16 +409,16 @@ class Scheduler {
           self.findIndex(
             (t) =>
               t.title.toLowerCase() === value.title.toLowerCase() &&
-              t.episodeOffset === value.episodeOffset
-          )
+              t.episodeOffset === value.episodeOffset,
+          ),
       );
 
       console.log(
         `Attempting combinations of ${
           anime.media.title.romaji
         } -> ${possibleCombinations.map(
-          (c) => `${c.title} : ${c.episodeOffset}`
-        )}`.green
+          (c) => `${c.title} : ${c.episodeOffset}`,
+        )}`.green,
       );
 
       // Bounded concurrency search across combinations and pick the highest seeder result
@@ -362,14 +432,14 @@ class Scheduler {
             endEpisode + combo.episodeOffset,
             startingEpisode + combo.episodeOffset,
             downloadedEpisodes,
-            combo.title
+            combo.title,
           );
           const seederCount = (result || []).reduce(
             (acc, t) => acc + (parseInt(t["nyaa:seeders"], 10) || 0),
-            0
+            0,
           );
           return { combo, result, seederCount };
-        })
+        }),
       );
 
       const results = await Promise.all(comboTasks);
@@ -392,7 +462,7 @@ class Scheduler {
           comboIndex: -1,
           seederCount: primarySeedCount,
           result: primaryTorrent as any,
-        }
+        },
       );
 
       if (best.comboIndex !== -1 && best.seederCount > primarySeedCount) {
@@ -413,7 +483,21 @@ class Scheduler {
     }
 
     if (primaryTorrent) {
-      await this.downloadTorrents(anime, ...primaryTorrent);
+      const newlyDownloadedEpisodes = await this.downloadTorrents(
+        anime,
+        ...primaryTorrent,
+      );
+
+      if (!newlyDownloadedEpisodes) {
+        return;
+      }
+
+      const allDownloadedEpisodes = Array.from(
+        new Set([...downloadedEpisodes, ...newlyDownloadedEpisodes]),
+      );
+
+      await this.syncAnimeRewatchingStatus(anime, allDownloadedEpisodes);
+
       return;
     } // Finish the function if successful
     else {
@@ -421,7 +505,7 @@ class Scheduler {
 
       logNextRunTime(
         anime.media.title.romaji,
-        this.offlineAnimeDB[anime.mediaId].timeouts
+        this.offlineAnimeDB[anime.mediaId].timeouts,
       );
     }
   }
@@ -433,11 +517,14 @@ class Scheduler {
   public async check() {
     const animeList: AniQuery[] = await Anilist.getAnimeUserList();
 
+    // Return if empty list.
     if (animeList.length === 0) return;
 
+    // List of promises. Each promise will be executed in parallel
     const promises: AniQuery[] = [];
 
     for (const anime of animeList) {
+      // Populate offlineDB if anime is not present.
       if (!this.offlineAnimeDB.hasOwnProperty(anime.mediaId)) {
         this.offlineAnimeDB[anime.mediaId] = new OfflineAnime([]);
         promises.push(anime);
@@ -449,7 +536,7 @@ class Scheduler {
           console.log(
             `\u2139\uFE0F Next run for ${anime.media.title.romaji} in ${
               offlineAnime.timeouts * interval
-            } minutes`.blue
+            } minutes`.blue,
           );
           this.offlineAnimeDB[anime.mediaId].timeouts = --offlineAnime.timeouts;
 
@@ -461,8 +548,10 @@ class Scheduler {
           ? anime.media.nextAiringEpisode.episode - 1
           : anime.media.episodes;
 
+        // If no aired episodes, return.
         if (airingEpisodes === 0) continue;
 
+        // Begin search for new episode if downloaded episodes do not match aired episodes
         if (
           episodesOffline[episodesOffline.length - 1] !==
           airingEpisodes + offlineAnime.starting_episode
@@ -472,7 +561,7 @@ class Scheduler {
     }
 
     const tasks = promises.map((anime) =>
-      this.limit(() => handleWithDelay.call(this, anime))
+      this.limit(() => handleWithDelay.call(this, anime)),
     );
 
     await Promise.all(tasks);

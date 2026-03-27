@@ -51,7 +51,10 @@ class DB {
           "anime",
           dataToAdd["mediaId"].toString()
         ),
-        dataToAdd
+        {
+          ...dataToAdd,
+          pendingRewatchingUpdate: false,
+        }
       );
     }
   }
