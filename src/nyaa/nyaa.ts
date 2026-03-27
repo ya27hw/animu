@@ -26,12 +26,29 @@ import { proxy } from "@utils/models";
 
 class Nyaa {
   private parser: any;
+  private enableProxy: boolean;
+
   constructor() {
     this.parser = new Parser({
       customFields: {
         item: ["nyaa:seeders", "nyaa:size"],
       },
     });
+    this.enableProxy = useProxy;
+  }
+
+  private getSearchContext(anime: AniQuery) {
+    if (anime.media.genres?.includes(triggerGenre)) {
+      return {
+        searchUrl: altNyaaUrl,
+        enableProxy: true,
+      };
+    }
+
+    return {
+      searchUrl: nyaaUrl,
+      enableProxy: this.enableProxy,
+    };
   }
 
   /**
@@ -58,32 +75,28 @@ class Nyaa {
     endEpisode: number,
     startingEpisode: number,
     downloadedEpisodes: number[],
-    altAnimeTitle?: string
+    altAnimeTitle?: string,
   ): Promise<NyaaTorrent[] | null> {
-    let searchUrl = nyaaUrl;
+    const { searchUrl, enableProxy } = this.getSearchContext(anime);
     const episodeList = getNumbers(
       startEpisode,
       endEpisode,
-      downloadedEpisodes
+      downloadedEpisodes,
     );
 
     const animeTitle = altAnimeTitle ? altAnimeTitle : anime.media.title.romaji;
 
     console.log(
       `🔍 Searching for ${animeTitle} with ID ${anime.mediaId} episode(s) ${episodeList}`
-        .green
+        .green,
     );
 
     const airDates = await getEpisodeAirDates(
       anime.mediaId,
       episodeList,
-      startingEpisode
+      startingEpisode,
     );
     if (!airDates) return null;
-
-    if (anime.media.genres?.includes(triggerGenre)) {
-      searchUrl = altNyaaUrl;
-    }
 
     let searchMode =
       anime.media.status === AnimeStatus.FINISHED &&
@@ -93,7 +106,11 @@ class Nyaa {
         : SearchMode.EPISODE;
 
     if (searchMode === SearchMode.BATCH) {
-      const rssResult = await this.fetchRSSFeed(animeTitle, searchUrl);
+      const rssResult = await this.fetchRSSFeed(
+        animeTitle,
+        searchUrl,
+        enableProxy,
+      );
 
       if (rssResult.status === 200 && rssResult.data?.length) {
         const bestTorrent = await this.getBestTorrent(
@@ -103,7 +120,7 @@ class Nyaa {
           searchUrl === altNyaaUrl,
           airDates,
           startEpisode,
-          endEpisode
+          endEpisode,
         );
         if (bestTorrent) return [bestTorrent];
       }
@@ -121,7 +138,8 @@ class Nyaa {
         // If the episode in the title has a prefix (Like EP01 or E01)
         // Then nyaa will also include it in the search.
         `${animeTitle} "${formattedEpisode}"`,
-        searchUrl
+        searchUrl,
+        enableProxy,
       );
 
       if (rssResult.status === 200 && rssResult.data?.length) {
@@ -131,7 +149,7 @@ class Nyaa {
           searchMode,
           searchUrl === altNyaaUrl,
           airDates,
-          episode
+          episode,
         );
         if (bestTorrent) {
           bestTorrent.episode = episode;
@@ -155,7 +173,7 @@ class Nyaa {
     anime: AniQuery,
     episode: number,
     startingEpisode: number,
-    altAnimeTitle?: string
+    altAnimeTitle?: string,
   ): Promise<
     Array<
       NyaaTorrent & {
@@ -164,25 +182,26 @@ class Nyaa {
       }
     >
   > {
-    let searchUrl = nyaaUrl;
+    const { searchUrl, enableProxy } = this.getSearchContext(anime);
     const animeTitle = altAnimeTitle ? altAnimeTitle : anime.media.title.romaji;
-
-    if (anime.media.genres?.includes(triggerGenre)) {
-      searchUrl = altNyaaUrl;
-    }
 
     const airDates = await getEpisodeAirDates(
       anime.mediaId,
       [episode],
-      startingEpisode
+      startingEpisode,
     );
     if (!airDates) return [];
 
     const formattedEpisode = episode.toString().padStart(2, "0");
     const rssResult = await this.fetchRSSFeed(
       `${animeTitle} "${formattedEpisode}"`,
-      searchUrl
+      searchUrl,
+      enableProxy,
     );
+
+    console.log(
+      rssResult.data
+    )
 
     if (rssResult.status !== 200 || !rssResult.data?.length) return [];
 
@@ -192,11 +211,13 @@ class Nyaa {
         const score = verifyQuery(
           animeTitle,
           parsed,
-          searchUrl === altNyaaUrl ? Resolution.NONE : (resolution as Resolution),
+          searchUrl === altNyaaUrl
+            ? Resolution.NONE
+            : (resolution as Resolution),
           SearchMode.EPISODE,
           item.pubDate,
           airDates,
-          episode
+          episode,
         );
         return {
           ...item,
@@ -217,6 +238,83 @@ class Nyaa {
     return candidates;
   }
 
+  public async searchTitleCandidates(
+    anime: AniQuery,
+    startingEpisode: number,
+    altAnimeTitle?: string,
+  ): Promise<
+    Array<
+      NyaaTorrent & {
+        score: number;
+        parsedTitle?: string;
+      }
+    >
+  > {
+    const { searchUrl, enableProxy } = this.getSearchContext(anime);
+    const animeTitle = altAnimeTitle ? altAnimeTitle : anime.media.title.romaji;
+
+    // Dumb title-only search for the Web UI. Keep the richer batch verification
+    // logic disabled here so the request simply reflects what Nyaa returns.
+    //
+    // const endEpisode = anime.media.nextAiringEpisode?.episode
+    //   ? anime.media.nextAiringEpisode.episode - 1 + startingEpisode
+    //   : (anime.media.episodes ?? 0) + startingEpisode;
+    //
+    // if (endEpisode <= startingEpisode) return [];
+    //
+    // const episodeList = getNumbers(startingEpisode, endEpisode, []);
+    // const airDates = await getEpisodeAirDates(
+    //   anime.mediaId,
+    //   episodeList,
+    //   startingEpisode,
+    // );
+    // if (!airDates) return [];
+
+    const rssResult = await this.fetchRSSFeed(
+      animeTitle,
+      searchUrl,
+      enableProxy,
+    );
+
+    if (rssResult.status !== 200 || !rssResult.data?.length) return [];
+
+    // const candidates = rssResult.data
+    //   .map((item) => {
+    //     const parsed = anitomy.parseSync(item.title);
+    //     const score = verifyQuery(
+    //       animeTitle,
+    //       parsed,
+    //       searchUrl === altNyaaUrl
+    //         ? Resolution.NONE
+    //         : (resolution as Resolution),
+    //       SearchMode.BATCH,
+    //       item.pubDate,
+    //       airDates,
+    //       startingEpisode,
+    //       endEpisode,
+    //     );
+    //     return {
+    //       ...item,
+    //       score,
+    //       parsedTitle: parsed.anime_title,
+    //     };
+    //   })
+    //   .filter((item) => item.score > 0)
+    //   .sort((a, b) => {
+    //     if (b.score !== a.score) return b.score - a.score;
+    //     return (
+    //       (parseInt(b["nyaa:seeders"], 10) || 0) -
+    //       (parseInt(a["nyaa:seeders"], 10) || 0)
+    //     );
+    //   });
+
+    return rssResult.data.map((item) => ({
+      ...item,
+      score: 0,
+      parsedTitle: undefined,
+    }));
+  }
+
   private setParams(url: string, query: string): URL {
     const rssLink = new URL(url);
 
@@ -231,14 +329,14 @@ class Nyaa {
 
     return rssLink;
   }
-  private async getResponse(rssLink: URL) {
+  private async getResponse(rssLink: URL, enableProxy: boolean) {
     return await axios.get(
       rssLink.href,
-      useProxy
+      enableProxy
         ? {
             proxy: proxy,
           }
-        : {}
+        : {},
     );
   }
 
@@ -250,12 +348,13 @@ class Nyaa {
    */
   private async fetchRSSFeed(
     searchQuery: string,
-    url: string
+    url: string,
+    enableProxy: boolean,
   ): Promise<NyaaRSSResult> {
     const rssLink = this.setParams(url, searchQuery);
 
     try {
-      const response = await this.getResponse(rssLink);
+      const response = await this.getResponse(rssLink, enableProxy);
 
       if (response.status !== 200) {
         return {
@@ -278,7 +377,7 @@ class Nyaa {
 
       items.sort(
         (a: { [x: string]: string }, b: { [x: string]: string }) =>
-          parseInt(b["nyaa:seeders"]) - parseInt(a["nyaa:seeders"])
+          parseInt(b["nyaa:seeders"]) - parseInt(a["nyaa:seeders"]),
       );
 
       return {
@@ -289,7 +388,7 @@ class Nyaa {
     } catch (error) {
       console.error(
         "An error occurred while trying to retrieve the RSS feed from Nyaa:",
-        error
+        error,
       );
       return {
         status: 500,
@@ -335,7 +434,7 @@ class Nyaa {
         searchMode,
         nyaaPubDate,
         airDates,
-        ...episodes
+        ...episodes,
       );
 
       // If a new best rating is found, replace the best rating

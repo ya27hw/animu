@@ -257,13 +257,6 @@ class WebUI {
       typeof anime.media?.alternativeTitle === "string"
         ? anime.media.alternativeTitle
         : undefined;
-    const maxAiredEpisode = this.getMaxAiredEpisode(anime);
-    if (episode > maxAiredEpisode) {
-      throw new Error(
-        `Episode ${episode} has not aired yet (max aired: ${maxAiredEpisode})`
-      );
-    }
-
     const candidates = await Nyaa.searchEpisodeCandidates(
       {
         mediaId: anime.mediaId,
@@ -278,7 +271,44 @@ class WebUI {
     return {
       mediaId,
       episode,
-      maxAiredEpisode,
+      title: this.getAnimeCardTitle(anime),
+      count: candidates.length,
+      results: candidates.slice(0, 25).map((item) => ({
+        title: item.title,
+        link: item.link,
+        seeders: item["nyaa:seeders"],
+        size: item["nyaa:size"],
+        pubDate: item.pubDate,
+        score: Number(item.score.toFixed(3)),
+      })),
+    };
+  }
+
+  private async searchNyaaCandidatesByTitle(mediaId: number) {
+    const anime = await this.getAnimeByMediaId(mediaId);
+    if (!anime) {
+      throw new Error(`Anime ${mediaId} not found in watching list`);
+    }
+
+    const startingEpisode =
+      typeof anime.media?.startingEpisode === "number" ? anime.media.startingEpisode : 0;
+    const altTitle =
+      typeof anime.media?.alternativeTitle === "string"
+        ? anime.media.alternativeTitle
+        : undefined;
+    const candidates = await Nyaa.searchTitleCandidates(
+      {
+        mediaId: anime.mediaId,
+        progress: anime.progress,
+        media: anime.media,
+      } as any,
+      startingEpisode,
+      altTitle
+    );
+
+    return {
+      mediaId,
+      episode: null,
       title: this.getAnimeCardTitle(anime),
       count: candidates.length,
       results: candidates.slice(0, 25).map((item) => ({
@@ -302,25 +332,26 @@ class WebUI {
     if (!anime) throw new Error(`Anime ${mediaId} not found in watching list`);
 
     const link = typeof payload.link === "string" ? payload.link.trim() : "";
-    const episode = Number(payload.episode);
     if (!link) throw new Error("Missing torrent link");
-    if (!Number.isFinite(episode) || episode < 1) throw new Error("Invalid episode");
 
-    const maxAiredEpisode = this.getMaxAiredEpisode(anime);
-    if (episode > maxAiredEpisode) {
-      throw new Error(
-        `Episode ${episode} has not aired yet (max aired: ${maxAiredEpisode})`
-      );
+    const episode =
+      typeof payload.episode === "number" ? payload.episode : undefined;
+    if (episode !== undefined && (!Number.isFinite(episode) || episode < 1)) {
+      throw new Error("Invalid episode");
     }
 
     const saveTitle = this.getAnimeCardTitle(anime);
-    const ok = await qbit.addCheckTorrent(link, saveTitle, Math.trunc(episode));
+    const ok = await qbit.addCheckTorrent(
+      link,
+      saveTitle,
+      episode === undefined ? undefined : Math.trunc(episode)
+    );
     if (!ok) throw new Error("qBittorrent rejected the torrent request");
 
     return {
       ok: true,
       mediaId,
-      episode: Math.trunc(episode),
+      episode: episode === undefined ? null : Math.trunc(episode),
       title: saveTitle,
     };
   }
@@ -551,15 +582,15 @@ class WebUI {
       const nyaaMatch = url.pathname.match(/^\/api\/anime\/(\d+)\/nyaa-search$/);
       if (nyaaMatch && req.method === "POST") {
         const body = (await this.readJsonBody(req)) as NyaaSearchPayload;
-        const episode = Number(body.episode);
-        if (!Number.isFinite(episode) || episode < 1) {
+        const mediaId = Number(nyaaMatch[1]);
+        const episode = typeof body.episode === "number" ? body.episode : undefined;
+        if (episode !== undefined && (!Number.isFinite(episode) || episode < 1)) {
           this.sendJson(res, 400, { error: "Invalid episode" });
           return;
         }
-        const response = await this.searchNyaaCandidates(
-          Number(nyaaMatch[1]),
-          Math.trunc(episode)
-        );
+        const response = episode !== undefined
+          ? await this.searchNyaaCandidates(mediaId, Math.trunc(episode))
+          : await this.searchNyaaCandidatesByTitle(mediaId);
         this.sendJson(res, 200, response);
         return;
       }
@@ -1258,7 +1289,7 @@ class WebUI {
       <button id="closeNyaaBtnTop" class="icon-close" type="button" aria-label="Close Nyaa search">❌</button>
       <div>
         <h2 id="nyaaModalTitle">Nyaa Episode Search</h2>
-        <p id="nyaaModalSubtitle">Pick an episode and view ranked candidates.</p>
+        <p id="nyaaModalSubtitle">Pick an episode or search by title only.</p>
       </div>
       <div class="nyaa-controls">
         <div class="nyaa-controls-left">
@@ -1492,10 +1523,7 @@ class WebUI {
     function buildEpisodeOptions(item) {
       const total = Number.isFinite(item.media?.episodes) ? item.media.episodes : Math.max(12, (item.progress || 0) + 6);
       const offset = Number.isFinite(item.media?.startingEpisode) ? item.media.startingEpisode : 0;
-      const maxAired = item.media?.nextAiringEpisode?.episode
-        ? Math.max(0, (item.media.nextAiringEpisode.episode - 1) + offset)
-        : Math.max(0, total + offset);
-      const maxEpisode = Math.max(0, maxAired);
+      const maxEpisode = Math.max(0, total + offset);
       const startAt = Math.max(1, Math.min(Math.max(1, maxEpisode), (item.progress || 0) + 1 + offset));
       const options = [];
       for (let ep = 1; ep <= maxEpisode; ep++) {
@@ -1510,26 +1538,19 @@ class WebUI {
       state.nyaa.selectedAnime = item;
       state.nyaa.selectedEpisode = null;
       els.nyaaModalTitle.textContent = "Nyaa Search • " + getDisplayTitle(item);
-      els.nyaaModalSubtitle.textContent = "Media ID " + item.mediaId + " • Select an episode to query ranked results";
+      els.nyaaModalSubtitle.textContent = "Media ID " + item.mediaId + " • Select an episode or use title-only search";
       const options = buildEpisodeOptions(item);
-      if (!options.length) {
-        els.nyaaEpisodeSelect.innerHTML = '<option value="">No aired episodes</option>';
-        els.nyaaEpisodeSelect.disabled = true;
-        els.runNyaaSearchBtn.disabled = true;
-        state.nyaa.selectedEpisode = null;
-        els.nyaaStatus.textContent = "⏳ No aired episodes available to request yet.";
-      } else {
-        els.nyaaEpisodeSelect.disabled = false;
-        els.runNyaaSearchBtn.disabled = false;
-        els.nyaaEpisodeSelect.innerHTML = options.map((opt) =>
+      els.nyaaEpisodeSelect.disabled = false;
+      els.runNyaaSearchBtn.disabled = false;
+      els.nyaaEpisodeSelect.innerHTML =
+        '<option value="">Title only</option>' +
+        options.map((opt) =>
           '<option value="' + opt.value + '"' + (opt.selected ? " selected" : "") + '>Episode ' + opt.value + '</option>'
         ).join("");
-        state.nyaa.selectedEpisode = Number(els.nyaaEpisodeSelect.value || options[0]?.value || 1);
-        els.nyaaStatus.textContent = "";
-      }
-      els.nyaaResults.innerHTML = options.length
-        ? '<div class="empty">📦 Select an episode and click Search Nyaa.</div>'
-        : '<div class="empty">⏳ Waiting for the first episode to air.</div>';
+      els.nyaaEpisodeSelect.value = "";
+      els.nyaaStatus.textContent = "";
+      els.nyaaResults.innerHTML =
+        '<div class="empty">📦 Select "Title only" or an episode, then click Search Nyaa.</div>';
       if (typeof els.nyaaDialog.showModal === "function") els.nyaaDialog.showModal();
     }
 
@@ -1541,8 +1562,11 @@ class WebUI {
 
     function renderNyaaResults(data) {
       const results = Array.isArray(data.results) ? data.results : [];
+      const hasEpisode = Number.isFinite(Number(data.episode)) && Number(data.episode) > 0;
       if (!results.length) {
-        els.nyaaResults.innerHTML = '<div class="empty">No ranked candidates found for this episode.</div>';
+        els.nyaaResults.innerHTML = hasEpisode
+          ? '<div class="empty">No ranked candidates found for this episode.</div>'
+          : '<div class="empty">No ranked candidates found for this title.</div>';
         return;
       }
       function scoreStyle(scoreValue) {
@@ -1562,7 +1586,7 @@ class WebUI {
             '<span class="chip">🕒 ' + escapeHtml(new Date(item.pubDate).toLocaleString()) + '</span>' +
           '</div>' +
           '<div class="result-actions">' +
-            '<button class="tiny-btn" type="button" data-action="nyaa-download" data-link="' + encodeURIComponent(item.link || "") + '" data-episode="' + escapeHtml(data.episode) + '">📥 Download</button>' +
+            '<button class="tiny-btn" type="button" data-action="nyaa-download" data-link="' + encodeURIComponent(item.link || "") + '" data-episode="' + escapeHtml(data.episode ?? "") + '">📥 Download</button>' +
           '</div>' +
         '</div>'
       ).join("");
@@ -1571,18 +1595,21 @@ class WebUI {
     async function runNyaaDownload(link, episode) {
       const selectedAnime = state.nyaa.selectedAnime;
       if (!selectedAnime) return;
-      const ep = Number(episode);
-      if (!link || !Number.isFinite(ep)) return;
+      const hasEpisode = episode !== undefined && episode !== null && episode !== "";
+      const ep = hasEpisode ? Number(episode) : null;
+      if (!link || (hasEpisode && !Number.isFinite(ep))) return;
       els.nyaaStatus.textContent = "📥 Sending request to qBittorrent...";
       try {
         const res = await fetch("/api/anime/" + selectedAnime.mediaId + "/nyaa-download", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ link, episode: ep }),
+          body: JSON.stringify(hasEpisode ? { link, episode: ep } : { link }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Download request failed");
-        els.nyaaStatus.textContent = "✅ Requested episode " + ep + " download";
+        els.nyaaStatus.textContent = hasEpisode
+          ? "✅ Requested episode " + ep + " download"
+          : "✅ Requested title-only torrent download";
       } catch (err) {
         els.nyaaStatus.textContent = err.message || "Download request failed";
       }
@@ -1591,16 +1618,18 @@ class WebUI {
     async function runNyaaSearch() {
       const selectedAnime = state.nyaa.selectedAnime;
       if (!selectedAnime) return;
-      const episode = Number(els.nyaaEpisodeSelect.value || 0);
-      if (!Number.isFinite(episode) || episode < 1) return;
-      state.nyaa.selectedEpisode = episode;
+      const selectedValue = els.nyaaEpisodeSelect.value;
+      const hasEpisode = selectedValue !== "";
+      const episode = hasEpisode ? Number(selectedValue) : null;
+      if (hasEpisode && (!Number.isFinite(episode) || episode < 1)) return;
+      state.nyaa.selectedEpisode = hasEpisode ? episode : null;
       els.runNyaaSearchBtn.disabled = true;
         els.nyaaStatus.textContent = "🔎 Searching Nyaa and ranking results...";
       try {
         const res = await fetch("/api/anime/" + selectedAnime.mediaId + "/nyaa-search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ episode }),
+          body: JSON.stringify(hasEpisode ? { episode } : {}),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Nyaa search failed");
@@ -1808,7 +1837,7 @@ class WebUI {
     });
     els.runNyaaSearchBtn.addEventListener("click", runNyaaSearch);
     els.nyaaEpisodeSelect.addEventListener("change", (e) => {
-      state.nyaa.selectedEpisode = Number(e.target.value || 0);
+      state.nyaa.selectedEpisode = e.target.value ? Number(e.target.value) : null;
     });
     els.closeNyaaBtnTop.addEventListener("click", closeNyaaSearch);
     els.nyaaShell.addEventListener("click", (e) => e.stopPropagation());
