@@ -3,7 +3,7 @@ import axios from "axios";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { qbit_url, password, username, rootDir } from "profile.json";
+import { qbit_url, password, username, rootDir, altRootDir } from "profile.json";
 import { proxy } from "@utils/models";
 
 class QbitTorrent {
@@ -114,7 +114,8 @@ class QbitTorrent {
 
     try {
       const rename = episode ? `${title} - ${episode}` : title;
-      const savePath = path.posix.join(rootDir, title);
+      const baseRootDir = useProxyDownload ? altRootDir : rootDir;
+      const savePath = path.posix.join(baseRootDir, title);
       const headers = {
         Cookie: `SID=${this.sid?.SID}`,
       };
