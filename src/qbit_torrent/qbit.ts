@@ -1,10 +1,18 @@
 import { qbitSID } from "@utils/interfaces";
 import axios from "axios";
-import path from "path/posix";
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
 import { qbit_url, password, username, rootDir } from "profile.json";
+import { proxy } from "@utils/models";
 
 class QbitTorrent {
   private sid?: qbitSID;
+  private readonly tempDir: string;
+
+  constructor() {
+    this.tempDir = path.join(os.tmpdir(), "animu-torrents");
+  }
 
   // Function to authenticate and get the SID (Session ID)
   private async authenticate() {
@@ -49,13 +57,19 @@ class QbitTorrent {
   public async addCheckTorrent(
     link: string,
     title: string,
-    episode?: number
+    episode?: number,
+    useProxyDownload: boolean = false,
   ): Promise<boolean> {
     const displayTitle = episode ? `${title} - ${episode}` : title;
 
     // 5 attempts to add the torrent
     for (let attempt = 1; attempt <= 5; attempt++) {
-      const added = await this.addTorrent(link, title, episode);
+      const added = await this.addTorrent(
+        link,
+        title,
+        episode,
+        useProxyDownload,
+      );
 
       if (!added) {
         console.error(
@@ -86,7 +100,8 @@ class QbitTorrent {
   private async addTorrent(
     link: string,
     title: string,
-    episode?: number
+    episode?: number,
+    useProxyDownload: boolean = false,
   ): Promise<boolean> {
     const authLink = new URL(qbit_url);
     authLink.pathname = "/api/v2/torrents/add";
@@ -98,20 +113,28 @@ class QbitTorrent {
     }
 
     try {
-      const response = await axios.post(
-        authLink.toString(),
-        `urls=${encodeURIComponent(link)}&savepath=${encodeURIComponent(
-          path.join(rootDir, title)
-        )}&rename=${encodeURIComponent(
-          episode ? `${title} - ${episode}` : title
-        )}&sequentialDownload=true&category=${encodeURIComponent("animu")}`,
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Cookie: `SID=${this.sid?.SID}`,
-          },
-        }
-      );
+      const rename = episode ? `${title} - ${episode}` : title;
+      const savePath = path.posix.join(rootDir, title);
+      const headers = {
+        Cookie: `SID=${this.sid?.SID}`,
+      };
+
+      const response = useProxyDownload
+        ? await this.addTorrentFile(authLink.toString(), link, savePath, rename, headers)
+        : await axios.post(
+            authLink.toString(),
+            `urls=${encodeURIComponent(link)}&savepath=${encodeURIComponent(
+              savePath
+            )}&rename=${encodeURIComponent(
+              rename
+            )}&sequentialDownload=true&category=${encodeURIComponent("animu")}`,
+            {
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                ...headers,
+              },
+            }
+          );
 
       if (response.status === 200 && response.data === "Ok.") {
         return true;
@@ -124,6 +147,74 @@ class QbitTorrent {
 
       return false;
     }
+  }
+
+  private async addTorrentFile(
+    authUrl: string,
+    link: string,
+    savePath: string,
+    rename: string,
+    headers: Record<string, string>,
+  ) {
+    const torrentFilePath = await this.downloadTorrentFile(link, rename);
+    const torrentBuffer = await fs.readFile(torrentFilePath);
+    const boundary = `----AnimuBoundary${Date.now().toString(16)}`;
+
+    const fieldPart = (name: string, value: string) =>
+      Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${name}"\r\n\r\n` +
+        `${value}\r\n`,
+      );
+
+    const fileHeader = Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="torrents"; filename="${rename}.torrent"\r\n` +
+      `Content-Type: application/x-bittorrent\r\n\r\n`,
+    );
+
+    const closingBoundary = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([
+      fileHeader,
+      torrentBuffer,
+      Buffer.from("\r\n"),
+      fieldPart("savepath", savePath),
+      fieldPart("rename", rename),
+      fieldPart("sequentialDownload", "true"),
+      fieldPart("category", "animu"),
+      closingBoundary,
+    ]);
+
+    try {
+      return await axios.post(authUrl, body, {
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": body.length.toString(),
+          ...headers,
+        },
+      });
+    } finally {
+      await fs.unlink(torrentFilePath).catch(() => undefined);
+    }
+  }
+
+  private async downloadTorrentFile(link: string, rename: string): Promise<string> {
+    await fs.mkdir(this.tempDir, { recursive: true });
+
+    const safeName = rename.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_");
+    const torrentFilePath = path.join(
+      this.tempDir,
+      `${safeName}-${Date.now()}.torrent`,
+    );
+
+    const torrentResponse = await axios.get<ArrayBuffer>(link, {
+      responseType: "arraybuffer",
+      proxy,
+    });
+
+    await fs.writeFile(torrentFilePath, Buffer.from(torrentResponse.data));
+
+    return torrentFilePath;
   }
   // Delete torrent based on what the torrent is named
   public async deleteTorrent(name: string): Promise<boolean> {

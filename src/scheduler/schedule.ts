@@ -14,9 +14,8 @@ import {
   sendAnimeDownloadedHook,
 } from "@scheduler/utils";
 import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB } from "@utils/index";
-import { interval, setCompletedToRewatching } from "profile.json";
+import { interval, setCompletedToRewatching, triggerGenre } from "profile.json";
 import { arrayUnion, DocumentData } from "firebase/firestore";
-import { on } from "events";
 
 class Scheduler {
   private offlineAnimeDB: OfflineDB;
@@ -105,6 +104,7 @@ class Scheduler {
         nyaaTorrent.link,
         anime.media.title.romaji,
         nyaaTorrent.episode,
+        anime.media.genres?.includes(triggerGenre),
       );
       if (!isAdded) {
         this.offlineAnimeDB[anime.mediaId].setTimeout();

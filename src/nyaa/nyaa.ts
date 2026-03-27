@@ -37,8 +37,12 @@ class Nyaa {
     this.enableProxy = useProxy;
   }
 
+  public shouldUseProxyDownload(anime: AniQuery): boolean {
+    return anime.media.genres?.includes(triggerGenre) ?? false;
+  }
+
   private getSearchContext(anime: AniQuery) {
-    if (anime.media.genres?.includes(triggerGenre)) {
+    if (this.shouldUseProxyDownload(anime)) {
       return {
         searchUrl: altNyaaUrl,
         enableProxy: true,
@@ -78,6 +82,7 @@ class Nyaa {
     altAnimeTitle?: string,
   ): Promise<NyaaTorrent[] | null> {
     const { searchUrl, enableProxy } = this.getSearchContext(anime);
+    const ignoreAirdateChecks = this.shouldUseProxyDownload(anime);
     const episodeList = getNumbers(
       startEpisode,
       endEpisode,
@@ -91,11 +96,13 @@ class Nyaa {
         .green,
     );
 
-    const airDates = await getEpisodeAirDates(
-      anime.mediaId,
-      episodeList,
-      startingEpisode,
-    );
+    const airDates = ignoreAirdateChecks
+      ? ({ nodes: [] } as AiringSchedule)
+      : await getEpisodeAirDates(
+          anime.mediaId,
+          episodeList,
+          startingEpisode,
+        );
     if (!airDates) return null;
 
     let searchMode =
@@ -119,6 +126,7 @@ class Nyaa {
           searchMode,
           searchUrl === altNyaaUrl,
           airDates,
+          ignoreAirdateChecks,
           startEpisode,
           endEpisode,
         );
@@ -149,6 +157,7 @@ class Nyaa {
           searchMode,
           searchUrl === altNyaaUrl,
           airDates,
+          ignoreAirdateChecks,
           episode,
         );
         if (bestTorrent) {
@@ -183,13 +192,16 @@ class Nyaa {
     >
   > {
     const { searchUrl, enableProxy } = this.getSearchContext(anime);
+    const ignoreAirdateChecks = this.shouldUseProxyDownload(anime);
     const animeTitle = altAnimeTitle ? altAnimeTitle : anime.media.title.romaji;
 
-    const airDates = await getEpisodeAirDates(
-      anime.mediaId,
-      [episode],
-      startingEpisode,
-    );
+    const airDates = ignoreAirdateChecks
+      ? ({ nodes: [] } as AiringSchedule)
+      : await getEpisodeAirDates(
+          anime.mediaId,
+          [episode],
+          startingEpisode,
+        );
     if (!airDates) return [];
 
     const formattedEpisode = episode.toString().padStart(2, "0");
@@ -198,10 +210,6 @@ class Nyaa {
       searchUrl,
       enableProxy,
     );
-
-    console.log(
-      rssResult.data
-    )
 
     if (rssResult.status !== 200 || !rssResult.data?.length) return [];
 
@@ -217,6 +225,7 @@ class Nyaa {
           SearchMode.EPISODE,
           item.pubDate,
           airDates,
+          ignoreAirdateChecks,
           episode,
         );
         return {
@@ -415,6 +424,7 @@ class Nyaa {
     searchMode: SearchMode,
     useAltUrl: boolean,
     airDates: AiringSchedule,
+    ignoreAirdateChecks: boolean,
     ...episodes: number[]
   ): Promise<NyaaTorrent | null> {
     let bestRating = -1;
@@ -434,6 +444,7 @@ class Nyaa {
         searchMode,
         nyaaPubDate,
         airDates,
+        ignoreAirdateChecks,
         ...episodes,
       );
 

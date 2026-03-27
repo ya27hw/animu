@@ -115,6 +115,7 @@ function verifyQuery(
   searchMode: SearchMode,
   nyaaPubDate: string,
   airDates: AiringSchedule,
+  ignoreAirdateChecks: boolean = false,
   ...episodes: number[]
 ): number {
   const group = (animeParsedData.release_group ?? "").trim().toLowerCase();
@@ -175,9 +176,11 @@ function verifyQuery(
         (x) => x.episode === wantedEpisode
       );
 
-      if (pageNumber === -1) return 0;
+      if (pageNumber === -1 && !ignoreAirdateChecks) return 0;
 
-      let airDateMatch = airDates.nodes[pageNumber].airingAt < pubEpoch; // Check if the episode date is similar
+      const airDateMatch =
+        ignoreAirdateChecks ||
+        (pageNumber !== -1 && airDates.nodes[pageNumber].airingAt < pubEpoch);
 
       return (
         +episodeMatch +
@@ -200,8 +203,9 @@ function verifyQuery(
       // const isEpisode = animeParsedData.episode_number;
 
       const airDateMatchBatch =
-        airDates.nodes.length > 0 &&
-        airDates.nodes[airDates.nodes.length - 1].airingAt < pubEpoch; // Check if the episode date is similar
+        ignoreAirdateChecks ||
+        (airDates.nodes.length > 0 &&
+          airDates.nodes[airDates.nodes.length - 1].airingAt < pubEpoch); // Check if the episode date is similar
 
       const episodeRange = fileName.match(/\d+\s*[-~]\s*\d+/); // Check if the file name contains a range of episodes
       if (episodeRange)

@@ -344,7 +344,12 @@ class WebUI {
     const ok = await qbit.addCheckTorrent(
       link,
       saveTitle,
-      episode === undefined ? undefined : Math.trunc(episode)
+      episode === undefined ? undefined : Math.trunc(episode),
+      Nyaa.shouldUseProxyDownload({
+        mediaId: anime.mediaId,
+        progress: anime.progress,
+        media: anime.media,
+      } as any),
     );
     if (!ok) throw new Error("qBittorrent rejected the torrent request");
 
