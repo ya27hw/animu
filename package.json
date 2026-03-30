@@ -1,6 +1,6 @@
 {
   "name": "animu",
-  "version": "4.1.3",
+  "version": "4.1.4",
   "description": "DOWNLOAD ANIMU",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
