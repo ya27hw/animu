@@ -8,7 +8,7 @@ import DB from "@db/db";
 import schedule from "@scheduler/schedule";
 import Nyaa from "@nyaa/nyaa";
 import qbit from "@qbit/qbit";
-import { aniUserName } from "profile.json";
+import { aniUserName, triggerGenre } from "profile.json";
 
 type AnimeApiItem = {
   mediaId: number;
@@ -361,6 +361,13 @@ class WebUI {
     };
   }
 
+  private async setAnimeToRewatching(mediaId: number): Promise<void> {
+    const ok = await anilist.setAnimeToRewatching(mediaId);
+    if (!ok) {
+      throw new Error("AniList rejected the rewatching update");
+    }
+  }
+
   /**
    * Returns the application log files exposed in the Web UI.
    * Paths are relative to the repo root `logs/` directory.
@@ -613,6 +620,13 @@ class WebUI {
         return;
       }
 
+      const rewatchingMatch = url.pathname.match(/^\/api\/anime\/(\d+)\/rewatching$/);
+      if (rewatchingMatch && req.method === "POST") {
+        await this.setAnimeToRewatching(Number(rewatchingMatch[1]));
+        this.sendJson(res, 200, { ok: true });
+        return;
+      }
+
       const animeMatch = url.pathname.match(/^\/api\/anime\/(\d+)$/);
       if (animeMatch && req.method === "PATCH") {
         const body = (await this.readJsonBody(req)) as AnimePatchPayload;
@@ -807,6 +821,11 @@ class WebUI {
       object-fit:cover;
       background:#0b1321;
       border:1px solid rgba(255,255,255,.06);
+    }
+    .cover-censored{
+      filter:blur(28px) saturate(.7);
+      transform:scale(1.08);
+      transform-origin:center;
     }
     .title{
       margin:0;
@@ -1242,6 +1261,7 @@ class WebUI {
       <div class="modal-actions">
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button type="button" id="resetDownloadedBtn" class="danger">Reset Downloaded Episodes</button>
+          <button type="button" id="setRewatchingBtn">Move to Rewatching</button>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button type="button" id="cancelBtn">Cancel</button>
@@ -1346,6 +1366,7 @@ class WebUI {
       altTitleInput: document.getElementById("altTitleInput"),
       startingEpisodeInput: document.getElementById("startingEpisodeInput"),
       resetDownloadedBtn: document.getElementById("resetDownloadedBtn"),
+      setRewatchingBtn: document.getElementById("setRewatchingBtn"),
       cancelBtn: document.getElementById("cancelBtn"),
       saveBtn: document.getElementById("saveBtn"),
       detailDialog: document.getElementById("detailDialog"),
@@ -1448,9 +1469,10 @@ class WebUI {
       els.app.innerHTML = filtered.map((item) => {
         const media = item.media || {};
         const title = getDisplayTitle(item);
+        const isTriggered = Array.isArray(media.genres) && media.genres.includes(${JSON.stringify(triggerGenre)});
         return '<article class="card">' +
           '<button class="poster-trigger" data-action="open-detail" data-id="' + item.mediaId + '" aria-label="Open details for ' + escapeHtml(title) + '">' +
-            '<img class="cover" loading="lazy" alt="' + escapeHtml(title) + ' cover" src="' + escapeHtml(media.coverImage?.extraLarge || media.coverImage?.large || media.coverImage?.medium || "") + '">' +
+            '<img class="cover' + (isTriggered ? ' cover-censored' : '') + '" loading="lazy" alt="' + escapeHtml(title) + ' cover" src="' + escapeHtml(media.coverImage?.extraLarge || media.coverImage?.large || media.coverImage?.medium || "") + '">' +
             '<div>' +
               '<h3 class="title">' + escapeHtml(title) + '</h3>' +
             '</div>' +
@@ -1778,6 +1800,27 @@ class WebUI {
       }
     }
 
+    async function moveAnimeToRewatching() {
+      if (!state.selected) return;
+      const ok = confirm("Move media ID " + state.selected.mediaId + " to REWATCHING on AniList?");
+      if (!ok) return;
+      els.setRewatchingBtn.disabled = true;
+      els.modalStatus.textContent = "Updating AniList status...";
+      try {
+        const res = await fetch("/api/anime/" + state.selected.mediaId + "/rewatching", {
+          method: "POST",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to update AniList status");
+        els.modalStatus.textContent = "Moved to rewatching";
+        await fetchAnime();
+      } catch (err) {
+        els.modalStatus.textContent = err.message || "Failed to update AniList status";
+      } finally {
+        els.setRewatchingBtn.disabled = false;
+      }
+    }
+
     els.refreshBtn.addEventListener("click", fetchAnime);
     els.searchInput.addEventListener("input", (e) => {
       state.query = e.target.value || "";
@@ -1804,6 +1847,7 @@ class WebUI {
     });
     els.cancelBtn.addEventListener("click", closeSettings);
     els.resetDownloadedBtn.addEventListener("click", resetDownloadedEpisodes);
+    els.setRewatchingBtn.addEventListener("click", moveAnimeToRewatching);
     els.closeDetailBtnTop.addEventListener("click", closeDetailModal);
     els.detailShell.addEventListener("click", (e) => e.stopPropagation());
     els.detailContent.addEventListener("click", (e) => {
