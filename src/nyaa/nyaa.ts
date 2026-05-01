@@ -324,6 +324,24 @@ class Nyaa {
     }));
   }
 
+  public async searchRawTitleCandidates(
+    animeTitle: string,
+    useAltUrl: boolean,
+  ): Promise<NyaaTorrent[]> {
+    const query = animeTitle.trim();
+    if (!query) return [];
+
+    const searchUrl = useAltUrl ? altNyaaUrl : nyaaUrl;
+    const rssResult = await this.fetchRSSFeed(
+      query,
+      searchUrl,
+      useAltUrl ? true : this.enableProxy,
+    );
+
+    if (rssResult.status !== 200 || !rssResult.data?.length) return [];
+    return rssResult.data;
+  }
+
   private setParams(url: string, query: string): URL {
     const rssLink = new URL(url);
 

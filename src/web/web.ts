@@ -37,9 +37,16 @@ type NyaaSearchPayload = {
   episode?: number;
 };
 
+type NyaaTitleSearchPayload = {
+  query?: string;
+  useAltUrl?: boolean;
+};
+
 type NyaaDownloadPayload = {
   link?: string;
   episode?: number;
+  title?: string;
+  useAltUrl?: boolean;
 };
 
 class WebUI {
@@ -150,7 +157,9 @@ class WebUI {
           alternativeTitle:
             entry && entry.media ? entry.media.alternativeTitle : undefined,
           startingEpisode:
-            entry && entry.media && typeof entry.media.startingEpisode === "number"
+            entry &&
+            entry.media &&
+            typeof entry.media.startingEpisode === "number"
               ? entry.media.startingEpisode
               : 0,
         };
@@ -161,7 +170,7 @@ class WebUI {
           downloadedEpisodes: (entry && entry.downloadedEpisodes) || [],
           media,
         } as AnimeApiItem;
-      })
+      }),
     );
 
     return merged.sort((a, b) => {
@@ -185,7 +194,7 @@ class WebUI {
    */
   private async updateAnimeSettings(
     mediaId: string,
-    payload: AnimePatchPayload
+    payload: AnimePatchPayload,
   ): Promise<void> {
     await this.ensureDbReady();
 
@@ -196,7 +205,9 @@ class WebUI {
     }
 
     if (typeof payload.startingEpisode === "number") {
-      updateData["media.startingEpisode"] = Number.isFinite(payload.startingEpisode)
+      updateData["media.startingEpisode"] = Number.isFinite(
+        payload.startingEpisode,
+      )
         ? Math.max(0, Math.trunc(payload.startingEpisode))
         : 0;
     }
@@ -215,8 +226,12 @@ class WebUI {
    * Fetches and merges a single anime entry by AniList media ID.
    * @param mediaId AniList media ID.
    */
-  private async getAnimeByMediaId(mediaId: number): Promise<AnimeApiItem | null> {
-    const anime = (await this.getAnimeList()).find((x) => x.mediaId === mediaId);
+  private async getAnimeByMediaId(
+    mediaId: number,
+  ): Promise<AnimeApiItem | null> {
+    const anime = (await this.getAnimeList()).find(
+      (x) => x.mediaId === mediaId,
+    );
     return anime || null;
   }
 
@@ -227,7 +242,9 @@ class WebUI {
    */
   private getMaxAiredEpisode(anime: AnimeApiItem): number {
     const offset =
-      typeof anime.media?.startingEpisode === "number" ? anime.media.startingEpisode : 0;
+      typeof anime.media?.startingEpisode === "number"
+        ? anime.media.startingEpisode
+        : 0;
 
     if (anime.media?.nextAiringEpisode?.episode) {
       return Math.max(0, anime.media.nextAiringEpisode.episode - 1 + offset);
@@ -252,7 +269,9 @@ class WebUI {
     }
 
     const startingEpisode =
-      typeof anime.media?.startingEpisode === "number" ? anime.media.startingEpisode : 0;
+      typeof anime.media?.startingEpisode === "number"
+        ? anime.media.startingEpisode
+        : 0;
     const altTitle =
       typeof anime.media?.alternativeTitle === "string"
         ? anime.media.alternativeTitle
@@ -265,7 +284,7 @@ class WebUI {
       } as any,
       episode,
       startingEpisode,
-      altTitle
+      altTitle,
     );
 
     return {
@@ -291,7 +310,9 @@ class WebUI {
     }
 
     const startingEpisode =
-      typeof anime.media?.startingEpisode === "number" ? anime.media.startingEpisode : 0;
+      typeof anime.media?.startingEpisode === "number"
+        ? anime.media.startingEpisode
+        : 0;
     const altTitle =
       typeof anime.media?.alternativeTitle === "string"
         ? anime.media.alternativeTitle
@@ -303,7 +324,7 @@ class WebUI {
         media: anime.media,
       } as any,
       startingEpisode,
-      altTitle
+      altTitle,
     );
 
     return {
@@ -322,12 +343,42 @@ class WebUI {
     };
   }
 
+  private async searchNyaaByTitle(payload: NyaaTitleSearchPayload) {
+    const query = typeof payload.query === "string" ? payload.query.trim() : "";
+    if (!query) {
+      throw new Error("Anime name is required");
+    }
+
+    const candidates = await Nyaa.searchRawTitleCandidates(
+      query,
+      Boolean(payload.useAltUrl),
+    );
+
+    return {
+      title: query,
+      episode: null,
+      useAltUrl: Boolean(payload.useAltUrl),
+      count: candidates.length,
+      results: candidates.slice(0, 25).map((item) => ({
+        title: item.title,
+        link: item.link,
+        seeders: item["nyaa:seeders"],
+        size: item["nyaa:size"],
+        pubDate: item.pubDate,
+        score: null,
+      })),
+    };
+  }
+
   /**
    * Sends a selected Nyaa torrent to qBittorrent as a manual request/download.
    * @param mediaId AniList media ID.
    * @param payload Nyaa result link and episode number.
    */
-  private async downloadNyaaCandidate(mediaId: number, payload: NyaaDownloadPayload) {
+  private async downloadNyaaCandidate(
+    mediaId: number,
+    payload: NyaaDownloadPayload,
+  ) {
     const anime = await this.getAnimeByMediaId(mediaId);
     if (!anime) throw new Error(`Anime ${mediaId} not found in watching list`);
 
@@ -361,6 +412,28 @@ class WebUI {
     };
   }
 
+  private async downloadNyaaTitleCandidate(payload: NyaaDownloadPayload) {
+    const link = typeof payload.link === "string" ? payload.link.trim() : "";
+    if (!link) throw new Error("Missing torrent link");
+
+    const title = typeof payload.title === "string" ? payload.title.trim() : "";
+    if (!title) throw new Error("Anime name is required");
+
+    const ok = await qbit.addCheckTorrent(
+      link,
+      title,
+      undefined,
+      Boolean(payload.useAltUrl),
+    );
+    if (!ok) throw new Error("qBittorrent rejected the torrent request");
+
+    return {
+      ok: true,
+      title,
+      episode: null,
+    };
+  }
+
   private async setAnimeToRewatching(mediaId: number): Promise<void> {
     const ok = await anilist.setAnimeToRewatching(mediaId);
     if (!ok) {
@@ -376,9 +449,15 @@ class WebUI {
     const rootDir = path.resolve(__dirname, "..", "..");
     const logsDir = path.join(rootDir, "logs");
     return {
-      combined: { label: "Combined", filePath: path.join(logsDir, "animu.log") },
+      combined: {
+        label: "Combined",
+        filePath: path.join(logsDir, "animu.log"),
+      },
       out: { label: "Stdout", filePath: path.join(logsDir, "animu-out.log") },
-      error: { label: "Stderr", filePath: path.join(logsDir, "animu-error.log") },
+      error: {
+        label: "Stderr",
+        filePath: path.join(logsDir, "animu-error.log"),
+      },
     };
   }
 
@@ -390,9 +469,19 @@ class WebUI {
     const local = this.getLogFileMap()[key].filePath;
     const pm2LogsDir = path.join(os.homedir(), ".pm2", "logs");
     const namesByKey: Record<LogKey, string[]> = {
-      combined: ["Animu.log", "animu.log", "Animu-combined.log", "animu-combined.log"],
+      combined: [
+        "Animu.log",
+        "animu.log",
+        "Animu-combined.log",
+        "animu-combined.log",
+      ],
       out: ["Animu-out.log", "animu-out.log"],
-      error: ["Animu-error.log", "animu-error.log", "Animu-err.log", "animu-err.log"],
+      error: [
+        "Animu-error.log",
+        "animu-error.log",
+        "Animu-err.log",
+        "animu-err.log",
+      ],
     };
 
     return [
@@ -441,7 +530,7 @@ class WebUI {
         } catch {
           await fs.writeFile(entry.filePath, "", "utf8");
         }
-      })
+      }),
     );
   }
 
@@ -450,7 +539,10 @@ class WebUI {
    * @param filePath Absolute log file path.
    * @param maxLines Number of trailing lines to return.
    */
-  private async readLogTail(filePath: string, maxLines: number): Promise<string> {
+  private async readLogTail(
+    filePath: string,
+    maxLines: number,
+  ): Promise<string> {
     const chunkSize = 64 * 1024;
     try {
       const handle = await fs.open(filePath, "r");
@@ -495,14 +587,21 @@ class WebUI {
   private formatLogContent(content: string): string {
     if (!content) return content;
 
+    const stripAnsi = (value: string) =>
+      value.replace(
+        /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g,
+        "",
+      );
+
     const lines = content.split(/\r?\n/);
     const formatted = lines.map((line) => {
-      const trimmed = line.trim();
+      const cleanLine = stripAnsi(line);
+      const trimmed = cleanLine.trim();
       if (!trimmed) return "";
 
       try {
         const parsed = JSON.parse(trimmed) as Record<string, any>;
-        if (!parsed || typeof parsed !== "object") return line;
+        if (!parsed || typeof parsed !== "object") return cleanLine;
 
         const timestamp =
           parsed.timestamp ||
@@ -522,14 +621,16 @@ class WebUI {
 
         const tsText = timestamp ? String(timestamp) : "";
         const msgText =
-          typeof message === "string" ? message : JSON.stringify(message);
+          typeof message === "string"
+            ? stripAnsi(message)
+            : stripAnsi(JSON.stringify(message));
 
-        if (!tsText && !msgText) return line;
+        if (!tsText && !msgText) return cleanLine;
         if (!tsText) return msgText;
         if (!msgText) return tsText;
         return `${tsText} ${msgText}`;
       } catch {
-        return line;
+        return cleanLine;
       }
     });
 
@@ -591,36 +692,59 @@ class WebUI {
         return;
       }
 
-      const nyaaMatch = url.pathname.match(/^\/api\/anime\/(\d+)\/nyaa-search$/);
+      if (req.method === "POST" && url.pathname === "/api/nyaa-search") {
+        const body = (await this.readJsonBody(req)) as NyaaTitleSearchPayload;
+        const response = await this.searchNyaaByTitle(body);
+        this.sendJson(res, 200, response);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/nyaa-download") {
+        const body = (await this.readJsonBody(req)) as NyaaDownloadPayload;
+        const response = await this.downloadNyaaTitleCandidate(body);
+        this.sendJson(res, 200, response);
+        return;
+      }
+
+      const nyaaMatch = url.pathname.match(
+        /^\/api\/anime\/(\d+)\/nyaa-search$/,
+      );
       if (nyaaMatch && req.method === "POST") {
         const body = (await this.readJsonBody(req)) as NyaaSearchPayload;
         const mediaId = Number(nyaaMatch[1]);
-        const episode = typeof body.episode === "number" ? body.episode : undefined;
-        if (episode !== undefined && (!Number.isFinite(episode) || episode < 1)) {
+        const episode =
+          typeof body.episode === "number" ? body.episode : undefined;
+        if (
+          episode !== undefined &&
+          (!Number.isFinite(episode) || episode < 1)
+        ) {
           this.sendJson(res, 400, { error: "Invalid episode" });
           return;
         }
-        const response = episode !== undefined
-          ? await this.searchNyaaCandidates(mediaId, Math.trunc(episode))
-          : await this.searchNyaaCandidatesByTitle(mediaId);
+        const response =
+          episode !== undefined
+            ? await this.searchNyaaCandidates(mediaId, Math.trunc(episode))
+            : await this.searchNyaaCandidatesByTitle(mediaId);
         this.sendJson(res, 200, response);
         return;
       }
 
       const nyaaDownloadMatch = url.pathname.match(
-        /^\/api\/anime\/(\d+)\/nyaa-download$/
+        /^\/api\/anime\/(\d+)\/nyaa-download$/,
       );
       if (nyaaDownloadMatch && req.method === "POST") {
         const body = (await this.readJsonBody(req)) as NyaaDownloadPayload;
         const response = await this.downloadNyaaCandidate(
           Number(nyaaDownloadMatch[1]),
-          body
+          body,
         );
         this.sendJson(res, 200, response);
         return;
       }
 
-      const rewatchingMatch = url.pathname.match(/^\/api\/anime\/(\d+)\/rewatching$/);
+      const rewatchingMatch = url.pathname.match(
+        /^\/api\/anime\/(\d+)\/rewatching$/,
+      );
       if (rewatchingMatch && req.method === "POST") {
         await this.setAnimeToRewatching(Number(rewatchingMatch[1]));
         this.sendJson(res, 200, { ok: true });
@@ -635,7 +759,11 @@ class WebUI {
         return;
       }
 
-      if (animeMatch && req.method === "POST" && url.pathname.endsWith("/reset")) {
+      if (
+        animeMatch &&
+        req.method === "POST" &&
+        url.pathname.endsWith("/reset")
+      ) {
         await this.updateAnimeSettings(animeMatch[1], {
           resetDownloadedEpisodes: true,
         });
@@ -732,6 +860,7 @@ class WebUI {
       display:flex;
       gap:10px;
       flex-wrap:wrap;
+      align-items:center;
     }
     button,.btn{
       border:1px solid transparent;
@@ -880,7 +1009,7 @@ class WebUI {
     }
     .detail-actions{
       display:grid;
-      grid-template-columns:1fr 1fr;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
       gap:8px;
     }
     .detail-page{
@@ -931,6 +1060,7 @@ class WebUI {
     .detail-info{
       display:grid;
       gap:12px;
+      min-width:0;
     }
     .detail-title{
       margin:0;
@@ -943,6 +1073,36 @@ class WebUI {
       margin:0;
       color:var(--muted);
       font-size:.9rem;
+    }
+    .detail-header{
+      display:grid;
+      gap:8px;
+      padding-bottom:6px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .detail-stat-grid{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:8px;
+    }
+    .detail-stat{
+      min-width:0;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.035);
+      border-radius:12px;
+      padding:10px;
+      display:grid;
+      gap:4px;
+    }
+    .detail-stat span{
+      color:var(--muted);
+      font-size:.72rem;
+    }
+    .detail-stat strong{
+      font-size:.95rem;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
     }
     .action-btn{
       border:1px solid rgba(255,255,255,.09);
@@ -1094,6 +1254,18 @@ class WebUI {
       flex-wrap:wrap;
       align-items:center;
     }
+    .toggle-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      color:var(--muted);
+      font-size:.82rem;
+      user-select:none;
+    }
+    .toggle-row input{
+      width:auto;
+      accent-color:var(--accent);
+    }
     select{
       border:1px solid rgba(255,255,255,.09);
       background:rgba(255,255,255,.03);
@@ -1151,6 +1323,16 @@ class WebUI {
       gap:10px;
       align-items:center;
       flex-wrap:wrap;
+    }
+    .nyaa-title-row{
+      display:grid;
+      grid-template-columns:minmax(220px, 1fr) auto;
+      gap:10px;
+      width:100%;
+      align-items:end;
+    }
+    .nyaa-title-row label{
+      min-width:0;
     }
     .results-list{
       display:grid;
@@ -1218,7 +1400,10 @@ class WebUI {
         width:min(220px, 70vw);
         justify-self:center;
       }
-    }
+      .detail-stat-grid{grid-template-columns:1fr}
+      .detail-actions{grid-template-columns:1fr}
+      .nyaa-title-row{grid-template-columns:1fr}
+      }
   </style>
 </head>
 <body>
@@ -1229,6 +1414,7 @@ class WebUI {
         <p>Watching list from AniList for <strong id="userName">${aniUserName}</strong>. Edit per-title overrides used by your bot/scheduler.</p>
       </div>
       <div class="actions">
+        <button id="openNyaaSearchBtn" type="button">🔎 Nyaa Search</button>
         <button id="refreshBtn" class="btn-primary">🔄 Refresh</button>
       </div>
     </section>
@@ -1260,8 +1446,8 @@ class WebUI {
       <div class="status" id="modalStatus"></div>
       <div class="modal-actions">
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button type="button" id="resetDownloadedBtn" class="danger">Reset Downloaded Episodes</button>
-          <button type="button" id="setRewatchingBtn">Move to Rewatching</button>
+          <button type="button" id="resetDownloadedBtn" class="danger">Reset Downloads</button>
+          <button type="button" id="setRewatchingBtn">Rewatch</button>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button type="button" id="cancelBtn">Cancel</button>
@@ -1299,6 +1485,10 @@ class WebUI {
               <option value="800">800</option>
             </select>
           </label>
+          <label class="toggle-row">
+            <input id="logTimestampToggle" type="checkbox" checked />
+            <span>Timestamps</span>
+          </label>
           <button id="refreshLogsBtn" type="button">🔄 Refresh Logs</button>
         </div>
       </div>
@@ -1318,6 +1508,16 @@ class WebUI {
       </div>
       <div class="nyaa-controls">
         <div class="nyaa-controls-left">
+          <div id="nyaaTitleRow" class="nyaa-title-row">
+            <label>
+              Anime name
+              <input id="nyaaTitleInput" type="search" maxlength="200" placeholder="Enter anime name..." />
+            </label>
+            <label class="toggle-row">
+              <input id="nyaaAltUrlToggle" type="checkbox" />
+              <span>Alternate URL</span>
+            </label>
+          </div>
           <label style="display:flex; align-items:center; gap:8px;">
             <span>Episode</span>
             <select id="nyaaEpisodeSelect"></select>
@@ -1341,10 +1541,14 @@ class WebUI {
         selected: "combined",
         lines: 50,
         available: [],
+        content: "",
+        showTimestamps: true,
       },
       nyaa: {
+        mode: "anime",
         selectedAnime: null,
         selectedEpisode: null,
+        useAltUrl: false,
       },
     };
 
@@ -1356,6 +1560,7 @@ class WebUI {
       toolbar: document.getElementById("toolbar"),
       summaryRow: document.getElementById("summaryRow"),
       summaryText: document.getElementById("summaryText"),
+      openNyaaSearchBtn: document.getElementById("openNyaaSearchBtn"),
       refreshBtn: document.getElementById("refreshBtn"),
       searchInput: document.getElementById("searchInput"),
       dialog: document.getElementById("settingsDialog"),
@@ -1378,6 +1583,7 @@ class WebUI {
       logsShell: document.getElementById("logsShell"),
       logSourceSelect: document.getElementById("logSourceSelect"),
       logLinesSelect: document.getElementById("logLinesSelect"),
+      logTimestampToggle: document.getElementById("logTimestampToggle"),
       refreshLogsBtn: document.getElementById("refreshLogsBtn"),
       closeLogsBtnTop: document.getElementById("closeLogsBtnTop"),
       logPathText: document.getElementById("logPathText"),
@@ -1388,6 +1594,9 @@ class WebUI {
       closeNyaaBtnTop: document.getElementById("closeNyaaBtnTop"),
       nyaaModalTitle: document.getElementById("nyaaModalTitle"),
       nyaaModalSubtitle: document.getElementById("nyaaModalSubtitle"),
+      nyaaTitleRow: document.getElementById("nyaaTitleRow"),
+      nyaaTitleInput: document.getElementById("nyaaTitleInput"),
+      nyaaAltUrlToggle: document.getElementById("nyaaAltUrlToggle"),
       nyaaEpisodeSelect: document.getElementById("nyaaEpisodeSelect"),
       runNyaaSearchBtn: document.getElementById("runNyaaSearchBtn"),
       nyaaStatus: document.getElementById("nyaaStatus"),
@@ -1494,15 +1703,12 @@ class WebUI {
 
       els.detailContent.innerHTML =
           '<div class="detail-page">' +
-            '<div class="detail-top">' +
-              '<div class="detail-subtitle">🎬 ' + escapeHtml(title) + '</div>' +
-            '</div>' +
             '<div class="detail-layout">' +
             '<img class="detail-poster" alt="' + escapeHtml(title) + ' cover" src="' + escapeHtml(media.coverImage?.extraLarge || media.coverImage?.large || media.coverImage?.medium || "") + '">' +
             '<div class="detail-info">' +
-              '<div>' +
+              '<div class="detail-header">' +
                 '<h2 class="detail-title">' + escapeHtml(title) + '</h2>' +
-                '<p class="detail-subtitle">🆔 <a href="https://anilist.co/anime/' + item.mediaId + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;">' + item.mediaId + '</a></p>' +
+                '<p class="detail-subtitle"><a href="https://anilist.co/anime/' + item.mediaId + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;">AniList #' + item.mediaId + '</a> • ' + escapeHtml(media.status || "Unknown") + '</p>' +
               '</div>' +
               '<div class="meta">' +
                 '<span class="chip">📺 ' + escapeHtml(media.format || "Unknown") + '</span>' +
@@ -1510,12 +1716,15 @@ class WebUI {
                 '<span class="chip">↕️ Offset ' + (media.startingEpisode || 0) + '</span>' +
               '</div>' +
               '<div class="progress"><span style="width:' + progressPct + '%"></span></div>' +
-              '<div class="row"><span>📈 Progress</span><span>' + item.progress + ' / ' + total + '</span></div>' +
-              '<div class="row"><span>✅ Downloaded</span><span>' + downloadedCount + (isFullyDownloaded ? '<span class="ok-icon">✅</span>' : '') + '</span></div>' +
-              '<div class="row"><span>🗓️ Next</span><span>' + escapeHtml(nextText) + '</span></div>' +
+              '<div class="detail-stat-grid">' +
+                '<div class="detail-stat"><span>Progress</span><strong>' + item.progress + ' / ' + total + '</strong></div>' +
+                '<div class="detail-stat"><span>Downloaded</span><strong>' + downloadedCount + (isFullyDownloaded ? '<span class="ok-icon">✅</span>' : '') + '</strong></div>' +
+                '<div class="detail-stat"><span>Next</span><strong title="' + escapeHtml(nextText) + '">' + escapeHtml(nextText) + '</strong></div>' +
+              '</div>' +
               '<div class="detail-actions">' +
                 '<button class="action-btn" data-action="settings" data-id="' + item.mediaId + '" type="button">⚙️ Settings</button>' +
                 '<button class="action-btn" data-action="nyaa" data-id="' + item.mediaId + '" type="button">📥 Request</button>' +
+                '<button class="action-btn" data-action="rewatching" data-id="' + item.mediaId + '" type="button">🔁 Rewatch</button>' +
               '</div>' +
             '</div>' +
             '</div>' +
@@ -1562,11 +1771,14 @@ class WebUI {
     function openNyaaSearch(mediaId) {
       const item = state.anime.find((a) => String(a.mediaId) === String(mediaId));
       if (!item) return;
+      state.nyaa.mode = "anime";
       state.nyaa.selectedAnime = item;
       state.nyaa.selectedEpisode = null;
+      state.nyaa.useAltUrl = false;
       els.nyaaModalTitle.textContent = "Nyaa Search • " + getDisplayTitle(item);
       els.nyaaModalSubtitle.textContent = "Media ID " + item.mediaId + " • Select an episode or use title-only search";
       const options = buildEpisodeOptions(item);
+      els.nyaaTitleRow.style.display = "none";
       els.nyaaEpisodeSelect.disabled = false;
       els.runNyaaSearchBtn.disabled = false;
       els.nyaaEpisodeSelect.innerHTML =
@@ -1581,10 +1793,31 @@ class WebUI {
       if (typeof els.nyaaDialog.showModal === "function") els.nyaaDialog.showModal();
     }
 
-    function closeNyaaSearch() {
-      if (els.nyaaDialog.open) els.nyaaDialog.close();
+    function openGlobalNyaaSearch() {
+      state.nyaa.mode = "title";
       state.nyaa.selectedAnime = null;
       state.nyaa.selectedEpisode = null;
+      state.nyaa.useAltUrl = false;
+      els.nyaaModalTitle.textContent = "Nyaa Title Search";
+      els.nyaaModalSubtitle.textContent = "Enter an anime name. Results are returned directly from the RSS feed and sorted by seeders.";
+      els.nyaaTitleRow.style.display = "";
+      els.nyaaTitleInput.value = "";
+      els.nyaaAltUrlToggle.checked = false;
+      els.nyaaEpisodeSelect.disabled = true;
+      els.nyaaEpisodeSelect.innerHTML = '<option value="">Title search</option>';
+      els.runNyaaSearchBtn.disabled = false;
+      els.nyaaStatus.textContent = "";
+      els.nyaaResults.innerHTML = '<div class="empty">Enter an anime name, then click Search Nyaa.</div>';
+      if (typeof els.nyaaDialog.showModal === "function") els.nyaaDialog.showModal();
+      setTimeout(() => els.nyaaTitleInput.focus(), 50);
+    }
+
+    function closeNyaaSearch() {
+      if (els.nyaaDialog.open) els.nyaaDialog.close();
+      state.nyaa.mode = "anime";
+      state.nyaa.selectedAnime = null;
+      state.nyaa.selectedEpisode = null;
+      state.nyaa.useAltUrl = false;
     }
 
     function renderNyaaResults(data) {
@@ -1597,6 +1830,9 @@ class WebUI {
         return;
       }
       function scoreStyle(scoreValue) {
+        if (scoreValue === null || scoreValue === undefined || scoreValue === "") {
+          return 'background: linear-gradient(160deg, rgba(255,255,255,.035), rgba(255,255,255,.015));';
+        }
         const s = Number(scoreValue);
         const ratio = Math.max(0, Math.min(1, (Number.isFinite(s) ? s : 0) / 4));
         const hue = Math.round(ratio * 120); // 0 red -> 120 green
@@ -1607,13 +1843,15 @@ class WebUI {
         '<div class="result-item" style="' + scoreStyle(item.score) + '">' +
           '<a class="result-title" href="' + escapeHtml(item.link || "#") + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.title || "Untitled") + '</a>' +
           '<div class="result-meta">' +
-            '<span class="chip score-chip">#' + (idx + 1) + ' • Score ' + escapeHtml(item.score) + '</span>' +
+            '<span class="chip score-chip">#' + (idx + 1) + (item.score === null || item.score === undefined ? '' : ' • Score ' + escapeHtml(item.score)) + '</span>' +
             '<span class="chip">🌱 ' + escapeHtml(item.seeders || "0") + ' seeders</span>' +
             '<span class="chip">📦 ' + escapeHtml(item.size || "?") + '</span>' +
             '<span class="chip">🕒 ' + escapeHtml(new Date(item.pubDate).toLocaleString()) + '</span>' +
           '</div>' +
           '<div class="result-actions">' +
-            '<button class="tiny-btn" type="button" data-action="nyaa-download" data-link="' + encodeURIComponent(item.link || "") + '" data-episode="' + escapeHtml(data.episode ?? "") + '">📥 Download</button>' +
+            (state.nyaa.mode === "anime"
+              ? '<button class="tiny-btn" type="button" data-action="nyaa-download" data-link="' + encodeURIComponent(item.link || "") + '" data-episode="' + escapeHtml(data.episode ?? "") + '">📥 Download</button>'
+              : '<button class="tiny-btn" type="button" data-action="nyaa-download" data-link="' + encodeURIComponent(item.link || "") + '" data-episode="">📥 Download</button>') +
           '</div>' +
         '</div>'
       ).join("");
@@ -1621,16 +1859,26 @@ class WebUI {
 
     async function runNyaaDownload(link, episode) {
       const selectedAnime = state.nyaa.selectedAnime;
-      if (!selectedAnime) return;
       const hasEpisode = episode !== undefined && episode !== null && episode !== "";
       const ep = hasEpisode ? Number(episode) : null;
       if (!link || (hasEpisode && !Number.isFinite(ep))) return;
       els.nyaaStatus.textContent = "📥 Sending request to qBittorrent...";
       try {
-        const res = await fetch("/api/anime/" + selectedAnime.mediaId + "/nyaa-download", {
+        const isTitleMode = state.nyaa.mode === "title";
+        const title = (els.nyaaTitleInput.value || "").trim();
+        if (isTitleMode && !title) {
+          els.nyaaStatus.textContent = "Enter an anime name first.";
+          els.nyaaTitleInput.focus();
+          return;
+        }
+        if (!isTitleMode && !selectedAnime) return;
+
+        const res = await fetch(isTitleMode ? "/api/nyaa-download" : "/api/anime/" + selectedAnime.mediaId + "/nyaa-download", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(hasEpisode ? { link, episode: ep } : { link }),
+          body: JSON.stringify(isTitleMode
+            ? { link, title, useAltUrl: Boolean(els.nyaaAltUrlToggle.checked) }
+            : hasEpisode ? { link, episode: ep } : { link }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Download request failed");
@@ -1643,6 +1891,36 @@ class WebUI {
     }
 
     async function runNyaaSearch() {
+      if (state.nyaa.mode === "title") {
+        const query = (els.nyaaTitleInput.value || "").trim();
+        state.nyaa.useAltUrl = Boolean(els.nyaaAltUrlToggle.checked);
+        if (!query) {
+          els.nyaaStatus.textContent = "Enter an anime name first.";
+          els.nyaaResults.innerHTML = "";
+          els.nyaaTitleInput.focus();
+          return;
+        }
+        els.runNyaaSearchBtn.disabled = true;
+        els.nyaaStatus.textContent = "🔎 Searching Nyaa RSS...";
+        try {
+          const res = await fetch("/api/nyaa-search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, useAltUrl: state.nyaa.useAltUrl }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Nyaa search failed");
+          els.nyaaStatus.textContent = "✅ " + (data.count || 0) + " result(s) sorted by seeders";
+          renderNyaaResults(data);
+        } catch (err) {
+          els.nyaaStatus.textContent = err.message || "Nyaa search failed";
+          els.nyaaResults.innerHTML = "";
+        } finally {
+          els.runNyaaSearchBtn.disabled = false;
+        }
+        return;
+      }
+
       const selectedAnime = state.nyaa.selectedAnime;
       if (!selectedAnime) return;
       const selectedValue = els.nyaaEpisodeSelect.value;
@@ -1651,7 +1929,7 @@ class WebUI {
       if (hasEpisode && (!Number.isFinite(episode) || episode < 1)) return;
       state.nyaa.selectedEpisode = hasEpisode ? episode : null;
       els.runNyaaSearchBtn.disabled = true;
-        els.nyaaStatus.textContent = "🔎 Searching Nyaa and ranking results...";
+      els.nyaaStatus.textContent = "🔎 Searching Nyaa and ranking results...";
       try {
         const res = await fetch("/api/anime/" + selectedAnime.mediaId + "/nyaa-search", {
           method: "POST",
@@ -1677,6 +1955,23 @@ class WebUI {
       els.logSourceSelect.value = state.logs.selected;
     }
 
+    function stripLeadingLogTimestamp(line) {
+      return String(line || "")
+        .replace(/^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:\\s*(?:Z|[+-]\\d{2}:?\\d{2}))?\\s+/, "")
+        .replace(/^\\[[^\\]]*\\d{2}:\\d{2}:\\d{2}[^\\]]*\\]\\s*/, "");
+    }
+
+    function renderLogOutput() {
+      const content = state.logs.content || "";
+      const visibleContent = state.logs.showTimestamps
+        ? content
+        : content.split("\\n").map(stripLeadingLogTimestamp).join("\\n");
+      els.logOutput.textContent = visibleContent || "(empty)";
+      requestAnimationFrame(() => {
+        els.logOutput.scrollTop = els.logOutput.scrollHeight;
+      });
+    }
+
     function openLogs() {
       els.logsStatus.textContent = "";
       if (typeof els.logsDialog.showModal === "function") els.logsDialog.showModal();
@@ -1700,11 +1995,12 @@ class WebUI {
         if (!res.ok) throw new Error(data.error || "Failed to load logs");
         state.logs.selected = data.selected || state.logs.selected;
         state.logs.lines = data.lines || state.logs.lines;
+        state.logs.content = data.content || "";
         state.logs.available = Array.isArray(data.available) ? data.available : [];
         renderLogSourceOptions(state.logs.available);
         els.logLinesSelect.value = String(state.logs.lines);
         els.logPathText.textContent = data.path || "";
-        els.logOutput.textContent = data.content || "(empty)";
+        renderLogOutput();
         els.logsStatus.textContent = "Updated";
       } catch (err) {
         els.logsStatus.textContent = err.message || "Failed to load logs";
@@ -1800,14 +2096,15 @@ class WebUI {
       }
     }
 
-    async function moveAnimeToRewatching() {
-      if (!state.selected) return;
-      const ok = confirm("Move media ID " + state.selected.mediaId + " to REWATCHING on AniList?");
+    async function moveAnimeToRewatching(mediaIdOverride) {
+      const mediaId = mediaIdOverride || (state.selected && state.selected.mediaId);
+      if (!mediaId) return;
+      const ok = confirm("Move media ID " + mediaId + " to REWATCHING on AniList?");
       if (!ok) return;
       els.setRewatchingBtn.disabled = true;
       els.modalStatus.textContent = "Updating AniList status...";
       try {
-        const res = await fetch("/api/anime/" + state.selected.mediaId + "/rewatching", {
+        const res = await fetch("/api/anime/" + mediaId + "/rewatching", {
           method: "POST",
         });
         const data = await res.json().catch(() => ({}));
@@ -1821,6 +2118,7 @@ class WebUI {
       }
     }
 
+    els.openNyaaSearchBtn.addEventListener("click", openGlobalNyaaSearch);
     els.refreshBtn.addEventListener("click", fetchAnime);
     els.searchInput.addEventListener("input", (e) => {
       state.query = e.target.value || "";
@@ -1839,6 +2137,10 @@ class WebUI {
       }
       if (btn.dataset.action === "nyaa") {
         openNyaaSearch(btn.dataset.id);
+        return;
+      }
+      if (btn.dataset.action === "rewatching") {
+        moveAnimeToRewatching(btn.dataset.id);
       }
     });
     els.form.addEventListener("submit", (e) => {
@@ -1847,7 +2149,7 @@ class WebUI {
     });
     els.cancelBtn.addEventListener("click", closeSettings);
     els.resetDownloadedBtn.addEventListener("click", resetDownloadedEpisodes);
-    els.setRewatchingBtn.addEventListener("click", moveAnimeToRewatching);
+    els.setRewatchingBtn.addEventListener("click", () => moveAnimeToRewatching());
     els.closeDetailBtnTop.addEventListener("click", closeDetailModal);
     els.detailShell.addEventListener("click", (e) => e.stopPropagation());
     els.detailContent.addEventListener("click", (e) => {
@@ -1859,6 +2161,10 @@ class WebUI {
       }
       if (btn.dataset.action === "nyaa") {
         openNyaaSearch(btn.dataset.id);
+        return;
+      }
+      if (btn.dataset.action === "rewatching") {
+        moveAnimeToRewatching(btn.dataset.id);
       }
     });
     els.detailDialog.addEventListener("click", (e) => {
@@ -1876,6 +2182,10 @@ class WebUI {
       state.logs.lines = Number(e.target.value || 200);
       fetchLogs();
     });
+    els.logTimestampToggle.addEventListener("change", (e) => {
+      state.logs.showTimestamps = Boolean(e.target.checked);
+      renderLogOutput();
+    });
     els.dialog.addEventListener("click", (e) => {
       const rect = els.form.getBoundingClientRect();
       const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
@@ -1885,6 +2195,9 @@ class WebUI {
       if (e.target === els.logsDialog) closeLogs();
     });
     els.runNyaaSearchBtn.addEventListener("click", runNyaaSearch);
+    els.nyaaTitleInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") runNyaaSearch();
+    });
     els.nyaaEpisodeSelect.addEventListener("change", (e) => {
       state.nyaa.selectedEpisode = e.target.value ? Number(e.target.value) : null;
     });
@@ -1912,7 +2225,10 @@ class WebUI {
    * @param res Outgoing response.
    */
   private async handleRequest(req: IncomingMessage, res: ServerResponse) {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const url = new URL(
+      req.url || "/",
+      `http://${req.headers.host || "localhost"}`,
+    );
 
     if (url.pathname.startsWith("/api/")) {
       await this.routeApi(req, res, url);
@@ -1955,7 +2271,7 @@ class WebUI {
 
     this.server.listen(this.port, this.host, () => {
       console.log(
-        `Animu Web UI running at http://localhost:${this.port} (bind ${this.host})`
+        `Animu Web UI running at http://localhost:${this.port} (bind ${this.host})`,
       );
     });
   }
