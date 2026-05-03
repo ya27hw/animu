@@ -1266,6 +1266,24 @@ class WebUI {
       width:auto;
       accent-color:var(--accent);
     }
+    .color-settings-grid{
+      display:grid;
+      gap:12px;
+    }
+    .color-setting-row{
+      display:grid;
+      grid-template-columns:minmax(130px, 1fr) 48px minmax(92px, 120px);
+      gap:10px;
+      align-items:center;
+    }
+    .color-setting-row input[type="color"]{
+      min-height:42px;
+      padding:3px;
+    }
+    .color-setting-row input[type="text"]{
+      text-transform:uppercase;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     select{
       border:1px solid rgba(255,255,255,.09);
       background:rgba(255,255,255,.03);
@@ -1293,15 +1311,19 @@ class WebUI {
       overflow:auto;
       white-space:pre-wrap;
       word-break:break-word;
-      line-height:1.35;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size:.78rem;
+      line-height:1.7;
+      font-family:"JetBrains Mono", "Cascadia Mono", "Fira Code", "SFMono-Regular", "Roboto Mono", "DejaVu Sans Mono", Consolas, monospace;
+      font-size:.82rem;
       color:#b4ffb8;
       background:
         linear-gradient(rgba(255,255,255,.02), rgba(255,255,255,0) 18px),
         #020508;
       text-shadow:0 0 10px rgba(86,255,123,.06);
       scrollbar-color:#1c3857 #07101d;
+    }
+    .log-line{
+      display:block;
+      color:var(--log-normal, #7CFFB2);
     }
     .nyaa-dialog{
       width:min(980px, calc(100vw - 18px));
@@ -1403,6 +1425,7 @@ class WebUI {
       .detail-stat-grid{grid-template-columns:1fr}
       .detail-actions{grid-template-columns:1fr}
       .nyaa-title-row{grid-template-columns:1fr}
+      .color-setting-row{grid-template-columns:1fr 48px minmax(92px, 1fr)}
       }
   </style>
 </head>
@@ -1414,6 +1437,7 @@ class WebUI {
         <p>Watching list from AniList for <strong id="userName">${aniUserName}</strong>. Edit per-title overrides used by your bot/scheduler.</p>
       </div>
       <div class="actions">
+        <button id="logSettingsBtn" type="button" title="Log color settings" aria-label="Log color settings">⚙️ Settings</button>
         <button id="openNyaaSearchBtn" type="button">🔎 Nyaa Search</button>
         <button id="refreshBtn" class="btn-primary">🔄 Refresh</button>
       </div>
@@ -1447,7 +1471,6 @@ class WebUI {
       <div class="modal-actions">
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button type="button" id="resetDownloadedBtn" class="danger">Reset Downloads</button>
-          <button type="button" id="setRewatchingBtn">Rewatch</button>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button type="button" id="cancelBtn">Cancel</button>
@@ -1486,8 +1509,12 @@ class WebUI {
             </select>
           </label>
           <label class="toggle-row">
-            <input id="logTimestampToggle" type="checkbox" checked />
+            <input id="logTimestampToggle" type="checkbox" />
             <span>Timestamps</span>
+          </label>
+          <label class="toggle-row">
+            <input id="logAutoRefreshToggle" type="checkbox" />
+            <span>Auto-refresh</span>
           </label>
           <button id="refreshLogsBtn" type="button">🔄 Refresh Logs</button>
         </div>
@@ -1498,6 +1525,42 @@ class WebUI {
         <pre id="logOutput" class="log-output">Loading...</pre>
       </div>
     </div>
+  </dialog>
+  <dialog id="logSettingsDialog">
+    <form class="modal" id="logSettingsForm" method="dialog">
+      <h2>Log Colors</h2>
+      <p>Customize readable colors used in the application log viewer.</p>
+      <div class="color-settings-grid">
+        <div class="color-setting-row">
+          <label for="normalLogHex">Normal logs stdout</label>
+          <input id="normalLogColor" data-log-color="normal" type="color" />
+          <input id="normalLogHex" data-log-hex="normal" type="text" maxlength="7" />
+        </div>
+        <div class="color-setting-row">
+          <label for="errorLogHex">Error logs stderr</label>
+          <input id="errorLogColor" data-log-color="error" type="color" />
+          <input id="errorLogHex" data-log-hex="error" type="text" maxlength="7" />
+        </div>
+        <div class="color-setting-row">
+          <label for="nextRunLogHex">Next run logs</label>
+          <input id="nextRunLogColor" data-log-color="nextRun" type="color" />
+          <input id="nextRunLogHex" data-log-hex="nextRun" type="text" maxlength="7" />
+        </div>
+        <div class="color-setting-row">
+          <label for="failedFindLogHex">Failed to find logs</label>
+          <input id="failedFindLogColor" data-log-color="failedFind" type="color" />
+          <input id="failedFindLogHex" data-log-hex="failedFind" type="text" maxlength="7" />
+        </div>
+      </div>
+      <div class="status" id="logSettingsStatus"></div>
+      <div class="modal-actions">
+        <button type="button" id="resetLogColorsBtn">Reset Defaults</button>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button type="button" id="cancelLogSettingsBtn">Cancel</button>
+          <button type="submit" id="saveLogColorsBtn" class="btn-primary">Save Colors</button>
+        </div>
+      </div>
+    </form>
   </dialog>
   <dialog id="nyaaDialog" class="nyaa-dialog">
     <div class="modal nyaa-shell" id="nyaaShell">
@@ -1531,6 +1594,15 @@ class WebUI {
   </dialog>
 
   <script>
+    const DEFAULT_LOG_COLORS = {
+      normal: "#7CFFB2",
+      error: "#FF7A90",
+      nextRun: "#6EB8FF",
+      failedFind: "#FFB15C",
+    };
+    const LOG_COLOR_STORAGE_KEY = "animu.logColors";
+    const LOG_AUTO_REFRESH_MS = 5000;
+
     const state = {
       anime: [],
       loading: false,
@@ -1542,7 +1614,10 @@ class WebUI {
         lines: 50,
         available: [],
         content: "",
-        showTimestamps: true,
+        showTimestamps: false,
+        autoRefresh: false,
+        autoRefreshTimer: null,
+        colors: { ...DEFAULT_LOG_COLORS },
       },
       nyaa: {
         mode: "anime",
@@ -1560,6 +1635,7 @@ class WebUI {
       toolbar: document.getElementById("toolbar"),
       summaryRow: document.getElementById("summaryRow"),
       summaryText: document.getElementById("summaryText"),
+      logSettingsBtn: document.getElementById("logSettingsBtn"),
       openNyaaSearchBtn: document.getElementById("openNyaaSearchBtn"),
       refreshBtn: document.getElementById("refreshBtn"),
       searchInput: document.getElementById("searchInput"),
@@ -1571,7 +1647,6 @@ class WebUI {
       altTitleInput: document.getElementById("altTitleInput"),
       startingEpisodeInput: document.getElementById("startingEpisodeInput"),
       resetDownloadedBtn: document.getElementById("resetDownloadedBtn"),
-      setRewatchingBtn: document.getElementById("setRewatchingBtn"),
       cancelBtn: document.getElementById("cancelBtn"),
       saveBtn: document.getElementById("saveBtn"),
       detailDialog: document.getElementById("detailDialog"),
@@ -1584,11 +1659,19 @@ class WebUI {
       logSourceSelect: document.getElementById("logSourceSelect"),
       logLinesSelect: document.getElementById("logLinesSelect"),
       logTimestampToggle: document.getElementById("logTimestampToggle"),
+      logAutoRefreshToggle: document.getElementById("logAutoRefreshToggle"),
       refreshLogsBtn: document.getElementById("refreshLogsBtn"),
       closeLogsBtnTop: document.getElementById("closeLogsBtnTop"),
       logPathText: document.getElementById("logPathText"),
       logsStatus: document.getElementById("logsStatus"),
       logOutput: document.getElementById("logOutput"),
+      logSettingsDialog: document.getElementById("logSettingsDialog"),
+      logSettingsForm: document.getElementById("logSettingsForm"),
+      logSettingsStatus: document.getElementById("logSettingsStatus"),
+      resetLogColorsBtn: document.getElementById("resetLogColorsBtn"),
+      cancelLogSettingsBtn: document.getElementById("cancelLogSettingsBtn"),
+      logColorInputs: Array.from(document.querySelectorAll("[data-log-color]")),
+      logHexInputs: Array.from(document.querySelectorAll("[data-log-hex]")),
       nyaaDialog: document.getElementById("nyaaDialog"),
       nyaaShell: document.getElementById("nyaaShell"),
       closeNyaaBtnTop: document.getElementById("closeNyaaBtnTop"),
@@ -1948,6 +2031,107 @@ class WebUI {
       }
     }
 
+    function normalizeHexColor(value, fallback) {
+      const raw = String(value || "").trim();
+      const expanded = raw.replace(/^#?([0-9a-fA-F]{3})$/, (_, short) =>
+        "#" + short.split("").map((ch) => ch + ch).join("")
+      );
+      const normalized = expanded.startsWith("#") ? expanded : "#" + expanded;
+      return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized.toUpperCase() : fallback;
+    }
+
+    function hexToRgb(hex) {
+      const safeHex = normalizeHexColor(hex, "#FFFFFF").slice(1);
+      return {
+        r: parseInt(safeHex.slice(0, 2), 16),
+        g: parseInt(safeHex.slice(2, 4), 16),
+        b: parseInt(safeHex.slice(4, 6), 16),
+      };
+    }
+
+    function relativeLuminance(hex) {
+      const rgb = hexToRgb(hex);
+      const channels = [rgb.r, rgb.g, rgb.b].map((value) => {
+        const c = value / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+    }
+
+    function contrastRatio(foreground, background) {
+      const fg = relativeLuminance(foreground);
+      const bg = relativeLuminance(background);
+      const lighter = Math.max(fg, bg);
+      const darker = Math.min(fg, bg);
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    function ensureReadableColor(value, fallback) {
+      const normalized = normalizeHexColor(value, fallback);
+      return contrastRatio(normalized, "#020508") >= 4.5 ? normalized : fallback;
+    }
+
+    function loadLogColors() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(LOG_COLOR_STORAGE_KEY) || "{}");
+        state.logs.colors = Object.keys(DEFAULT_LOG_COLORS).reduce((acc, key) => {
+          acc[key] = ensureReadableColor(stored[key], DEFAULT_LOG_COLORS[key]);
+          return acc;
+        }, {});
+      } catch {
+        state.logs.colors = { ...DEFAULT_LOG_COLORS };
+      }
+    }
+
+    function saveLogColors() {
+      localStorage.setItem(LOG_COLOR_STORAGE_KEY, JSON.stringify(state.logs.colors));
+    }
+
+    function syncLogColorInputs() {
+      els.logColorInputs.forEach((input) => {
+        input.value = state.logs.colors[input.dataset.logColor] || DEFAULT_LOG_COLORS[input.dataset.logColor];
+      });
+      els.logHexInputs.forEach((input) => {
+        input.value = state.logs.colors[input.dataset.logHex] || DEFAULT_LOG_COLORS[input.dataset.logHex];
+      });
+    }
+
+    function applyLogColorVars() {
+      els.logOutput.style.setProperty("--log-normal", state.logs.colors.normal);
+      els.logOutput.style.setProperty("--log-error", state.logs.colors.error);
+      els.logOutput.style.setProperty("--log-next-run", state.logs.colors.nextRun);
+      els.logOutput.style.setProperty("--log-failed-find", state.logs.colors.failedFind);
+    }
+
+    function openLogSettings() {
+      syncLogColorInputs();
+      els.logSettingsStatus.textContent = "";
+      if (typeof els.logSettingsDialog.showModal === "function") els.logSettingsDialog.showModal();
+    }
+
+    function closeLogSettings() {
+      if (els.logSettingsDialog.open) els.logSettingsDialog.close();
+    }
+
+    function setLogColor(key, value) {
+      const fallback = DEFAULT_LOG_COLORS[key] || DEFAULT_LOG_COLORS.normal;
+      const color = ensureReadableColor(value, fallback);
+      state.logs.colors[key] = color;
+      syncLogColorInputs();
+      applyLogColorVars();
+      renderLogOutput();
+      return color === normalizeHexColor(value, fallback);
+    }
+
+    function resetLogColors() {
+      state.logs.colors = { ...DEFAULT_LOG_COLORS };
+      syncLogColorInputs();
+      applyLogColorVars();
+      saveLogColors();
+      renderLogOutput();
+      els.logSettingsStatus.textContent = "Defaults restored";
+    }
+
     function renderLogSourceOptions(options) {
       els.logSourceSelect.innerHTML = (options || []).map((item) =>
         '<option value="' + escapeHtml(item.key) + '">' + escapeHtml(item.label) + '</option>'
@@ -1961,25 +2145,61 @@ class WebUI {
         .replace(/^\\[[^\\]]*\\d{2}:\\d{2}:\\d{2}[^\\]]*\\]\\s*/, "");
     }
 
+    function getLogLineKind(line) {
+      const body = stripLeadingLogTimestamp(line);
+      if (/Failed to find/i.test(body)) return "failed-find";
+      if (/Next run for/i.test(body)) return "next-run";
+      if (state.logs.selected === "error" || /\\b(error|exception|failed)\\b/i.test(body)) return "error";
+      return "normal";
+    }
+
     function renderLogOutput() {
       const content = state.logs.content || "";
       const visibleContent = state.logs.showTimestamps
         ? content
         : content.split("\\n").map(stripLeadingLogTimestamp).join("\\n");
-      els.logOutput.textContent = visibleContent || "(empty)";
+      if (!visibleContent) {
+        els.logOutput.textContent = "(empty)";
+      } else {
+        els.logOutput.innerHTML = visibleContent.split("\\n").map((line) => {
+          const kind = getLogLineKind(line);
+          const varName = kind === "next-run"
+            ? "--log-next-run"
+            : kind === "failed-find"
+              ? "--log-failed-find"
+              : kind === "error"
+                ? "--log-error"
+                : "--log-normal";
+          return '<span class="log-line" style="color:var(' + varName + ')">' + escapeHtml(line) + '</span>';
+        }).join("");
+      }
       requestAnimationFrame(() => {
         els.logOutput.scrollTop = els.logOutput.scrollHeight;
       });
+    }
+
+    function setLogAutoRefresh(enabled) {
+      state.logs.autoRefresh = Boolean(enabled);
+      if (state.logs.autoRefreshTimer) {
+        clearInterval(state.logs.autoRefreshTimer);
+        state.logs.autoRefreshTimer = null;
+      }
+      if (state.logs.autoRefresh && els.logsDialog.open) {
+        state.logs.autoRefreshTimer = setInterval(fetchLogs, LOG_AUTO_REFRESH_MS);
+      }
     }
 
     function openLogs() {
       els.logsStatus.textContent = "";
       if (typeof els.logsDialog.showModal === "function") els.logsDialog.showModal();
       fetchLogs();
+      setLogAutoRefresh(state.logs.autoRefresh);
     }
 
     function closeLogs() {
       if (els.logsDialog.open) els.logsDialog.close();
+      setLogAutoRefresh(false);
+      els.logAutoRefreshToggle.checked = false;
     }
 
     async function fetchLogs() {
@@ -2101,7 +2321,6 @@ class WebUI {
       if (!mediaId) return;
       const ok = confirm("Move media ID " + mediaId + " to REWATCHING on AniList?");
       if (!ok) return;
-      els.setRewatchingBtn.disabled = true;
       els.modalStatus.textContent = "Updating AniList status...";
       try {
         const res = await fetch("/api/anime/" + mediaId + "/rewatching", {
@@ -2113,12 +2332,11 @@ class WebUI {
         await fetchAnime();
       } catch (err) {
         els.modalStatus.textContent = err.message || "Failed to update AniList status";
-      } finally {
-        els.setRewatchingBtn.disabled = false;
       }
     }
 
     els.openNyaaSearchBtn.addEventListener("click", openGlobalNyaaSearch);
+    els.logSettingsBtn.addEventListener("click", openLogSettings);
     els.refreshBtn.addEventListener("click", fetchAnime);
     els.searchInput.addEventListener("input", (e) => {
       state.query = e.target.value || "";
@@ -2149,7 +2367,6 @@ class WebUI {
     });
     els.cancelBtn.addEventListener("click", closeSettings);
     els.resetDownloadedBtn.addEventListener("click", resetDownloadedEpisodes);
-    els.setRewatchingBtn.addEventListener("click", () => moveAnimeToRewatching());
     els.closeDetailBtnTop.addEventListener("click", closeDetailModal);
     els.detailShell.addEventListener("click", (e) => e.stopPropagation());
     els.detailContent.addEventListener("click", (e) => {
@@ -2186,6 +2403,36 @@ class WebUI {
       state.logs.showTimestamps = Boolean(e.target.checked);
       renderLogOutput();
     });
+    els.logAutoRefreshToggle.addEventListener("change", (e) => {
+      setLogAutoRefresh(Boolean(e.target.checked));
+    });
+    els.logColorInputs.forEach((input) => {
+      input.addEventListener("input", (e) => {
+        const key = e.target.dataset.logColor;
+        const isReadable = setLogColor(key, e.target.value);
+        els.logSettingsStatus.textContent = isReadable ? "" : "Adjusted to a readable color";
+      });
+    });
+    els.logHexInputs.forEach((input) => {
+      input.addEventListener("change", (e) => {
+        const key = e.target.dataset.logHex;
+        const isReadable = setLogColor(key, e.target.value);
+        els.logSettingsStatus.textContent = isReadable ? "" : "Adjusted to a readable color";
+      });
+    });
+    els.logSettingsForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveLogColors();
+      els.logSettingsStatus.textContent = "Saved";
+      closeLogSettings();
+    });
+    els.cancelLogSettingsBtn.addEventListener("click", closeLogSettings);
+    els.resetLogColorsBtn.addEventListener("click", resetLogColors);
+    els.logSettingsDialog.addEventListener("click", (e) => {
+      const rect = els.logSettingsForm.getBoundingClientRect();
+      const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (!inside) closeLogSettings();
+    });
     els.dialog.addEventListener("click", (e) => {
       const rect = els.form.getBoundingClientRect();
       const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
@@ -2213,6 +2460,9 @@ class WebUI {
     els.nyaaDialog.addEventListener("click", (e) => {
       if (e.target === els.nyaaDialog) closeNyaaSearch();
     });
+    loadLogColors();
+    applyLogColorVars();
+    syncLogColorInputs();
     fetchAnime();
   </script>
 </body>
