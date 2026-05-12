@@ -3,7 +3,14 @@ import axios from "axios";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { qbit_url, password, username, rootDir, altRootDir } from "profile.json";
+import {
+  qbit_url,
+  password,
+  username,
+  rootDir,
+  altRootDir,
+  useProxy,
+} from "profile.json";
 import { proxy } from "@utils/models";
 
 class QbitTorrent {
@@ -114,14 +121,23 @@ class QbitTorrent {
 
     try {
       const rename = episode ? `${title} - ${episode}` : title;
+      // qBittorrent cannot use this app's Axios proxy when it receives a URL.
+      // If the app is proxying Nyaa, fetch the .torrent here and upload it.
+      const shouldUploadTorrentFile = useProxy || useProxyDownload;
       const baseRootDir = useProxyDownload ? altRootDir : rootDir;
       const savePath = path.posix.join(baseRootDir, title);
       const headers = {
         Cookie: `SID=${this.sid?.SID}`,
       };
 
-      const response = useProxyDownload
-        ? await this.addTorrentFile(authLink.toString(), link, savePath, rename, headers)
+      const response = shouldUploadTorrentFile
+        ? await this.addTorrentFile(
+            authLink.toString(),
+            link,
+            savePath,
+            rename,
+            headers,
+          )
         : await axios.post(
             authLink.toString(),
             `urls=${encodeURIComponent(link)}&savepath=${encodeURIComponent(
@@ -160,6 +176,7 @@ class QbitTorrent {
     const torrentFilePath = await this.downloadTorrentFile(link, rename);
     const torrentBuffer = await fs.readFile(torrentFilePath);
     const boundary = `----AnimuBoundary${Date.now().toString(16)}`;
+    const torrentFilename = `${this.safeTorrentFilename(rename)}.torrent`;
 
     const fieldPart = (name: string, value: string) =>
       Buffer.from(
@@ -170,11 +187,11 @@ class QbitTorrent {
 
     const fileHeader = Buffer.from(
       `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="torrents"; filename="${rename}.torrent"\r\n` +
+      `Content-Disposition: form-data; name="torrents"; filename="${torrentFilename}"\r\n` +
       `Content-Type: application/x-bittorrent\r\n\r\n`,
     );
 
-    const closingBoundary = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const closingBoundary = Buffer.from(`--${boundary}--\r\n`);
     const body = Buffer.concat([
       fileHeader,
       torrentBuffer,
@@ -199,10 +216,14 @@ class QbitTorrent {
     }
   }
 
+  private safeTorrentFilename(name: string): string {
+    return name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_") || "download";
+  }
+
   private async downloadTorrentFile(link: string, rename: string): Promise<string> {
     await fs.mkdir(this.tempDir, { recursive: true });
 
-    const safeName = rename.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_");
+    const safeName = this.safeTorrentFilename(rename);
     const torrentFilePath = path.join(
       this.tempDir,
       `${safeName}-${Date.now()}.torrent`,
