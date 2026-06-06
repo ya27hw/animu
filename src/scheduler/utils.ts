@@ -1,5 +1,5 @@
 import { MessageBuilder, Webhook } from "discord-webhook-node";
-import { webhook } from "profile.json";
+import { webhook } from "../profile.json";
 const hook: Webhook = new Webhook(webhook);
 import { CronTime } from "cron";
 import { DateTime } from "luxon";
@@ -13,7 +13,11 @@ async function alertUser(anime: string, image: string) {
     .setColor(0xff0000)
     .setDescription(`Animu could not add ${anime} to qBittorrent.`)
     .setImage(image);
-  await hook.send(msg);
+  try {
+    await hook.send(msg);
+  } catch (err) {
+    console.error("Discord webhook send failed (alertUser):", err);
+  }
 }
 
 function logNextRunTime(animeTitle: string, timeouts: number) {
@@ -72,7 +76,11 @@ async function sendAnimeDownloadedHook(
     msg.addField(field.name, field.value, true);
   }
 
-  await hook.send(msg);
+  try {
+    await hook.send(msg);
+  } catch (err) {
+    console.error("Discord webhook send failed (sendAnimeDownloadedHook):", err);
+  }
 }
 
 /**

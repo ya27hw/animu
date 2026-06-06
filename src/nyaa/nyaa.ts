@@ -19,7 +19,7 @@ import {
   nyaaUrl,
   altNyaaUrl,
   triggerGenre,
-} from "profile.json";
+} from "../profile.json";
 import anitomy from "anitomy-js";
 import axios from "axios";
 import { proxy } from "@utils/models";
@@ -380,50 +380,79 @@ class Nyaa {
   ): Promise<NyaaRSSResult> {
     const rssLink = this.setParams(url, searchQuery);
 
-    try {
-      const response = await this.getResponse(rssLink, enableProxy);
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY = 3000;
 
-      if (response.status !== 200) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await this.getResponse(rssLink, enableProxy);
+
+        if (response.status !== 200) {
+          if (attempt < MAX_RETRIES) {
+            console.warn(
+              `Nyaa RSS fetch returned HTTP ${response.status}, retrying in ${RETRY_DELAY}ms (attempt ${attempt + 1}/${MAX_RETRIES})`,
+            );
+            await new Promise((r) => setTimeout(r, RETRY_DELAY));
+            continue;
+          }
+
+          return {
+            status: response.status,
+            message: `Failed to fetch RSS feed. HTTP status: ${response.status}`,
+            data: null,
+          };
+        }
+
+        const rss = await this.parser.parseString(response.data);
+        const items = rss.items;
+
+        if (items.length === 0) {
+          return {
+            status: 404,
+            message: "No items found in the RSS feed.",
+            data: null,
+          };
+        }
+
+        items.sort(
+          (a: { [x: string]: string }, b: { [x: string]: string }) =>
+            parseInt(b["nyaa:seeders"]) - parseInt(a["nyaa:seeders"]),
+        );
+
         return {
-          status: response.status,
-          message: `Failed to fetch RSS feed. HTTP status: ${response.status}`,
+          status: 200,
+          message: "RSS feed fetched successfully.",
+          data: items as NyaaTorrent[],
+        };
+      } catch (error) {
+        if (attempt < MAX_RETRIES) {
+          console.warn(
+            `Nyaa RSS fetch error, retrying in ${RETRY_DELAY}ms (attempt ${attempt + 1}/${MAX_RETRIES}):`,
+            error instanceof Error ? error.message : error,
+          );
+          await new Promise((r) => setTimeout(r, RETRY_DELAY));
+          continue;
+        }
+
+        console.error(
+          "An error occurred while trying to retrieve the RSS feed from Nyaa:",
+          error,
+        );
+        return {
+          status: 500,
+          message:
+            error instanceof Error ? error.message : "Unknown error occurred.",
           data: null,
         };
       }
-
-      const rss = await this.parser.parseString(response.data);
-      const items = rss.items;
-
-      if (items.length === 0) {
-        return {
-          status: 404,
-          message: "No items found in the RSS feed.",
-          data: null,
-        };
-      }
-
-      items.sort(
-        (a: { [x: string]: string }, b: { [x: string]: string }) =>
-          parseInt(b["nyaa:seeders"]) - parseInt(a["nyaa:seeders"]),
-      );
-
-      return {
-        status: 200,
-        message: "RSS feed fetched successfully.",
-        data: items as NyaaTorrent[],
-      };
-    } catch (error) {
-      console.error(
-        "An error occurred while trying to retrieve the RSS feed from Nyaa:",
-        error,
-      );
-      return {
-        status: 500,
-        message:
-          error instanceof Error ? error.message : "Unknown error occurred.",
-        data: null,
-      };
     }
+
+    // Should not be reached, but satisfies TypeScript
+    return {
+      status: 500,
+      message: "Max retries exhausted.",
+      data: null,
+    };
   }
 
   /**

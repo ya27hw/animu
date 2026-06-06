@@ -1,4 +1,4 @@
-import { interval } from "profile.json";
+import { interval } from "../profile.json";
 
 class OfflineAnime {
   episodes: Array<number>;
@@ -19,18 +19,17 @@ class OfflineAnime {
   }
 
   public setTimeout() {
-    let isMaxTimeouts = false;
-
-    // Siuuuuuuuuuuuuuuuu (jk pessi better)
-    if (this.maxTimeouts === 10) {
-      this.maxTimeouts = 0;
-      isMaxTimeouts = true;
+    // Cap at 10 instead of wrapping to 0 — prevents burst of retries
+    // when the counter wraps back from max to min.
+    if (this.maxTimeouts >= 10) {
+      this.timeouts = this.maxTimeouts;
+      return true;
     }
 
     this.maxTimeouts += 1;
     this.timeouts = this.maxTimeouts;
 
-    return isMaxTimeouts;
+    return this.maxTimeouts >= 10;
   }
   public resetTimeout() {
     this.timeouts = 0;

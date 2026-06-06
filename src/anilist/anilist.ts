@@ -1,7 +1,7 @@
 import axios from "axios";
-import { aniUserName } from "profile.json";
+import { aniUserName } from "../profile.json";
 import { AiringSchedule, AniQuery, MediaRelations } from "@utils/index";
-import { bearerTokenAnilist, useProxy } from "profile.json";
+import { bearerTokenAnilist, useProxy } from "../profile.json";
 import { proxy } from "@utils/models";
 class Anilist {
   api: string;
@@ -42,25 +42,60 @@ class Anilist {
       timeout: 10000,
     };
 
-    try {
-      return await axios(this.api, {
-        headers: headersWithAuth,
-        ...requestConfig,
-      });
-    } catch (error: any) {
-      const status = error?.response?.status;
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [2000, 4000, 8000];
 
-      // AniList list queries are public; expired/invalid bearer tokens can fail
-      // even when the same query works anonymously.
-      if (bearerTokenAnilist && (status === 400 || status === 401)) {
+    let currentHeaders = headersWithAuth;
+    let authFallbackTried = false;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
         return await axios(this.api, {
-          headers: baseHeaders,
+          headers: currentHeaders,
           ...requestConfig,
         });
-      }
+      } catch (error: any) {
+        const status = error?.response?.status;
 
-      throw error;
+        // AniList list queries are public; expired/invalid bearer tokens can fail
+        // even when the same query works anonymously.
+        if (
+          !authFallbackTried &&
+          bearerTokenAnilist &&
+          (status === 400 || status === 401)
+        ) {
+          currentHeaders = baseHeaders;
+          authFallbackTried = true;
+          continue;
+        }
+
+        // Retry on proxy/transient errors: 502 (Cloudflare), 404 (proxy miss), 5xx
+        const isRetryable =
+          status === 502 || status === 404 || (status != null && status >= 500);
+
+        if (isRetryable && attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[attempt];
+          console.warn(
+            `AniList request failed with status ${status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // After max retries, return null instead of throwing (matches getAiringSchedule pattern)
+        if (attempt >= MAX_RETRIES) {
+          console.error(
+            `AniList request failed after ${MAX_RETRIES} retries:`,
+            error,
+          );
+          return null;
+        }
+
+        throw error;
+      }
     }
+
+    return null;
   }
 
   /**

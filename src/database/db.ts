@@ -1,6 +1,6 @@
 import { FirebaseApp, initializeApp } from "firebase/app";
 import { firebaseConfig } from "./creds.json";
-import { id, aniUserName, email, emailPassword } from "profile.json";
+import { id, aniUserName, email, emailPassword } from "../profile.json";
 import { AniQuery } from "@utils/index";
 import {
   getAuth,
@@ -30,9 +30,13 @@ class DB {
 
   public async logIn() {
     try {
-    const auth = getAuth();
-    DB.user = await signInWithEmailAndPassword(auth, email, emailPassword);
-  } catch(e) {process.exit(0)}}
+      const auth = getAuth();
+      DB.user = await signInWithEmailAndPassword(auth, email, emailPassword);
+    } catch (e) {
+      console.error("Firebase login failed:", e);
+      throw e;
+    }
+  }
 
   /**
    * Adds data to firestore

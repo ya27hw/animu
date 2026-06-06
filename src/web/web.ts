@@ -8,7 +8,7 @@ import DB from "@db/db";
 import schedule from "@scheduler/schedule";
 import Nyaa from "@nyaa/nyaa";
 import qbit from "@qbit/qbit";
-import { aniUserName, triggerGenre } from "profile.json";
+import { aniUserName, triggerGenre } from "../profile.json";
 
 type AnimeApiItem = {
   mediaId: number;
@@ -759,12 +759,9 @@ class WebUI {
         return;
       }
 
-      if (
-        animeMatch &&
-        req.method === "POST" &&
-        url.pathname.endsWith("/reset")
-      ) {
-        await this.updateAnimeSettings(animeMatch[1], {
+      const resetMatch = url.pathname.match(/^\/api\/anime\/(\d+)\/reset$/);
+      if (resetMatch && req.method === "POST") {
+        await this.updateAnimeSettings(resetMatch[1], {
           resetDownloadedEpisodes: true,
         });
         this.sendJson(res, 200, { ok: true });
