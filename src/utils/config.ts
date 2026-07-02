@@ -44,10 +44,7 @@ export interface ProfileConfig {
   discord_fail_description?: string;
 }
 
-let cachedConfig: ProfileConfig | null = null;
-
 export function getConfig(): ProfileConfig {
-  if (cachedConfig) return cachedConfig;
   try {
     let resolvedPath = rootConfigPath;
     if (fs.existsSync(srcConfigPath)) {
@@ -58,8 +55,7 @@ export function getConfig(): ProfileConfig {
       return {} as ProfileConfig;
     }
     const raw = fs.readFileSync(resolvedPath, "utf8");
-    cachedConfig = JSON.parse(raw);
-    return cachedConfig!;
+    return JSON.parse(raw);
   } catch (err) {
     console.error("Failed to read profile.json:", err);
   }
@@ -73,7 +69,6 @@ export function saveConfig(newConfig: ProfileConfig): void {
     if (fs.existsSync(srcDir)) {
       fs.writeFileSync(srcConfigPath, JSON.stringify(newConfig, null, 2), "utf8");
     }
-    cachedConfig = newConfig;
     console.log("Config updated and saved to profile.json");
   } catch (err) {
     console.error("Failed to save config:", err);
@@ -81,6 +76,5 @@ export function saveConfig(newConfig: ProfileConfig): void {
 }
 
 export function reloadConfig(): ProfileConfig {
-  cachedConfig = null;
   return getConfig();
 }
