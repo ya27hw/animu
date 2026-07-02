@@ -632,9 +632,9 @@
       if (input.type === 'checkbox') {
         payload[name] = input.checked;
       } else if (input.type === 'number') {
-        payload[name] = input.value !== '' ? Number(input.value) : undefined;
+        payload[name] = input.value !== '' ? Number(input.value) : null;
       } else {
-        payload[name] = input.value !== '' ? input.value : undefined;
+        payload[name] = input.value !== '' ? input.value : '';
       }
     });
 

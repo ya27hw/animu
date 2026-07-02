@@ -1,6 +1,6 @@
 import axios from "axios";
 import { AiringSchedule, AniQuery, MediaRelations, getConfig } from "@utils/index";
-import { proxy } from "@utils/models";
+import { getProxyAgent } from "@utils/models";
 class Anilist {
   api: string;
   authLink: string;
@@ -34,13 +34,15 @@ class Anilist {
         }
       : baseHeaders;
 
+    const proxyAgent = getProxyAgent();
     const requestConfig = {
       method: "post" as const,
       data: {
         query,
         variables,
       },
-      proxy: useProxyVal ? (proxy as any) : undefined,
+      httpsAgent: proxyAgent,
+      proxy: false as const,
       timeout: 10000,
     };
 

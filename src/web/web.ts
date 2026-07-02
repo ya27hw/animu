@@ -11,6 +11,7 @@ import Nyaa from "@nyaa/nyaa";
 import qbit from "@qbit/qbit";
 import { arrayUnion } from "firebase/firestore";
 import { getConfig, saveConfig, reloadConfig } from "@utils/index";
+const { HttpsProxyAgent } = require("https-proxy-agent");
 
 type AnimeApiItem = {
   mediaId: number;
@@ -726,18 +727,12 @@ class WebUI {
           return;
         }
 
-        const testProxy: any = {
-          protocol: "http",
-          host: proxyAddress,
-          port: Number(proxyPort) || 80,
-        };
-
+        let authStr = "";
         if (proxyUsername || proxyPassword) {
-          testProxy.auth = {
-            username: proxyUsername || "",
-            password: proxyPassword || "",
-          };
+          authStr = `${encodeURIComponent(proxyUsername || "")}:${encodeURIComponent(proxyPassword || "")}@`;
         }
+        const proxyUrl = `http://${authStr}${proxyAddress}:${Number(proxyPort) || 80}`;
+        const agent = new HttpsProxyAgent(proxyUrl);
 
         try {
           const testRes = await axios.post(
@@ -746,7 +741,8 @@ class WebUI {
               query: "query { Page { pageInfo { total } } }",
             },
             {
-              proxy: testProxy,
+              httpsAgent: agent,
+              proxy: false,
               timeout: 5000,
               headers: {
                 Accept: "application/json",

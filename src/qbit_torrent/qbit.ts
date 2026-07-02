@@ -4,7 +4,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { getConfig } from "@utils/index";
-import { proxy } from "@utils/models";
+import { getProxyAgent } from "@utils/models";
 
 class QbitTorrent {
   private sid?: qbitSID;
@@ -226,9 +226,11 @@ class QbitTorrent {
       `${safeName}-${Date.now()}.torrent`,
     );
 
+    const proxyAgent = getProxyAgent();
     const torrentResponse = await axios.get<any>(link, {
       responseType: "arraybuffer",
-      proxy: proxy as any,
+      httpsAgent: proxyAgent,
+      proxy: false,
     });
 
     await fs.writeFile(torrentFilePath, Buffer.from(torrentResponse.data));

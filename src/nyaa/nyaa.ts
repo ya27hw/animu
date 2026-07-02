@@ -16,7 +16,7 @@ import { getEpisodeAirDates, getNumbers, verifyQuery } from "@nyaa/utils";
 import { getConfig } from "@utils/index";
 import anitomy from "anitomy-js";
 import axios from "axios";
-import { proxy } from "@utils/models";
+import { getProxyAgent } from "@utils/models";
 
 class Nyaa {
   private parser: any;
@@ -352,11 +352,13 @@ class Nyaa {
     return rssLink;
   }
   private async getResponse(rssLink: URL, enableProxy: boolean) {
+    const proxyAgent = enableProxy ? getProxyAgent() : undefined;
     return await axios.get(
       rssLink.href,
-      enableProxy
+      proxyAgent
         ? {
-            proxy: proxy,
+            httpsAgent: proxyAgent,
+            proxy: false,
           }
         : {},
     );

@@ -30,6 +30,7 @@
     "cron": "^4.0.0",
     "discord-webhook-node": "^1.1.8",
     "firebase": "11.4.0",
+    "https-proxy-agent": "^9.1.0",
     "p-limit": "3",
     "pm2-logrotate": "^3.0.0",
     "rss-parser": "^3.13.0",
