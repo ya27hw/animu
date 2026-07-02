@@ -39,10 +39,7 @@ class ui {
     console.log("Running the scheduler...");
     webUI.start();
     await DB.logIn();
-    // Run every x minutes, from 12:00pm to 04:00am
-    // Then run every 25 minutes, from 05:00am to 11:00am
-    await schedule.run(RUNTIMES.peak); // Peak hours
-    await schedule.run(RUNTIMES.offPeak); // Off peak hours
+    await schedule.run();
     schedule.runClearOfflineDB(RUNTIMES.clearOfflineDB); // Clear the offlineDB every day
   }
   private async runWebUi() {

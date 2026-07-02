@@ -1,4 +1,4 @@
-import { interval } from "../profile.json";
+import { getConfig } from "./config";
 
 class OfflineAnime {
   episodes: Array<number>;
@@ -15,7 +15,7 @@ class OfflineAnime {
    */
   public setTimeoutUntil(time: number): void {
     const timeInMinutes = time / 60;
-    this.timeouts = Math.round(timeInMinutes / interval);
+    this.timeouts = Math.round(timeInMinutes / (getConfig().interval ?? 30));
   }
 
   public setTimeout() {

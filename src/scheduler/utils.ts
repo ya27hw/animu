@@ -1,6 +1,9 @@
 import { MessageBuilder, Webhook } from "discord-webhook-node";
-import { webhook } from "../profile.json";
-const hook: Webhook = new Webhook(webhook);
+import { getConfig } from "@utils/index";
+
+function getWebhook(): Webhook {
+  return new Webhook(getConfig().webhook || "https://discord.com/api/webhooks/mock");
+}
 import { CronTime } from "cron";
 import { DateTime } from "luxon";
 import { RUNTIMES } from "@utils/constants";
@@ -14,7 +17,7 @@ async function alertUser(anime: string, image: string) {
     .setDescription(`Animu could not add ${anime} to qBittorrent.`)
     .setImage(image);
   try {
-    await hook.send(msg);
+    await getWebhook().send(msg);
   } catch (err) {
     console.error("Discord webhook send failed (alertUser):", err);
   }
@@ -77,7 +80,7 @@ async function sendAnimeDownloadedHook(
   }
 
   try {
-    await hook.send(msg);
+    await getWebhook().send(msg);
   } catch (err) {
     console.error("Discord webhook send failed (sendAnimeDownloadedHook):", err);
   }
@@ -169,8 +172,9 @@ async function countPastRelations(
  * @param  {any} anime - Anime object to handle
  * @returns Promise
  */
-async function handleWithDelay(this: any, anime: any): Promise<void> {
-  return this.handleAnime(anime);
+async function handleWithDelay(this: any, anime: any, fireDBAnime?: any): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return this.handleAnime(anime, fireDBAnime);
 }
 
 export {

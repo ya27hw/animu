@@ -3,14 +3,7 @@ import axios from "axios";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import {
-  qbit_url,
-  password,
-  username,
-  rootDir,
-  altRootDir,
-  useProxy,
-} from "profile.json";
+import { getConfig } from "@utils/index";
 import { proxy } from "@utils/models";
 
 class QbitTorrent {
@@ -23,14 +16,15 @@ class QbitTorrent {
 
   // Function to authenticate and get the SID (Session ID)
   private async authenticate() {
-    const authLink = new URL(qbit_url);
+    const config = getConfig();
+    const authLink = new URL(config.qbit_url || "http://localhost:8080");
     authLink.pathname = "/api/v2/auth/login";
 
     try {
       const response = await axios.post(
         authLink.toString(),
-        `username=${encodeURIComponent(username)}&password=${encodeURIComponent(
-          password
+        `username=${encodeURIComponent(config.username || "")}&password=${encodeURIComponent(
+          config.password || ""
         )}`,
         {
           headers: {
@@ -110,7 +104,8 @@ class QbitTorrent {
     episode?: number,
     useProxyDownload: boolean = false,
   ): Promise<boolean> {
-    const authLink = new URL(qbit_url);
+    const config = getConfig();
+    const authLink = new URL(config.qbit_url || "http://localhost:8080");
     authLink.pathname = "/api/v2/torrents/add";
 
     const authenticated = await this.ensureAuthenticated();
@@ -123,8 +118,10 @@ class QbitTorrent {
       const rename = episode ? `${title} - ${episode}` : title;
       // qBittorrent cannot use this app's Axios proxy when it receives a URL.
       // If the app is proxying Nyaa, fetch the .torrent here and upload it.
-      const shouldUploadTorrentFile = useProxy || useProxyDownload;
-      const baseRootDir = useProxyDownload ? altRootDir : rootDir;
+      const shouldUploadTorrentFile = config.useProxy || useProxyDownload;
+      const baseRootDir = useProxyDownload
+        ? (config.altRootDir || "/mock")
+        : (config.rootDir || "/mock");
       const savePath = path.posix.join(baseRootDir, title);
       const headers = {
         Cookie: `SID=${this.sid?.SID}`,
@@ -229,9 +226,9 @@ class QbitTorrent {
       `${safeName}-${Date.now()}.torrent`,
     );
 
-    const torrentResponse = await axios.get<ArrayBuffer>(link, {
+    const torrentResponse = await axios.get<any>(link, {
       responseType: "arraybuffer",
-      proxy,
+      proxy: proxy as any,
     });
 
     await fs.writeFile(torrentFilePath, Buffer.from(torrentResponse.data));
@@ -240,8 +237,12 @@ class QbitTorrent {
   }
   // Delete torrent based on what the torrent is named
   public async deleteTorrent(name: string): Promise<boolean> {
-    const authLink = new URL(qbit_url);
-    authLink.pathname = "/api/v2/torrents/delete";
+    const config = getConfig();
+    const infoLink = new URL(config.qbit_url || "http://localhost:8080");
+    infoLink.pathname = "/api/v2/torrents/info";
+
+    const deleteLink = new URL(config.qbit_url || "http://localhost:8080");
+    deleteLink.pathname = "/api/v2/torrents/delete";
 
     try {
       const authenticated = await this.ensureAuthenticated();
@@ -250,9 +251,30 @@ class QbitTorrent {
         return false;
       }
 
+      // Get torrent info to find the hash matching the name
+      const infoResponse = await axios.post(
+        infoLink.toString(),
+        `sort=added_on&limit=250&reverse=true`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Cookie: `SID=${this.sid?.SID}`,
+          },
+        }
+      );
+
+      const torrents = infoResponse.data;
+      const targetTorrent = torrents.find((torrent: any) => torrent.name === name);
+      if (!targetTorrent) {
+        console.error(`Torrent with name "${name}" not found.`);
+        return false;
+      }
+
+      const hash = targetTorrent.hash;
+
       const response = await axios.post(
-        authLink.toString(),
-        `hashes=${encodeURIComponent(name)}`,
+        deleteLink.toString(),
+        `hashes=${encodeURIComponent(hash)}`,
         {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -274,7 +296,8 @@ class QbitTorrent {
   }
 
   private async checkTorrent(name: string): Promise<boolean> {
-    const authLink = new URL(qbit_url);
+    const config = getConfig();
+    const authLink = new URL(config.qbit_url || "http://localhost:8080");
     authLink.pathname = "/api/v2/torrents/info";
 
     try {

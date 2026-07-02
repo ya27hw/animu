@@ -5,6 +5,8 @@ import Nyaa from "@nyaa/nyaa";
 import qbit from "@qbit/qbit";
 import pLimit from "p-limit";
 import "colors";
+import fs from "fs";
+import path from "path";
 import {
   alertUser,
   countPastRelations,
@@ -13,27 +15,101 @@ import {
   logNextRunTime,
   sendAnimeDownloadedHook,
 } from "@scheduler/utils";
-import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB } from "@utils/index";
-import { interval, setCompletedToRewatching, triggerGenre } from "profile.json";
+import { NyaaTorrent, AniQuery, OfflineAnime, OfflineDB, getConfig } from "@utils/index";
 import { arrayUnion, DocumentData } from "firebase/firestore";
 
 class Scheduler {
   private offlineAnimeDB: OfflineDB;
   private limit: ReturnType<typeof pLimit>;
   private cronJobs: Map<string, CronJob>;
+  private cacheFilePath: string;
 
   constructor() {
     this.limit = pLimit(3);
     this.offlineAnimeDB = {};
     this.cronJobs = new Map();
+    this.cacheFilePath = path.join(__dirname, "..", "..", "logs", "offline-cache.json");
+    this.loadOfflineCache();
+  }
+
+  private loadOfflineCache() {
+    try {
+      if (fs.existsSync(this.cacheFilePath)) {
+        const raw = fs.readFileSync(this.cacheFilePath, "utf8");
+        const data = JSON.parse(raw);
+        for (const mediaId of Object.keys(data)) {
+          const animeData = data[mediaId];
+          const offlineAnime = new OfflineAnime(animeData.episodes || []);
+          offlineAnime.starting_episode = animeData.starting_episode || 0;
+          offlineAnime.timeouts = animeData.timeouts || 0;
+          offlineAnime.maxTimeouts = animeData.maxTimeouts || 0;
+          this.offlineAnimeDB[mediaId] = offlineAnime;
+        }
+        console.log(`Loaded ${Object.keys(data).length} cached anime entries from offline-cache.json`);
+      }
+    } catch (err) {
+      console.error("Failed to load offline cache:", err);
+    }
+  }
+
+  private saveOfflineCacheToFile() {
+    try {
+      const dir = path.dirname(this.cacheFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const serializable: Record<string, any> = {};
+      for (const mediaId of Object.keys(this.offlineAnimeDB)) {
+        const item = this.offlineAnimeDB[mediaId];
+        serializable[mediaId] = {
+          episodes: item.episodes,
+          starting_episode: item.starting_episode,
+          timeouts: item.timeouts,
+          maxTimeouts: item.maxTimeouts,
+        };
+      }
+
+      fs.writeFileSync(this.cacheFilePath, JSON.stringify(serializable, null, 2), "utf8");
+    } catch (err) {
+      console.error("Failed to save offline cache:", err);
+    }
+  }
+
+  private shouldRunAt(date: Date): boolean {
+    const hour = date.getHours();
+    const minute = date.getMinutes();
+
+    const isPeak = (hour >= 12 && hour <= 23) || (hour >= 0 && hour <= 4);
+    const isOffPeak = hour >= 5 && hour <= 11;
+
+    if (isPeak) {
+      return minute % (getConfig().interval ?? 30) === 0;
+    }
+    if (isOffPeak) {
+      return minute % (getConfig().offpeakInterval ?? 25) === 0;
+    }
+    return false;
+  }
+
+  public updateOfflineCache(mediaId: number, episode: number) {
+    if (!this.offlineAnimeDB[mediaId]) {
+      this.offlineAnimeDB[mediaId] = new OfflineAnime([]);
+    }
+    if (!this.offlineAnimeDB[mediaId].episodes.includes(episode)) {
+      this.offlineAnimeDB[mediaId].episodes.push(episode);
+      this.offlineAnimeDB[mediaId].episodes.sort((a, b) => a - b);
+    }
+    this.offlineAnimeDB[mediaId].resetTimeout();
+    this.saveOfflineCacheToFile();
   }
 
   /**
-   * Runs the scheduler periodically every x minutes
-   * @param  {string} cronTime - Cron time
+   * Runs the scheduler periodically
    * @returns {Promise<void>}
    */
-  public async run(cronTime: string): Promise<void> {
+  public async run(): Promise<void> {
+    const cronTime = "* * * * *"; // Run check check every minute
     const existingJob = this.cronJobs.get(cronTime);
 
     if (existingJob) {
@@ -46,6 +122,10 @@ class Scheduler {
       cronTime,
 
       async () => {
+        if (!this.shouldRunAt(new Date())) {
+          return;
+        }
+
         if (isRunning) {
           console.log("❌ Previous job still running. Skipping this run.".blue);
           return; // Exit if the previous job is still running
@@ -85,6 +165,7 @@ class Scheduler {
   public clearOfflineDB(mediaId?: string) {
     if (mediaId) delete this.offlineAnimeDB[mediaId];
     else this.offlineAnimeDB = {};
+    this.saveOfflineCacheToFile();
   }
 
   /**
@@ -104,10 +185,11 @@ class Scheduler {
         nyaaTorrent.link,
         anime.media.title.romaji,
         nyaaTorrent.episode,
-        anime.media.genres?.includes(triggerGenre),
+        anime.media.genres?.includes(getConfig().triggerGenre ?? "Ecchi"),
       );
       if (!isAdded) {
         this.offlineAnimeDB[anime.mediaId].setTimeout();
+        this.saveOfflineCacheToFile();
         alertUser(anime.media.title.romaji, anime.media.coverImage.extraLarge);
 
         return null;
@@ -131,6 +213,7 @@ class Scheduler {
     // Append to offlineDB, and remove the timeout
     this.offlineAnimeDB[anime.mediaId].episodes = downloadedEpisodes;
     this.offlineAnimeDB[anime.mediaId].resetTimeout();
+    this.saveOfflineCacheToFile();
 
     const color = anime.media.coverImage.color
       ? Number(anime.media.coverImage.color.replace("#", "0x"))
@@ -176,7 +259,7 @@ class Scheduler {
     const downloadedCount = new Set(downloadedEpisodes).size;
 
     return (
-      setCompletedToRewatching &&
+      !!getConfig().setCompletedToRewatching &&
       anime.media.status === "FINISHED" &&
       anime.media.episodes > 0 &&
       downloadedCount >= anime.media.episodes
@@ -225,11 +308,15 @@ class Scheduler {
    * @param  {AniQuery} anime - Anime object taken from userlist
    * @returns Promise
    */
-  private async handleAnime(anime: AniQuery): Promise<void> {
+  private async handleAnime(
+    anime: AniQuery,
+    preloadedDbEntry?: DocumentData,
+  ): Promise<void> {
     let fireDBAnime: DocumentData;
 
     try {
-      const fireDBEntry = await DB.getByMediaId(`${anime.mediaId}`);
+      const fireDBEntry =
+        preloadedDbEntry || (await DB.getByMediaId(`${anime.mediaId}`));
 
       // Create FireDB entry if it doesn't exist
       if (!fireDBEntry) {
@@ -502,6 +589,7 @@ class Scheduler {
     } // Finish the function if successful
     else {
       this.offlineAnimeDB[anime.mediaId].setTimeout();
+      this.saveOfflineCacheToFile();
 
       logNextRunTime(
         anime.media.title.romaji,
@@ -520,14 +608,28 @@ class Scheduler {
     // Return if empty list.
     if (animeList.length === 0) return;
 
-    // List of promises. Each promise will be executed in parallel
-    const promises: AniQuery[] = [];
+    // Fetch all Firestore entries in one call!
+    const fireDbEntriesList = await DB.getFromDb();
+    const fireDbMap = new Map<string, any>();
+    if (fireDbEntriesList) {
+      for (const entry of fireDbEntriesList) {
+        if (entry.mediaId) {
+          fireDbMap.set(entry.mediaId.toString(), entry);
+        }
+      }
+    }
+
+    // List of tasks. Each task holds the anime and its Firestore entry if available
+    const promises: Array<{ anime: AniQuery; fireDBAnime: any }> = [];
 
     for (const anime of animeList) {
+      const fireDBAnime = fireDbMap.get(anime.mediaId.toString());
+
       // Populate offlineDB if anime is not present.
       if (!this.offlineAnimeDB.hasOwnProperty(anime.mediaId)) {
         this.offlineAnimeDB[anime.mediaId] = new OfflineAnime([]);
-        promises.push(anime);
+        this.saveOfflineCacheToFile();
+        promises.push({ anime, fireDBAnime });
       } else {
         const offlineAnime = this.offlineAnimeDB[anime.mediaId];
 
@@ -535,10 +637,11 @@ class Scheduler {
           // Log how many minutes left until the next run
           console.log(
             `\u2139\uFE0F Next run for ${anime.media.title.romaji} in ${
-              offlineAnime.timeouts * interval
+              offlineAnime.timeouts * (getConfig().interval ?? 30)
             } minutes`.blue,
           );
           this.offlineAnimeDB[anime.mediaId].timeouts = --offlineAnime.timeouts;
+          this.saveOfflineCacheToFile();
 
           continue;
         }
@@ -551,17 +654,22 @@ class Scheduler {
         // If no aired episodes, return.
         if (airingEpisodes === 0) continue;
 
-        // Begin search for new episode if downloaded episodes do not match aired episodes
-        if (
-          episodesOffline[episodesOffline.length - 1] !==
-          airingEpisodes + offlineAnime.starting_episode
-        )
-          promises.push(anime);
+        // Begin search for new episode if any expected episode is missing from downloaded episodes
+        const startEpisode = anime.progress + offlineAnime.starting_episode;
+        const endEpisode = airingEpisodes + offlineAnime.starting_episode;
+        let hasMissing = false;
+        for (let ep = startEpisode + 1; ep <= endEpisode; ep++) {
+          if (!episodesOffline.includes(ep)) {
+            hasMissing = true;
+            break;
+          }
+        }
+        if (hasMissing) promises.push({ anime, fireDBAnime });
       }
     }
 
-    const tasks = promises.map((anime) =>
-      this.limit(() => handleWithDelay.call(this, anime)),
+    const tasks = promises.map(({ anime, fireDBAnime }) =>
+      this.limit(() => handleWithDelay.call(this, anime, fireDBAnime)),
     );
 
     await Promise.all(tasks);

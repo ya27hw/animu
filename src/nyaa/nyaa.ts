@@ -13,20 +13,13 @@ import {
   SearchMode,
 } from "@utils/index";
 import { getEpisodeAirDates, getNumbers, verifyQuery } from "@nyaa/utils";
-import {
-  resolution,
-  useProxy,
-  nyaaUrl,
-  altNyaaUrl,
-  triggerGenre,
-} from "../profile.json";
+import { getConfig } from "@utils/index";
 import anitomy from "anitomy-js";
 import axios from "axios";
 import { proxy } from "@utils/models";
 
 class Nyaa {
   private parser: any;
-  private enableProxy: boolean;
 
   constructor() {
     this.parser = new Parser({
@@ -34,24 +27,24 @@ class Nyaa {
         item: ["nyaa:seeders", "nyaa:size"],
       },
     });
-    this.enableProxy = useProxy;
   }
 
   public shouldUseProxyDownload(anime: AniQuery): boolean {
-    return anime.media.genres?.includes(triggerGenre) ?? false;
+    return anime.media.genres?.includes(getConfig().triggerGenre ?? "Ecchi") ?? false;
   }
 
   private getSearchContext(anime: AniQuery) {
+    const config = getConfig();
     if (this.shouldUseProxyDownload(anime)) {
       return {
-        searchUrl: altNyaaUrl,
+        searchUrl: config.altNyaaUrl || "https://nyaa.si",
         enableProxy: true,
       };
     }
 
     return {
-      searchUrl: nyaaUrl,
-      enableProxy: this.enableProxy,
+      searchUrl: config.nyaaUrl || "https://nyaa.si",
+      enableProxy: !!config.useProxy,
     };
   }
 
@@ -124,7 +117,7 @@ class Nyaa {
           rssResult.data,
           animeTitle,
           searchMode,
-          searchUrl === altNyaaUrl,
+          searchUrl === (getConfig().altNyaaUrl || "https://nyaa.si"),
           airDates,
           ignoreAirdateChecks,
           startEpisode,
@@ -155,7 +148,7 @@ class Nyaa {
           rssResult.data,
           animeTitle,
           searchMode,
-          searchUrl === altNyaaUrl,
+          searchUrl === (getConfig().altNyaaUrl || "https://nyaa.si"),
           airDates,
           ignoreAirdateChecks,
           episode,
@@ -219,9 +212,9 @@ class Nyaa {
         const score = verifyQuery(
           animeTitle,
           parsed,
-          searchUrl === altNyaaUrl
+          searchUrl === (getConfig().altNyaaUrl || "https://nyaa.si")
             ? Resolution.NONE
-            : (resolution as Resolution),
+            : (getConfig().resolution as Resolution),
           SearchMode.EPISODE,
           item.pubDate,
           airDates,
@@ -331,11 +324,13 @@ class Nyaa {
     const query = animeTitle.trim();
     if (!query) return [];
 
-    const searchUrl = useAltUrl ? altNyaaUrl : nyaaUrl;
+    const searchUrl = useAltUrl
+      ? (getConfig().altNyaaUrl || "https://nyaa.si")
+      : (getConfig().nyaaUrl || "https://nyaa.si");
     const rssResult = await this.fetchRSSFeed(
       query,
       searchUrl,
-      useAltUrl ? true : this.enableProxy,
+      useAltUrl ? true : !!getConfig().useProxy,
     );
 
     if (rssResult.status !== 200 || !rssResult.data?.length) return [];
@@ -348,7 +343,7 @@ class Nyaa {
     // Set some filters, and then the search query
     rssLink.searchParams.set("page", "rss");
     rssLink.searchParams.set("q", query);
-    if (url === nyaaUrl) rssLink.searchParams.set("c", "1_2");
+    if (url === (getConfig().nyaaUrl || "https://nyaa.si")) rssLink.searchParams.set("c", "1_2");
     else rssLink.searchParams.set("c", "1_1");
     rssLink.searchParams.set("f", "0");
     rssLink.searchParams.set("o", "desc");
@@ -487,7 +482,7 @@ class Nyaa {
       const rating = verifyQuery(
         searchQuery,
         animeParsedData,
-        useAltUrl ? Resolution.NONE : (resolution as Resolution),
+        useAltUrl ? Resolution.NONE : (getConfig().resolution as Resolution),
         searchMode,
         nyaaPubDate,
         airDates,

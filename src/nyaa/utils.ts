@@ -1,8 +1,7 @@
-import { AiringSchedule, Resolution, SearchMode } from "@utils/index";
+import { AiringSchedule, Resolution, SearchMode, getConfig } from "@utils/index";
 import { BestMatch, findBestMatch } from "string-similarity";
 import anitomy from "anitomy-js";
 import anilist from "@ani/anilist";
-import { excludeReleaseGroups } from "profile.json";
 
 const pageNumberLimit: number = 25;
 const AIRDATE_BUFFER_SECONDS = 2 * 24 * 60 * 60;
@@ -128,7 +127,7 @@ function verifyQuery(
   ...episodes: number[]
 ): number {
   const group = (animeParsedData.release_group ?? "").trim().toLowerCase();
-  const isExcludedGroup = excludeReleaseGroups
+  const isExcludedGroup = (getConfig().excludeReleaseGroups || [])
     .map((g) => g.toLowerCase())
     .includes(group);
   if (

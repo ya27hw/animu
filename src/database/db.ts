@@ -1,18 +1,19 @@
 import { FirebaseApp, initializeApp } from "firebase/app";
 import { firebaseConfig } from "./creds.json";
-import { id, aniUserName, email, emailPassword } from "../profile.json";
-import { AniQuery } from "@utils/index";
+import { AniQuery, getConfig } from "@utils/index";
 import {
   getAuth,
   signInWithEmailAndPassword,
   UserCredential,
 } from "firebase/auth";
 import {
+  collection,
   deleteDoc,
   doc,
   DocumentData,
   Firestore,
   getDoc,
+  getDocs,
   getFirestore,
   setDoc,
   Timestamp,
@@ -31,7 +32,11 @@ class DB {
   public async logIn() {
     try {
       const auth = getAuth();
-      DB.user = await signInWithEmailAndPassword(auth, email, emailPassword);
+      DB.user = await signInWithEmailAndPassword(
+        auth,
+        getConfig().email || "",
+        getConfig().emailPassword || ""
+      );
     } catch (e) {
       console.error("Firebase login failed:", e);
       throw e;
@@ -122,13 +127,16 @@ class DB {
    * Gets the users animelist
    * @returns {Promise}
    */
-  public async getFromDb(): Promise<DocumentData | undefined> {
+  public async getFromDb(): Promise<DocumentData[] | undefined> {
     try {
-      const docSnap = await getDoc(
-        doc(this.db, "animelists", DB.user.user?.uid, "anime")
+      const querySnapshot = await getDocs(
+        collection(this.db, "animelists", DB.user.user?.uid, "anime")
       );
-      if (docSnap.exists()) return docSnap.data();
-      return undefined;
+      const list: DocumentData[] = [];
+      querySnapshot.forEach((doc) => {
+        list.push(doc.data());
+      });
+      return list;
     } catch (error) {
       console.error(error);
       return undefined;
@@ -138,8 +146,8 @@ class DB {
   public async createUserDB() {
     await setDoc(doc(this.db, "animelists", DB.user.user?.uid), {
       userId: DB.user.user?.uid,
-      userName: aniUserName,
-      "Anilist ID": id,
+      userName: getConfig().aniUserName,
+      "Anilist ID": getConfig().id,
       "Date Created": Timestamp.now(),
     });
   }

@@ -1,7 +1,5 @@
 import axios from "axios";
-import { aniUserName } from "../profile.json";
-import { AiringSchedule, AniQuery, MediaRelations } from "@utils/index";
-import { bearerTokenAnilist, useProxy } from "../profile.json";
+import { AiringSchedule, AniQuery, MediaRelations, getConfig } from "@utils/index";
 import { proxy } from "@utils/models";
 class Anilist {
   api: string;
@@ -20,15 +18,19 @@ class Anilist {
    */
 
   private async getData(query: string, variables?: Object): Promise<any> {
+    const configData = getConfig();
+    const token = configData.bearerTokenAnilist;
+    const useProxyVal = configData.useProxy;
+
     const baseHeaders: Record<string, string> = {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
 
-    const headersWithAuth = bearerTokenAnilist
+    const headersWithAuth = token
       ? {
           ...baseHeaders,
-          Authorization: `Bearer ${bearerTokenAnilist}`,
+          Authorization: `Bearer ${token}`,
         }
       : baseHeaders;
 
@@ -38,7 +40,7 @@ class Anilist {
         query,
         variables,
       },
-      proxy: useProxy ? proxy : undefined,
+      proxy: useProxyVal ? (proxy as any) : undefined,
       timeout: 10000,
     };
 
@@ -61,7 +63,7 @@ class Anilist {
         // even when the same query works anonymously.
         if (
           !authFallbackTried &&
-          bearerTokenAnilist &&
+          token &&
           (status === 400 || status === 401)
         ) {
           currentHeaders = baseHeaders;
@@ -245,7 +247,7 @@ class Anilist {
       }
     }`;
     var variables = {
-      userName: aniUserName,
+      userName: getConfig().aniUserName,
     };
 
     // Errors can sometimes happen here, so we need to catch it
@@ -309,7 +311,7 @@ class Anilist {
     }`;
 
     var variables = {
-      userName: aniUserName,
+      userName: getConfig().aniUserName,
     };
 
     // Errors can sometimes happen here, so we need to catch it

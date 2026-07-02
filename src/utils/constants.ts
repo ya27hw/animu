@@ -1,9 +1,12 @@
-import { clear } from "console";
-import { interval, offpeakInterval } from "profile.json";
+import { getConfig } from "./config";
 
 const RUNTIMES = {
-  offPeak: `*/${offpeakInterval} 05-11 * * *`,
-  peak: `*/${interval} 12-23,00-04 * * *`,
+  get offPeak() {
+    return `*/${getConfig().offpeakInterval ?? 25} 05-11 * * *`;
+  },
+  get peak() {
+    return `*/${getConfig().interval ?? 30} 12-23,00-04 * * *`;
+  },
   clearOfflineDB: "0 0 */1 * *",
 };
 

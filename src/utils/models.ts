@@ -1,17 +1,20 @@
-import {
-  proxyAddress,
-  proxyPort,
-  proxyUsername,
-  proxyPassword,
-} from "profile.json";
+import { getConfig } from "./config";
 
-const proxy = {
-  protocol: "http",
-  host: proxyAddress,
-  port: proxyPort,
-  auth: {
-    username: proxyUsername,
-    password: proxyPassword,
+const proxy: any = {
+  get protocol() {
+    return "http";
+  },
+  get host() {
+    return getConfig().proxyAddress || "";
+  },
+  get port() {
+    return getConfig().proxyPort || 80;
+  },
+  get auth() {
+    return {
+      username: getConfig().proxyUsername || "",
+      password: getConfig().proxyPassword || "",
+    };
   },
 };
 
