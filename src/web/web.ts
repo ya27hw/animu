@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { URL } from "url";
+import axios from "axios";
 import anilist from "@ani/anilist";
 import DB from "@db/db";
 import schedule from "@scheduler/schedule";
@@ -597,21 +598,24 @@ class WebUI {
   private formatLogContent(content: string): string {
     if (!content) return content;
 
-    const stripAnsi = (value: string) =>
-      value.replace(
+    const cleanAnsi = (value: string) => {
+      const withActualEsc = value.replace(/\\u001b|\\x1b/g, "\u001b");
+      return withActualEsc.replace(
         /[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g,
         "",
       );
+    };
 
     const lines = content.split(/\r?\n/);
     const formatted = lines.map((line) => {
-      const cleanLine = stripAnsi(line);
-      const trimmed = cleanLine.trim();
+      const trimmed = line.trim();
       if (!trimmed) return "";
 
       try {
         const parsed = JSON.parse(trimmed) as Record<string, any>;
-        if (!parsed || typeof parsed !== "object") return cleanLine;
+        if (!parsed || typeof parsed !== "object") {
+          return cleanAnsi(trimmed);
+        }
 
         const timestamp =
           parsed.timestamp ||
@@ -629,22 +633,22 @@ class WebUI {
           parsed.err ??
           "";
 
-        const tsText = timestamp ? String(timestamp) : "";
+        const tsText = timestamp ? cleanAnsi(String(timestamp)).trim() : "";
         const msgText =
           typeof message === "string"
-            ? stripAnsi(message)
-            : stripAnsi(JSON.stringify(message));
+            ? cleanAnsi(message).trim()
+            : cleanAnsi(JSON.stringify(message)).trim();
 
-        if (!tsText && !msgText) return cleanLine;
+        if (!tsText && !msgText) return cleanAnsi(trimmed);
         if (!tsText) return msgText;
         if (!msgText) return tsText;
         return `${tsText} ${msgText}`;
       } catch {
-        return cleanLine;
+        return cleanAnsi(trimmed);
       }
     });
 
-    return formatted.join("\n");
+    return formatted.filter(Boolean).join("\n");
   }
 
   /**
@@ -707,7 +711,58 @@ class WebUI {
         const updatedConfig = { ...currentConfig, ...body };
         saveConfig(updatedConfig);
         reloadConfig();
+        this.dbReady = false;
+        qbit.resetSession();
         this.sendJson(res, 200, { ok: true, config: getConfig() });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/test-proxy") {
+        const body = await this.readJsonBody(req);
+        const { proxyAddress, proxyPort, proxyUsername, proxyPassword } = body;
+
+        if (!proxyAddress) {
+          this.sendJson(res, 400, { ok: false, error: "Proxy address is required." });
+          return;
+        }
+
+        const testProxy: any = {
+          protocol: "http",
+          host: proxyAddress,
+          port: Number(proxyPort) || 80,
+        };
+
+        if (proxyUsername || proxyPassword) {
+          testProxy.auth = {
+            username: proxyUsername || "",
+            password: proxyPassword || "",
+          };
+        }
+
+        try {
+          const testRes = await axios.post(
+            "https://graphql.anilist.co",
+            {
+              query: "query { Page { pageInfo { total } } }",
+            },
+            {
+              proxy: testProxy,
+              timeout: 5000,
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (testRes.status >= 200 && testRes.status < 400) {
+            this.sendJson(res, 200, { ok: true, message: "Proxy connection successful!" });
+          } else {
+            this.sendJson(res, 200, { ok: false, error: `Proxy returned status ${testRes.status}` });
+          }
+        } catch (err: any) {
+          this.sendJson(res, 200, { ok: false, error: err.message || "Failed to connect via proxy." });
+        }
         return;
       }
 

@@ -325,6 +325,10 @@ class QbitTorrent {
       return false;
     }
   }
+
+  public resetSession() {
+    this.sid = undefined;
+  }
 }
 
 export default new QbitTorrent();

@@ -14,6 +14,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <!-- Custom Anime Theme Styling Overrides -->
   <style type="text/tailwindcss">
+    @custom-variant dark (&:where(.dark, .dark *));
+
     @layer base {
       :root {
         --font-outfit: 'Outfit', sans-serif;
@@ -248,9 +250,66 @@
               <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-blue-600 dark:text-blue-400">
                 <i class="fa-solid fa-bell text-base"></i>Notifications
               </h3>
-              <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Discord Webhook URL</label>
-                <input type="url" name="webhook" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" placeholder="https://discord.com/api/webhooks/..." />
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Discord Webhook URL</label>
+                  <input type="url" name="webhook" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" placeholder="https://discord.com/api/webhooks/..." />
+                </div>
+                
+                <div class="border-t border-slate-200/50 dark:border-slate-800/50 pt-4">
+                  <h4 class="text-xs font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Discord Bot Customization</h4>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Bot Username</label>
+                      <input type="text" name="discord_username" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm font-medium focus:border-violet-500 outline-none" placeholder="Animu" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Avatar URL</label>
+                      <input type="url" name="discord_avatar_url" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm font-medium focus:border-violet-500 outline-none" placeholder="https://..." />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="border-t border-slate-200/50 dark:border-slate-800/50 pt-4 space-y-3">
+                  <h4 class="text-xs font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Embed Customization</h4>
+                  
+                  <div class="flex flex-wrap items-center gap-6 py-1">
+                    <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+                      <input type="checkbox" name="discord_enable_download" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+                      Notify on Downloads
+                    </label>
+                    <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+                      <input type="checkbox" name="discord_enable_fail" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+                      Notify on Failures
+                    </label>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Download Color</label>
+                      <input type="color" name="discord_download_color" class="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1 outline-none cursor-pointer" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Failure Color</label>
+                      <input type="color" name="discord_fail_color" class="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1 outline-none cursor-pointer" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Download Title Template</label>
+                    <input type="text" name="discord_download_title" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm font-medium focus:border-violet-500 outline-none" placeholder="**{title}** is downloading!" />
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Failure Title Template</label>
+                    <input type="text" name="discord_fail_title" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm font-medium focus:border-violet-500 outline-none" placeholder="Anime Not Added" />
+                  </div>
+                  
+                  <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Failure Description Template</label>
+                    <input type="text" name="discord_fail_description" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm font-medium focus:border-violet-500 outline-none" placeholder="Animu could not add {title} to qBittorrent." />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -348,9 +407,14 @@
 
             <!-- Network Proxy Parameters -->
             <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 space-y-4">
-              <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400">
-                <i class="fa-solid fa-network-wired text-base"></i>Network Proxy Setup
-              </h3>
+              <div class="flex items-center justify-between">
+                <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400">
+                  <i class="fa-solid fa-network-wired text-base"></i>Network Proxy Setup
+                </h3>
+                <button type="button" id="btn-test-proxy" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md shadow-emerald-500/10 active:scale-95 text-xs font-bold transition-all duration-200 cursor-pointer flex items-center gap-1.5">
+                  <i class="fa-solid fa-vial"></i>Test Connection
+                </button>
+              </div>
               <div class="space-y-4">
                 <div class="grid grid-cols-3 gap-4">
                   <div class="col-span-2">
@@ -436,6 +500,17 @@
         <h3 id="nyaa-dialog-title" class="text-lg font-bold font-['Outfit']">Search Nyaa.si</h3>
         <button class="dialog-close text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg transition-colors cursor-pointer" data-close>
           <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Search controls inside dialog -->
+      <div class="px-6 py-4 bg-slate-50 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-800 flex items-end gap-4">
+        <div class="flex-grow">
+          <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Episode Number</label>
+          <input type="number" id="nyaa-search-episode" class="w-full bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700/60 rounded-xl px-4 py-2 text-sm font-medium focus:border-violet-500 outline-none transition-all duration-200" placeholder="e.g. 12 (leave empty to search all)" min="1" step="1" />
+        </div>
+        <button id="btn-nyaa-search-submit" class="px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl shadow-md shadow-violet-500/10 active:scale-95 text-sm font-bold transition-all duration-200 cursor-pointer flex items-center gap-2">
+          <i class="fa-solid fa-magnifying-glass"></i>Search
         </button>
       </div>
 

@@ -11,13 +11,32 @@ import anilist from "@ani/anilist";
 import { MediaRelation } from "@utils/enums";
 
 async function alertUser(anime: string, image: string) {
+  const config = getConfig();
+  
+  const isEnabled = config.discord_enable_fail !== undefined ? config.discord_enable_fail : true;
+  if (!isEnabled) return;
+
+  const webhook = getWebhook();
+  if (config.discord_username) webhook.setUsername(config.discord_username);
+  if (config.discord_avatar_url) webhook.setAvatar(config.discord_avatar_url);
+
+  const titleTemplate = config.discord_fail_title || "Anime Not Added";
+  const descTemplate = config.discord_fail_description || "Animu could not add {title} to qBittorrent.";
+
+  const title = titleTemplate.replace(/{title}/g, anime);
+  const description = descTemplate.replace(/{title}/g, anime);
+
+  const colorVal = config.discord_fail_color 
+    ? Number(config.discord_fail_color.replace("#", "0x")) 
+    : 0xff0000;
+
   const msg: MessageBuilder = new MessageBuilder()
-    .setTitle("Anime Not Added")
-    .setColor(0xff0000)
-    .setDescription(`Animu could not add ${anime} to qBittorrent.`)
+    .setTitle(title)
+    .setColor(colorVal)
+    .setDescription(description)
     .setImage(image);
   try {
-    await getWebhook().send(msg);
+    await webhook.send(msg);
   } catch (err) {
     console.error("Discord webhook send failed (alertUser):", err);
   }
@@ -69,10 +88,36 @@ async function sendAnimeDownloadedHook(
   image: string,
   ...fields: Record<string, string>[]
 ) {
+  const config = getConfig();
+
+  const isEnabled = config.discord_enable_download !== undefined ? config.discord_enable_download : true;
+  if (!isEnabled) return;
+
+  const webhook = getWebhook();
+  if (config.discord_username) webhook.setUsername(config.discord_username);
+  if (config.discord_avatar_url) webhook.setAvatar(config.discord_avatar_url);
+
+  let resolvedColor = color;
+  if (config.discord_download_color) {
+    resolvedColor = Number(config.discord_download_color.replace("#", "0x"));
+  }
+
+  const match = title.match(/\*\*(.*?)\*\*/);
+  const animeTitle = match ? match[1] : title;
+  const epField = fields.find(f => f.name === "Episode(s)");
+  const episodeStr = epField ? epField.value : "";
+
+  let resolvedTitle = title;
+  if (config.discord_download_title) {
+    resolvedTitle = config.discord_download_title
+      .replace(/{title}/g, animeTitle)
+      .replace(/{episode}/g, episodeStr);
+  }
+
   const msg: MessageBuilder = new MessageBuilder()
     .setTimestamp()
-    .setTitle(title)
-    .setColor(color)
+    .setTitle(resolvedTitle)
+    .setColor(resolvedColor)
     .setImage(image);
 
   for (const field of fields) {
@@ -80,7 +125,7 @@ async function sendAnimeDownloadedHook(
   }
 
   try {
-    await getWebhook().send(msg);
+    await webhook.send(msg);
   } catch (err) {
     console.error("Discord webhook send failed (sendAnimeDownloadedHook):", err);
   }

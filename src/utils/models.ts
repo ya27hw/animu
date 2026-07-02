@@ -11,9 +11,13 @@ const proxy: any = {
     return getConfig().proxyPort || 80;
   },
   get auth() {
+    const config = getConfig();
+    const username = config.proxyUsername;
+    const password = config.proxyPassword;
+    if (!username && !password) return undefined;
     return {
-      username: getConfig().proxyUsername || "",
-      password: getConfig().proxyPassword || "",
+      username: username || "",
+      password: password || "",
     };
   },
 };

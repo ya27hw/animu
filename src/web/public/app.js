@@ -5,7 +5,8 @@
     animeList: [],
     userName: '',
     config: {},
-    logs: { selected: 'combined', lines: 250, content: '', available: [] }
+    logs: { selected: 'combined', lines: 250, content: '', available: [] },
+    activeSearchMediaId: null
   };
 
   // Toast notifier
@@ -126,7 +127,10 @@
     themeToggle: document.getElementById('theme-toggle'),
     configForm: document.getElementById('profile-config-form'),
     btnSubmitConfig: document.getElementById('btn-submit-config'),
-    excludeReleaseGroupsInput: document.getElementById('excludeReleaseGroupsInput')
+    excludeReleaseGroupsInput: document.getElementById('excludeReleaseGroupsInput'),
+    nyaaSearchEpisode: document.getElementById('nyaa-search-episode'),
+    btnNyaaSearchSubmit: document.getElementById('btn-nyaa-search-submit'),
+    btnTestProxy: document.getElementById('btn-test-proxy')
   };
 
   // Light/Dark Theme Switcher
@@ -415,6 +419,13 @@
       }
     },
     async searchNyaaEpisode(mediaId, episode) {
+      state.activeSearchMediaId = mediaId;
+      if (episode !== undefined && episode !== null) {
+        DOM.nyaaSearchEpisode.value = episode;
+      } else if (document.activeElement !== DOM.nyaaSearchEpisode) {
+        DOM.nyaaSearchEpisode.value = '';
+      }
+
       const anime = state.animeList.find(x => x.mediaId === mediaId);
       const titleStr = anime ? getAnimeTitle(anime) : 'Nyaa.si';
       
@@ -496,6 +507,59 @@
   DOM.btnSaveSettings.onclick = window.UI.saveOverrides;
   DOM.btnResetDownloads.onclick = window.UI.resetAnime;
 
+  // Nyaa manual search controls
+  DOM.btnNyaaSearchSubmit.onclick = () => {
+    const mediaId = state.activeSearchMediaId;
+    if (!mediaId) return;
+    const epVal = DOM.nyaaSearchEpisode.value;
+    const episode = epVal && !isNaN(Number(epVal)) ? Number(epVal) : undefined;
+    window.UI.searchNyaaEpisode(mediaId, episode);
+  };
+
+  // Proxy tester Connection button
+  DOM.btnTestProxy.onclick = async () => {
+    const proxyAddress = DOM.configForm.querySelector('[name="proxyAddress"]').value.trim();
+    const proxyPort = DOM.configForm.querySelector('[name="proxyPort"]').value.trim();
+    const proxyUsername = DOM.configForm.querySelector('[name="proxyUsername"]').value.trim();
+    const proxyPassword = DOM.configForm.querySelector('[name="proxyPassword"]').value.trim();
+
+    if (!proxyAddress) {
+      showToast('Proxy Address is required to test connection.', 'error');
+      return;
+    }
+
+    try {
+      DOM.btnTestProxy.disabled = true;
+      DOM.btnTestProxy.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>Testing...';
+
+      const res = await fetch('/api/test-proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          proxyAddress,
+          proxyPort: proxyPort ? Number(proxyPort) : undefined,
+          proxyUsername,
+          proxyPassword
+        })
+      });
+
+      if (!res.ok) throw new Error('Failed to run proxy test.');
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message || 'Proxy connection successful!');
+      } else {
+        showToast(data.error || 'Proxy connection failed.', 'error');
+      }
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      DOM.btnTestProxy.disabled = false;
+      DOM.btnTestProxy.innerHTML = '<i class="fa-solid fa-vial"></i>Test Connection';
+    }
+  };
+
   // Render Live Logs
   async function loadLogs() {
     try {
@@ -505,15 +569,17 @@
       const data = await API.getLogs(name, lines);
       state.logs = data;
       
-      // Load Log Select options
-      DOM.logSelect.innerHTML = '';
-      data.available.forEach(item => {
-        const opt = document.createElement('option');
-        opt.value = item.key;
-        opt.textContent = item.label;
-        opt.selected = item.key === data.selected;
-        DOM.logSelect.appendChild(opt);
-      });
+      // Load Log Select options only if they aren't already populated
+      if (DOM.logSelect.options.length <= 1) {
+        DOM.logSelect.innerHTML = '';
+        data.available.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.key;
+          opt.textContent = item.label;
+          DOM.logSelect.appendChild(opt);
+        });
+      }
+      DOM.logSelect.value = data.selected;
       
       DOM.logsBody.textContent = data.content || 'System log stream is completely empty.';
       DOM.logsBody.scrollTop = DOM.logsBody.scrollHeight;

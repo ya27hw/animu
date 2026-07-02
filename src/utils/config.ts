@@ -32,6 +32,15 @@ export interface ProfileConfig {
   offpeakInterval?: number;
   excludeReleaseGroups?: string[];
   setCompletedToRewatching?: boolean;
+  discord_username?: string;
+  discord_avatar_url?: string;
+  discord_enable_download?: boolean;
+  discord_enable_fail?: boolean;
+  discord_download_color?: string;
+  discord_fail_color?: string;
+  discord_download_title?: string;
+  discord_fail_title?: string;
+  discord_fail_description?: string;
 }
 
 let cachedConfig: ProfileConfig | null = null;
