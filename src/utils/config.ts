@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 
-const configPath = path.join(__dirname, "..", "..", "profile.json");
+const rootConfigPath = path.join(__dirname, "..", "..", "profile.json");
+const srcConfigPath = path.join(__dirname, "..", "..", "src", "profile.json");
 
 export interface ProfileConfig {
   torrent_url?: string;
@@ -48,11 +49,17 @@ let cachedConfig: ProfileConfig | null = null;
 export function getConfig(): ProfileConfig {
   if (cachedConfig) return cachedConfig;
   try {
-    if (fs.existsSync(configPath)) {
-      const raw = fs.readFileSync(configPath, "utf8");
-      cachedConfig = JSON.parse(raw);
-      return cachedConfig!;
+    let resolvedPath = rootConfigPath;
+    if (fs.existsSync(srcConfigPath)) {
+      resolvedPath = srcConfigPath;
+    } else if (fs.existsSync(rootConfigPath)) {
+      resolvedPath = rootConfigPath;
+    } else {
+      return {} as ProfileConfig;
     }
+    const raw = fs.readFileSync(resolvedPath, "utf8");
+    cachedConfig = JSON.parse(raw);
+    return cachedConfig!;
   } catch (err) {
     console.error("Failed to read profile.json:", err);
   }
@@ -61,7 +68,11 @@ export function getConfig(): ProfileConfig {
 
 export function saveConfig(newConfig: ProfileConfig): void {
   try {
-    fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), "utf8");
+    fs.writeFileSync(rootConfigPath, JSON.stringify(newConfig, null, 2), "utf8");
+    const srcDir = path.dirname(srcConfigPath);
+    if (fs.existsSync(srcDir)) {
+      fs.writeFileSync(srcConfigPath, JSON.stringify(newConfig, null, 2), "utf8");
+    }
     cachedConfig = newConfig;
     console.log("Config updated and saved to profile.json");
   } catch (err) {
