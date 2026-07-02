@@ -77,6 +77,24 @@
       if (!res.ok) throw new Error('Failed to start torrent download.');
       return res.json();
     },
+    async customSearchNyaa(query, episode, resolution, useAltUrl) {
+      const res = await fetch('/api/nyaa-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, episode, resolution, useAltUrl })
+      });
+      if (!res.ok) throw new Error('Failed to run custom Nyaa query.');
+      return res.json();
+    },
+    async customDownloadNyaa(title, link, useAltUrl) {
+      const res = await fetch('/api/nyaa-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, link, useAltUrl })
+      });
+      if (!res.ok) throw new Error('Failed to request torrent download.');
+      return res.json();
+    },
     async getLogs(name, lines) {
       const res = await fetch(`/api/logs?name=${name || 'combined'}&lines=${lines || 250}`);
       if (!res.ok) throw new Error('Failed to load console logs.');
@@ -130,7 +148,13 @@
     excludeReleaseGroupsInput: document.getElementById('excludeReleaseGroupsInput'),
     nyaaSearchEpisode: document.getElementById('nyaa-search-episode'),
     btnNyaaSearchSubmit: document.getElementById('btn-nyaa-search-submit'),
-    btnTestProxy: document.getElementById('btn-test-proxy')
+    btnTestProxy: document.getElementById('btn-test-proxy'),
+    customSearchTitle: document.getElementById('custom-search-title'),
+    customSearchEpisode: document.getElementById('custom-search-episode'),
+    customSearchResolution: document.getElementById('custom-search-resolution'),
+    customSearchAltUrl: document.getElementById('custom-search-alt-url'),
+    customSearchForm: document.getElementById('custom-search-form'),
+    customSearchResults: document.getElementById('custom-search-results')
   };
 
   // Light/Dark Theme Switcher
@@ -661,6 +685,88 @@
       DOM.btnSubmitConfig.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>Save & Hotload';
     }
   });
+
+  // Custom Search Form Submission and Rendering
+  DOM.customSearchForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const title = DOM.customSearchTitle.value.trim();
+    if (!title) return;
+
+    const epVal = DOM.customSearchEpisode.value;
+    const episode = epVal && !isNaN(Number(epVal)) ? Number(epVal) : '';
+    const resolution = DOM.customSearchResolution.value;
+    const useAltUrl = DOM.customSearchAltUrl.checked;
+
+    DOM.customSearchResults.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center text-slate-400">
+        <i class="fa-solid fa-circle-notch fa-spin text-3xl mb-3 text-violet-500"></i>
+        <p class="font-semibold text-sm">Querying indexers...</p>
+      </div>
+    `;
+
+    try {
+      DOM.btnCustomSearchSubmit.disabled = true;
+      const data = await API.customSearchNyaa(title, episode, resolution, useAltUrl);
+      
+      DOM.customSearchResults.innerHTML = '';
+      if (!data.results || data.results.length === 0) {
+        DOM.customSearchResults.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center py-20 text-slate-400 dark:text-slate-500 text-center">
+            <i class="fa-solid fa-magnifying-glass text-4xl mb-4 text-slate-300 dark:text-slate-700"></i>
+            <p class="font-semibold text-sm">No candidates found.</p>
+            <p class="text-xs text-slate-400 mt-1">Try refining your search terms.</p>
+          </div>
+        `;
+        return;
+      }
+
+      data.results.forEach(item => {
+        const rating = item.seeders > 50 ? 'Excellent' : item.seeders > 10 ? 'Good' : 'Low';
+        const card = document.createElement('div');
+        card.className = "flex items-center gap-4 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:border-violet-500/20 dark:hover:border-violet-500/20 transition-all duration-200 group";
+        card.innerHTML = `
+          <div class="flex-grow min-w-0">
+            <span class="block font-semibold text-sm text-slate-800 dark:text-slate-200 break-all leading-normal select-all" title="${item.title}">${item.title}</span>
+            <div class="flex items-center gap-4 text-xs font-semibold text-slate-400 mt-2">
+              <span class="text-emerald-500 flex items-center gap-1"><i class="fa-solid fa-seedling"></i>${item.seeders}</span>
+              <span class="flex items-center gap-1"><i class="fa-solid fa-file-zipper"></i>${item.size}</span>
+              <span class="text-violet-500 flex items-center gap-1"><i class="fa-solid fa-bolt"></i>${rating}</span>
+            </div>
+          </div>
+          <button class="w-10 h-10 shrink-0 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-md cursor-pointer transition-all btn-custom-download" data-link="${item.link}">
+            <i class="fa-solid fa-arrow-down-long"></i>
+          </button>
+        `;
+
+        const downloadBtn = card.querySelector('.btn-custom-download');
+        downloadBtn.onclick = async () => {
+          try {
+            downloadBtn.disabled = true;
+            downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            await API.customDownloadNyaa(title, item.link, useAltUrl);
+            showToast('Download started successfully!');
+          } catch (err) {
+            showToast(err.message, 'error');
+          } finally {
+            downloadBtn.disabled = false;
+            downloadBtn.innerHTML = '<i class="fa-solid fa-arrow-down-long"></i>';
+          }
+        };
+
+        DOM.customSearchResults.appendChild(card);
+      });
+
+    } catch (e) {
+      DOM.customSearchResults.innerHTML = `
+        <div class="py-12 flex flex-col items-center justify-center text-slate-400 text-center">
+          <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 text-rose-500"></i>
+          <p class="font-semibold text-sm">${e.message}</p>
+        </div>
+      `;
+    } finally {
+      DOM.btnCustomSearchSubmit.disabled = false;
+    }
+  };
 
   // Init dashboard load
   async function loadDashboard() {

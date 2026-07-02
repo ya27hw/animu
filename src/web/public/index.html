@@ -84,6 +84,9 @@
         <button data-tab="watching" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 active-tab bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
           <i class="fa-solid fa-tv text-[11px] sm:text-xs"></i>Watching
         </button>
+        <button data-tab="search" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-magnifying-glass text-[11px] sm:text-xs"></i>Search
+        </button>
         <button data-tab="logs" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
           <i class="fa-solid fa-list-check text-[11px] sm:text-xs"></i>Logs
         </button>
@@ -442,6 +445,72 @@
           </div>
 
         </form>
+
+      </div>
+
+    <!-- VIEW PANEL: CUSTOM SEARCH -->
+    <section id="search-panel" class="view-panel hidden transition-all duration-300">
+      
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        <!-- Column 1: Search Form -->
+        <div class="lg:col-span-1 p-6 sm:p-8 rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 shadow-sm space-y-6 glow-violet">
+          <div class="space-y-1">
+            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight text-violet-600 dark:text-violet-400 flex items-center gap-2">
+              <i class="fa-solid fa-magnifying-glass text-lg"></i>Nyaa Search
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-400">Search Nyaa indexer for any custom title and downloads.</p>
+          </div>
+          
+          <form id="custom-search-form" class="space-y-4 pt-2">
+            <div>
+              <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Anime Title</label>
+              <input type="text" id="custom-search-title" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 outline-none transition-all duration-200" placeholder="e.g. Sousou no Frieren" required />
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Episode</label>
+                <input type="number" id="custom-search-episode" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 outline-none transition-all duration-200" placeholder="e.g. 12" min="1" step="1" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Resolution</label>
+                <select id="custom-search-resolution" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm font-medium focus:border-violet-500 outline-none transition-all duration-200">
+                  <option value="">Any</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="pt-2">
+              <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+                <input type="checkbox" id="custom-search-alt-url" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+                Use Alt Nyaa (Sukebei)
+              </label>
+            </div>
+
+            <button type="submit" id="btn-custom-search-submit" class="w-full py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white font-bold rounded-xl text-sm shadow-lg shadow-violet-500/25 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2">
+              <i class="fa-solid fa-magnifying-glass"></i>Search Candidates
+            </button>
+          </form>
+        </div>
+
+        <!-- Column 2 & 3: Results List -->
+        <div class="lg:col-span-2 p-6 sm:p-8 rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 shadow-sm flex flex-col min-h-[400px]">
+          <h3 class="font-['Outfit'] font-bold text-lg text-slate-800 dark:text-slate-200 mb-6 flex items-center gap-2">
+            <i class="fa-solid fa-list-ul text-violet-500"></i>Search Results
+          </h3>
+          
+          <div id="custom-search-results" class="flex-grow space-y-4">
+            <!-- Empty state -->
+            <div class="h-full flex flex-col items-center justify-center py-20 text-slate-400 dark:text-slate-500 text-center">
+              <i class="fa-solid fa-magnifying-glass text-4xl mb-4 text-slate-300 dark:text-slate-700"></i>
+              <p class="font-semibold text-sm">Enter search parameters and query candidates.</p>
+            </div>
+          </div>
+        </div>
 
       </div>
 

@@ -43,6 +43,8 @@ type NyaaSearchPayload = {
 type NyaaTitleSearchPayload = {
   query?: string;
   useAltUrl?: boolean;
+  episode?: number | string;
+  resolution?: string;
 };
 
 type NyaaDownloadPayload = {
@@ -352,14 +354,28 @@ class WebUI {
       throw new Error("Anime name is required");
     }
 
+    let fullQuery = query;
+    if (payload.episode !== undefined && payload.episode !== null && payload.episode !== "") {
+      const epNum = Number(payload.episode);
+      if (!isNaN(epNum)) {
+        const epStr = String(epNum).padStart(2, "0");
+        fullQuery += ` ${epStr}`;
+      } else {
+        fullQuery += ` ${payload.episode}`;
+      }
+    }
+    if (payload.resolution) {
+      fullQuery += ` ${payload.resolution}`;
+    }
+
     const candidates = await Nyaa.searchRawTitleCandidates(
-      query,
+      fullQuery,
       Boolean(payload.useAltUrl),
     );
 
     return {
       title: query,
-      episode: null,
+      episode: payload.episode || null,
       useAltUrl: Boolean(payload.useAltUrl),
       count: candidates.length,
       results: candidates.slice(0, 25).map((item) => ({
