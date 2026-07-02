@@ -55,7 +55,22 @@ export function getConfig(): ProfileConfig {
       return {} as ProfileConfig;
     }
     const raw = fs.readFileSync(resolvedPath, "utf8");
-    return JSON.parse(raw);
+    
+    // Resilient parsing: Clean trailing commas
+    const cleaned = raw.replace(/,(\s*[\]}])/g, '$1');
+    
+    try {
+      return JSON.parse(cleaned);
+    } catch (parseErr: any) {
+      console.error(`Failed to parse JSON in ${resolvedPath}:`, parseErr.message);
+      const lines = raw.split("\n");
+      console.error("--- profile.json content ---");
+      lines.forEach((line, idx) => {
+        console.error(`${String(idx + 1).padStart(3, " ")}: ${line}`);
+      });
+      console.error("----------------------------");
+      throw parseErr;
+    }
   } catch (err) {
     console.error("Failed to read profile.json:", err);
   }
