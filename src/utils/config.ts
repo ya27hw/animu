@@ -21,6 +21,7 @@ export interface ProfileConfig {
   guildId?: string;
   clientId?: string;
   useProxy?: boolean;
+  proxyAuthType?: "none" | "credentials";
   proxyAddress?: string;
   proxyPort?: number;
   proxyUsername?: string;

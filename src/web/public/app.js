@@ -154,7 +154,9 @@
     customSearchResolution: document.getElementById('custom-search-resolution'),
     customSearchAltUrl: document.getElementById('custom-search-alt-url'),
     customSearchForm: document.getElementById('custom-search-form'),
-    customSearchResults: document.getElementById('custom-search-results')
+    customSearchResults: document.getElementById('custom-search-results'),
+    proxyAuthType: document.querySelector('[name="proxyAuthType"]'),
+    proxyCredentialsFields: document.getElementById('proxy-credentials-fields')
   };
 
   // Light/Dark Theme Switcher
@@ -546,6 +548,7 @@
     const proxyPort = DOM.configForm.querySelector('[name="proxyPort"]').value.trim();
     const proxyUsername = DOM.configForm.querySelector('[name="proxyUsername"]').value.trim();
     const proxyPassword = DOM.configForm.querySelector('[name="proxyPassword"]').value.trim();
+    const proxyAuthType = DOM.configForm.querySelector('[name="proxyAuthType"]').value;
 
     if (!proxyAddress) {
       showToast('Proxy Address is required to test connection.', 'error');
@@ -565,7 +568,8 @@
           proxyAddress,
           proxyPort: proxyPort ? Number(proxyPort) : undefined,
           proxyUsername,
-          proxyPassword
+          proxyPassword,
+          proxyAuthType
         })
       });
 
@@ -583,6 +587,16 @@
       DOM.btnTestProxy.innerHTML = '<i class="fa-solid fa-vial"></i>Test Connection';
     }
   };
+
+  if (DOM.proxyAuthType) {
+    DOM.proxyAuthType.addEventListener('change', () => {
+      if (DOM.proxyAuthType.value === 'credentials') {
+        DOM.proxyCredentialsFields.classList.remove('hidden');
+      } else {
+        DOM.proxyCredentialsFields.classList.add('hidden');
+      }
+    });
+  }
 
   // Render Live Logs
   async function loadLogs() {
@@ -639,6 +653,15 @@
         DOM.excludeReleaseGroupsInput.value = data.excludeReleaseGroups.join(', ');
       } else {
         DOM.excludeReleaseGroupsInput.value = '';
+      }
+
+      // Toggle proxy credentials view
+      if (DOM.proxyAuthType && DOM.proxyCredentialsFields) {
+        if (data.proxyAuthType === 'credentials') {
+          DOM.proxyCredentialsFields.classList.remove('hidden');
+        } else {
+          DOM.proxyCredentialsFields.classList.add('hidden');
+        }
       }
     } catch (e) {
       showToast(e.message, 'error');

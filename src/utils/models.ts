@@ -8,12 +8,10 @@ export function getProxyAgent(): any {
   const protocol = "http";
   const host = config.proxyAddress;
   const port = config.proxyPort || 80;
-  const username = config.proxyUsername;
-  const password = config.proxyPassword;
   
   let authStr = "";
-  if (username || password) {
-    authStr = `${encodeURIComponent(username || "")}:${encodeURIComponent(password || "")}@`;
+  if (config.proxyAuthType === "credentials" && (config.proxyUsername || config.proxyPassword)) {
+    authStr = `${encodeURIComponent(config.proxyUsername || "")}:${encodeURIComponent(config.proxyPassword || "")}@`;
   }
   
   const proxyUrl = `${protocol}://${authStr}${host}:${port}`;

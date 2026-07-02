@@ -429,7 +429,14 @@
                     <input type="number" name="proxyPort" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" />
                   </div>
                 </div>
-                <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Proxy Authentication</label>
+                  <select name="proxyAuthType" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium focus:border-violet-500 outline-none transition-all duration-200">
+                    <option value="none">None</option>
+                    <option value="credentials">Credentials</option>
+                  </select>
+                </div>
+                <div id="proxy-credentials-fields" class="grid grid-cols-2 gap-4 hidden">
                   <div>
                     <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Proxy Username</label>
                     <input type="text" name="proxyUsername" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" />

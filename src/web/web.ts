@@ -736,7 +736,7 @@ class WebUI {
 
       if (req.method === "POST" && url.pathname === "/api/test-proxy") {
         const body = await this.readJsonBody(req);
-        const { proxyAddress, proxyPort, proxyUsername, proxyPassword } = body;
+        const { proxyAddress, proxyPort, proxyUsername, proxyPassword, proxyAuthType } = body;
 
         if (!proxyAddress) {
           this.sendJson(res, 400, { ok: false, error: "Proxy address is required." });
@@ -744,7 +744,7 @@ class WebUI {
         }
 
         let authStr = "";
-        if (proxyUsername || proxyPassword) {
+        if (proxyAuthType === "credentials" && (proxyUsername || proxyPassword)) {
           authStr = `${encodeURIComponent(proxyUsername || "")}:${encodeURIComponent(proxyPassword || "")}@`;
         }
         const proxyUrl = `http://${authStr}${proxyAddress}:${Number(proxyPort) || 80}`;
