@@ -163,6 +163,10 @@
     nyaaTitle: document.getElementById('nyaa-dialog-title'),
     nyaaList: document.getElementById('nyaa-candidates-list'),
     themeToggle: document.getElementById('theme-toggle'),
+    themeToggleDesktop: document.getElementById('theme-toggle-desktop'),
+    hamburgerBtn: document.getElementById('hamburger-btn'),
+    mobileMenu: document.getElementById('mobile-menu'),
+    mobileNavTabs: document.querySelectorAll('.mobile-nav-tab'),
     configForm: document.getElementById('profile-config-form'),
     btnSubmitConfig: document.getElementById('btn-submit-config'),
     excludeReleaseGroupsInput: document.getElementById('excludeReleaseGroupsInput'),
@@ -191,6 +195,30 @@
   DOM.themeToggle.addEventListener('click', () => {
     const isDark = document.documentElement.classList.toggle('dark');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  });
+
+  // Hamburger menu toggle
+  DOM.hamburgerBtn.addEventListener('click', () => {
+    const menu = DOM.mobileMenu;
+    const isOpen = menu.classList.contains('mobile-open');
+    if (isOpen) {
+      menu.classList.remove('mobile-open');
+      menu.style.maxHeight = '0px';
+      DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
+    } else {
+      menu.classList.add('mobile-open');
+      menu.style.maxHeight = menu.scrollHeight + 'px';
+      DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-xmark text-lg';
+    }
+  });
+
+  // Close mobile menu when a nav tab is clicked
+  DOM.mobileNavTabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      DOM.mobileMenu.classList.remove('mobile-open');
+      DOM.mobileMenu.style.maxHeight = '0px';
+      DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
+    });
   });
 
   // Modal handlers

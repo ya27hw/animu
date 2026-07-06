@@ -44,9 +44,8 @@ class Database:
 
     def auth(self) -> str:
         """Authenticate with PocketBase and store the auth token."""
-        config = get_config()
-        identity = config.email or PB_AUTH["identity"]
-        password = config.email_password or PB_AUTH["password"]
+        identity = PB_AUTH["identity"]
+        password = PB_AUTH["password"]
 
         resp = self.client.post(
             f"{PB_URL}/api/collections/{SUPERUSERS_COLLECTION}/auth-with-password",

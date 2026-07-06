@@ -115,6 +115,7 @@ class Scheduler:
             print(f"Failed to set {anime['media']['title']['romaji']} to rewatching: {e}")
 
     def handle_anime(self, anime: Dict[str, Any], record: OfflineAnime) -> None:
+        import time
         """Handle Nyaa search combinations and download matching torrents for an anime."""
         config = get_config()
         starting_episode = record.starting_episode
@@ -252,7 +253,6 @@ class Scheduler:
                 failed_traces[anime["mediaId"]] = active_traces[anime["mediaId"]]
             else:
                 # Stub trace if no active trace was recorded (e.g. error or empty results)
-                import time
                 failed_traces[anime["mediaId"]] = {
                     "anime_title": anime["media"]["title"]["romaji"],
                     "media_id": anime["mediaId"],

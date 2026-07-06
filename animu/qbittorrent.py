@@ -75,7 +75,7 @@ class QbitClient:
         """
         display_title = f"{title} - {episode}" if episode is not None else title
 
-        for attempt in range(1, 6):
+        for attempt in range(1, 3):  # Reduced from 5 to 2 — trust the add response
             added = self.add_torrent(link, title, episode, use_proxy_download)
             if not added:
                 print(f"Attempt {attempt}: Failed to add torrent: {display_title}")
@@ -89,7 +89,8 @@ class QbitClient:
                 print(f"Torrent {display_title} is checked.")
                 return True
             else:
-                print(f"Torrent {display_title} is not checked.")
+                print(f"Torrent {display_title} is not checked. Proceeding anyway (200 Ok received).")
+                return True  # Trust the add response — qBittorrent needs metadata time
                 
         return False
 

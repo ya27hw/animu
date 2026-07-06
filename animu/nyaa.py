@@ -25,42 +25,6 @@ class NyaaClient:
             return config.alt_nyaa_url or "https://nyaa.si", True
         return config.nyaa_url or "https://nyaa.si", bool(config.use_proxy)
 
-    def get_episode_air_dates(
-        self,
-        media_id: int,
-        episode_list: List[int],
-        starting_episode: int
-    ) -> Optional[Dict[str, Any]]:
-        """Retrieve airing schedules from AniList, paginating as required by the episode list."""
-        if not episode_list:
-            return {"nodes": []}
-
-        schedules = {"nodes": []}
-        
-        def get_page_number(ep: int) -> int:
-            return math.ceil(ep / 25)
-
-        start_page = get_page_number(episode_list[0] - starting_episode)
-        end_page = get_page_number(episode_list[-1] - starting_episode)
-
-        from .anilist import anilist
-
-        for page in range(start_page, end_page + 1):
-            data = anilist.get_airing_schedule(page, media_id)
-            if not data:
-                return None
-            time.sleep(1.0)
-            
-            nodes = data.get("nodes") or []
-            for node in nodes:
-                adjusted_node = dict(node)
-                adjusted_node["episode"] += starting_episode
-                schedules["nodes"].append(adjusted_node)
-
-        if len(schedules["nodes"]) < len(episode_list):
-            return None
-        return schedules
-
     def _set_params(self, url: str, query: str) -> Dict[str, str]:
         """Sets standard query params for Nyaa RSS feeds."""
         config = get_config()
@@ -79,7 +43,7 @@ class NyaaClient:
         """Fetch RSS feed from Nyaa with retry and proxy options."""
         params = self._set_params(url, query)
         config = get_config()
-        
+
         proxy_url = None
         if enable_proxy and config.proxy_address and config.proxy_port:
             proxy_url = f"http://{config.proxy_address}:{config.proxy_port}"
@@ -138,41 +102,6 @@ class NyaaClient:
                 }
         return {"status": 500, "message": "Max retries exhausted.", "data": None}
 
-# Global variables to track search traces for debugging
-active_traces = {}
-failed_traces = {}
-
-def record_trace(media_id: int, anime_title: str, query: str, status: str, candidates: list):
-    """Save the top 3 scored candidates for debugging purposes."""
-    candidates.sort(key=lambda x: x["rating"], reverse=True)
-    top_candidates = candidates[:3]
-    active_traces[media_id] = {
-        "anime_title": anime_title,
-        "media_id": media_id,
-        "search_query": query,
-        "status": status,
-        "candidates": top_candidates,
-        "timestamp": time.time()
-    }
-
-class NyaaClient:
-    def __init__(self):
-        self.client = httpx.Client(verify=False, timeout=20)
-
-    def should_use_proxy_download(self, anime: Dict[str, Any]) -> bool:
-        """Determines if the anime genres trigger proxy requirements (e.g. Ecchi genre)."""
-        config = get_config()
-        genres = anime.get("media", {}).get("genres") or []
-        trigger = config.trigger_genre or "Ecchi"
-        return trigger in genres
-
-    def get_search_context(self, anime: Dict[str, Any]) -> tuple[str, bool]:
-        """Returns the appropriate Nyaa URL and proxy setting for the given anime."""
-        config = get_config()
-        if self.should_use_proxy_download(anime):
-            return config.alt_nyaa_url or "https://nyaa.si", True
-        return config.nyaa_url or "https://nyaa.si", bool(config.use_proxy)
-
     def get_episode_air_dates(
         self,
         media_id: int,
@@ -182,7 +111,7 @@ class NyaaClient:
         """Retrieve airing schedules from AniList, paginating as required by the episode list."""
         if not episode_list:
             return {"nodes": []}
-        
+
         # Paginate to fetch airdates
         query = """
         query ($mediaId: Int, $page: Int) {
@@ -197,11 +126,11 @@ class NyaaClient:
           }
         }
         """
-        
+
         from .anilist import anilist
         nodes = []
         page = 1
-        
+
         for attempt in range(3):
             try:
                 res = anilist._query(query, {"mediaId": media_id, "page": page})
@@ -218,7 +147,7 @@ class NyaaClient:
                 if attempt == 2:
                     return None
                 time.sleep(1)
-                
+
         return {"nodes": nodes}
 
     def get_best_torrent(
@@ -456,5 +385,25 @@ class NyaaClient:
         if rss_res["status"] != 200 or not rss_res["data"]:
             return []
         return rss_res["data"]
+
+
+# Global variables to track search traces for debugging
+active_traces = {}
+failed_traces = {}
+
+
+def record_trace(media_id: int, anime_title: str, query: str, status: str, candidates: list):
+    """Save the top 3 scored candidates for debugging purposes."""
+    candidates.sort(key=lambda x: x["rating"], reverse=True)
+    top_candidates = candidates[:3]
+    active_traces[media_id] = {
+        "anime_title": anime_title,
+        "media_id": media_id,
+        "search_query": query,
+        "status": status,
+        "candidates": top_candidates,
+        "timestamp": time.time()
+    }
+
 
 nyaa = NyaaClient()
