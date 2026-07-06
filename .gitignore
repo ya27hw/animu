@@ -139,3 +139,6 @@ test*
 *.lock
 tempCodeRunner*
 build
+venv/
+__pycache__/
+*.pyc
