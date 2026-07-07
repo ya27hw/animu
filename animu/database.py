@@ -74,8 +74,26 @@ class Database:
             print(f"PocketBase HTTP request error: {e}")
             raise
 
+    def _to_offline_anime(self, rec: Dict[str, Any]) -> OfflineAnime:
+        """Convert a raw DB/cache dict into an OfflineAnime model."""
+        return OfflineAnime(
+            media_id=rec["media_id"],
+            downloaded_episodes=rec.get("downloaded_episodes", []),
+            starting_episode=rec.get("starting_episode", 0),
+            alternative_title=rec.get("alternative_title", ""),
+            timeouts=rec.get("timeouts", 0),
+            max_timeouts=rec.get("max_timeouts", 0),
+            pending_rewatching_update=rec.get("pending_rewatching_update", False)
+        )
+
     def get(self, media_id: int) -> Optional[OfflineAnime]:
-        """Fetch an anime record by its AniList media ID."""
+        """Fetch an anime record by its AniList media ID.
+
+        The local cache is treated as authoritative: a locally-stored,
+        unsynced entry is never overwritten by a (possibly stale/empty)
+        PocketBase response. This prevents downloaded-episode progress from
+        being silently lost when PocketBase writes fail.
+        """
         media_id_str = str(media_id)
         try:
             resp = self._request("GET", f"/api/collections/{ANIME_COLLECTION}/records", params={"filter": f"media_id={media_id}"})
@@ -83,37 +101,33 @@ class Database:
                 items = resp.json().get("items", [])
                 if items:
                     record = items[0]
-                    # Update local cache
+                    cached = self.local_cache.get(media_id_str)
+                    # Local unsynced data is newer than PocketBase: keep it.
+                    if cached and cached.get("_unsynced"):
+                        return self._to_offline_anime(cached)
+                    if cached:
+                        # Keep local progress if it is richer; adopt PB id.
+                        if len(cached.get("downloaded_episodes", [])) > len(record.get("downloaded_episodes", [])):
+                            if "id" in record:
+                                cached["id"] = record["id"]
+                            self.local_cache[media_id_str] = cached
+                        else:
+                            self.local_cache[media_id_str] = record
+                        self._save_local_cache()
+                        return self._to_offline_anime(self.local_cache[media_id_str])
                     self.local_cache[media_id_str] = record
                     self._save_local_cache()
-                    
-                    return OfflineAnime(
-                        media_id=record["media_id"],
-                        downloaded_episodes=record.get("downloaded_episodes", []),
-                        starting_episode=record.get("starting_episode", 0),
-                        alternative_title=record.get("alternative_title", ""),
-                        timeouts=record.get("timeouts", 0),
-                        max_timeouts=record.get("max_timeouts", 0),
-                        pending_rewatching_update=record.get("pending_rewatching_update", False)
-                    )
-            # Delete from cache if deleted from PB
-            if media_id_str in self.local_cache:
-                self.local_cache.pop(media_id_str)
-                self._save_local_cache()
+                    return self._to_offline_anime(record)
+                # PocketBase has no record. Keep any local entry (it is unsynced).
+                if media_id_str in self.local_cache:
+                    return self._to_offline_anime(self.local_cache[media_id_str])
+                return None
             return None
         except Exception as e:
             print(f"PocketBase get failed, falling back to local cache: {e}")
             cached = self.local_cache.get(media_id_str)
             if cached and not cached.get("_pending_delete"):
-                return OfflineAnime(
-                    media_id=cached["media_id"],
-                    downloaded_episodes=cached.get("downloaded_episodes", []),
-                    starting_episode=cached.get("starting_episode", 0),
-                    alternative_title=cached.get("alternative_title", ""),
-                    timeouts=cached.get("timeouts", 0),
-                    max_timeouts=cached.get("max_timeouts", 0),
-                    pending_rewatching_update=cached.get("pending_rewatching_update", False)
-                )
+                return self._to_offline_anime(cached)
             return None
 
     def upsert(self, media_id: int, anime_data: OfflineAnime):
@@ -143,7 +157,8 @@ class Database:
         try:
             self._sync_record_to_pb(media_id)
         except Exception as e:
-            print(f"PocketBase offline. Unsynced local updates saved for media_id {media_id}: {e}")
+            print(f"[PB_SYNC_WARNING] PocketBase sync failed for media_id {media_id}; "
+                  f"progress kept in local cache (offline_db.json) and will retry next cycle: {e}")
 
     def _sync_record_to_pb(self, media_id: int):
         """Internal helper to push a cached record to PocketBase."""
@@ -178,47 +193,57 @@ class Database:
         self._save_local_cache()
 
     def get_all(self) -> List[OfflineAnime]:
-        """Retrieve all anime records (up to 500)."""
+        """Retrieve all anime records (up to 500).
+
+        CRITICAL FIX (re-download loop): the local cache is the source of
+        truth for in-progress downloads. We MERGE PocketBase records with the
+        local cache instead of clobbering it. A locally-stored, unsynced
+        entry (with downloaded_episodes) must survive even if PocketBase
+        returns an empty/stale record — otherwise every cycle re-fetches the
+        same episodes.
+        """
         try:
             resp = self._request("GET", f"/api/collections/{ANIME_COLLECTION}/records", params={"perPage": 500})
             if resp.status_code == 200:
                 items = resp.json().get("items", [])
-                
-                # Rebuild cache with verified online records
-                new_cache = {}
-                records = []
-                for record in items:
-                    mid_str = str(record["media_id"])
-                    new_cache[mid_str] = record
-                    
-                    records.append(OfflineAnime(
-                        media_id=record["media_id"],
-                        downloaded_episodes=record.get("downloaded_episodes", []),
-                        starting_episode=record.get("starting_episode", 0),
-                        alternative_title=record.get("alternative_title", ""),
-                        timeouts=record.get("timeouts", 0),
-                        max_timeouts=record.get("max_timeouts", 0),
-                        pending_rewatching_update=record.get("pending_rewatching_update", False)
-                    ))
-                self.local_cache = new_cache
+
+                pb_map = {str(rec["media_id"]): rec for rec in items}
+
+                # Merge: start from local cache, adopt richer PocketBase data
+                # (e.g. the authoritative record id) without overwriting local
+                # progress that PocketBase may have lost.
+                merged: Dict[str, Dict[str, Any]] = dict(self.local_cache)
+                for mid_str, rec in pb_map.items():
+                    cached = merged.get(mid_str)
+                    if not cached:
+                        merged[mid_str] = rec
+                    elif cached.get("_unsynced"):
+                        # Local data is newer; just adopt PB id if present.
+                        if "id" in rec:
+                            cached["id"] = rec["id"]
+                        merged[mid_str] = cached
+                    else:
+                        # Take whichever has more downloaded episodes (progress
+                        # is never silently downgraded), and keep the PB id.
+                        if len(rec.get("downloaded_episodes", [])) >= len(cached.get("downloaded_episodes", [])):
+                            merged[mid_str] = rec
+                        else:
+                            if "id" in rec:
+                                cached["id"] = rec["id"]
+                            merged[mid_str] = cached
+
+                self.local_cache = merged
                 self._save_local_cache()
-                return records
+                return [self._to_offline_anime(r) for r in merged.values()
+                        if not r.get("_pending_delete")]
             return []
         except Exception as e:
-            print(f"PocketBase get_all failed, returning from local DB cache: {e}")
+            print(f"[PB_SYNC_WARNING] PocketBase get_all failed, returning from local DB cache: {e}")
             records = []
             for mid_str, cached in self.local_cache.items():
                 if cached.get("_pending_delete"):
                     continue
-                records.append(OfflineAnime(
-                    media_id=cached["media_id"],
-                    downloaded_episodes=cached.get("downloaded_episodes", []),
-                    starting_episode=cached.get("starting_episode", 0),
-                    alternative_title=cached.get("alternative_title", ""),
-                    timeouts=cached.get("timeouts", 0),
-                    max_timeouts=cached.get("max_timeouts", 0),
-                    pending_rewatching_update=cached.get("pending_rewatching_update", False)
-                ))
+                records.append(self._to_offline_anime(cached))
             return records
 
     def delete(self, media_id: int):

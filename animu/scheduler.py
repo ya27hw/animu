@@ -115,7 +115,6 @@ class Scheduler:
             print(f"Failed to set {anime['media']['title']['romaji']} to rewatching: {e}")
 
     def handle_anime(self, anime: Dict[str, Any], record: OfflineAnime) -> None:
-        import time
         """Handle Nyaa search combinations and download matching torrents for an anime."""
         config = get_config()
         starting_episode = record.starting_episode
@@ -301,6 +300,10 @@ class Scheduler:
         for anime in anime_list:
             media_id = anime["mediaId"]
             record = pb_map.get(media_id)
+
+            print(f"[SYNC_STATE] {anime['media']['title']['romaji']} (ID {media_id}) "
+                  f"downloaded_episodes={len(record.downloaded_episodes) if record else 0}, "
+                  f"timeouts={record.timeouts if record else 0}")
 
             if not record:
                 record = OfflineAnime(media_id=media_id)
