@@ -212,15 +212,6 @@
     }
   });
 
-  // Close mobile menu when a nav tab is clicked
-  DOM.mobileNavTabs.forEach(btn => {
-    btn.addEventListener('click', () => {
-      DOM.mobileMenu.classList.remove('mobile-open');
-      DOM.mobileMenu.style.maxHeight = '0px';
-      DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
-    });
-  });
-
   // Modal handlers
   function openModal(modal) {
     modal.classList.remove('opacity-0', 'pointer-events-none');
@@ -248,35 +239,63 @@
     }
   });
 
-  // Navigation tabs toggle
+  // Navigation tabs toggle helper
+  function switchTab(target) {
+    state.activeTab = target;
+    
+    // Update desktop buttons style
+    DOM.navTabs.forEach(t => {
+      if (t.dataset.tab === target) {
+        t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-tab";
+      } else {
+        t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
+      }
+    });
+
+    // Update mobile buttons style
+    DOM.mobileNavTabs.forEach(t => {
+      if (t.dataset.tab === target) {
+        t.className = "mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-violet-600/10 text-violet-700 dark:text-violet-300 font-['Outfit'] active-tab";
+      } else {
+        t.className = "mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']";
+      }
+    });
+    
+    // Switch views
+    DOM.viewPanels.forEach(panel => {
+      if (panel.id === `${target}-panel`) {
+        panel.classList.remove('hidden');
+      } else {
+        panel.classList.add('hidden');
+      }
+    });
+
+    // Close mobile menu if open
+    if (DOM.mobileMenu) {
+      DOM.mobileMenu.classList.remove('mobile-open');
+      DOM.mobileMenu.style.maxHeight = '0px';
+      if (DOM.hamburgerBtn && DOM.hamburgerBtn.querySelector('i')) {
+        DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
+      }
+    }
+    
+    if (target === 'logs') {
+      loadLogs();
+      updateSearchDiagnostics();
+    }
+    if (target === 'settings') loadConfig();
+    if (target === 'watching') loadAnime();
+  }
+
   DOM.navTabs.forEach(tab => {
     tab.addEventListener('click', () => {
-      const target = tab.dataset.tab;
-      state.activeTab = target;
-      
-      // Update buttons style
-      DOM.navTabs.forEach(t => {
-        if (t === tab) {
-          t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']";
-        } else {
-          t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
-        }
-      });
-      
-      // Switch views
-      DOM.viewPanels.forEach(panel => {
-        if (panel.id === `${target}-panel`) {
-          panel.classList.remove('hidden');
-        } else {
-          panel.classList.add('hidden');
-        }
-      });
-      
-      if (target === 'logs') {
-        loadLogs();
-        updateSearchDiagnostics();
-      }
-      if (target === 'settings') loadConfig();
+      switchTab(tab.dataset.tab);
+    });
+  });
+
+  DOM.mobileNavTabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchTab(btn.dataset.tab);
     });
   });
 

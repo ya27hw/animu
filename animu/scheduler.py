@@ -8,7 +8,7 @@ from .models import OfflineAnime
 from .anilist import anilist
 from .nyaa import nyaa
 from .qbittorrent import qbit
-from .discord import alert_user, send_anime_downloaded_hook
+from .discord import alert_user, alert_unresolved_anime, clear_alert_history, send_anime_downloaded_hook
 from .utils import fix_anime_season, count_past_relations
 
 class Scheduler:
@@ -38,7 +38,8 @@ class Scheduler:
                 # Increment timeout and alert user
                 record.set_timeout()
                 db.upsert(anime["mediaId"], record)
-                alert_user(romaji_title, anime["media"]["coverImage"]["extraLarge"])
+                cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
+                alert_user(romaji_title, cover_img)
                 return None
 
             if episode is not None:
@@ -142,6 +143,9 @@ class Scheduler:
         if is_up_to_date:
             if record.pending_rewatching_update:
                 self.sync_anime_rewatching_status(anime, record)
+            from .nyaa import remove_failed_trace
+            remove_failed_trace(anime["mediaId"])
+            clear_alert_history(anime["mediaId"])
             return
 
         # Search default title
@@ -238,33 +242,32 @@ class Scheduler:
             newly_downloaded = self.download_torrents(anime, record, primary_torrent)
             if newly_downloaded:
                 self.sync_anime_rewatching_status(anime, record)
-            # Torrent found and downloaded successfully, remove any failure trace
-            from .nyaa import failed_traces
-            failed_traces.pop(anime["mediaId"], None)
+            # Torrent found and downloaded successfully, remove any failure trace and alert history
+            from .nyaa import remove_failed_trace
+            remove_failed_trace(anime["mediaId"])
+            clear_alert_history(anime["mediaId"])
         else:
             # Increment timeouts and print failure log
             record.set_timeout()
             db.upsert(anime["mediaId"], record)
             
-            # Store trace for failed run
-            from .nyaa import active_traces, failed_traces
-            if anime["mediaId"] in active_traces:
-                failed_traces[anime["mediaId"]] = active_traces[anime["mediaId"]]
-            else:
-                # Stub trace if no active trace was recorded (e.g. error or empty results)
-                failed_traces[anime["mediaId"]] = {
-                    "anime_title": anime["media"]["title"]["romaji"],
-                    "media_id": anime["mediaId"],
-                    "search_query": anime["media"]["title"]["romaji"],
-                    "status": "NO_RESULTS",
-                    "candidates": [],
-                    "timestamp": time.time()
-                }
+            # Store persistent trace for failed run
+            from .nyaa import record_failed_trace
+            record_failed_trace(anime["mediaId"], anime=anime, record=record, status="NO_RESULTS")
+            
+            # Send deduplicated alert
+            cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
+            alert_unresolved_anime(
+                media_id=anime["mediaId"],
+                anime_title=anime["media"]["title"]["romaji"],
+                image=cover_img,
+                reason=f"No matching torrents found on Nyaa.si (Backoff timeout {record.timeouts}/10)",
+                season_info=f"Media ID {anime['mediaId']}"
+            )
             
             interval = config.interval or 30
             total_minutes = record.timeouts * interval
             now = datetime.now()
-            # Calculate next run timestamp
             from datetime import timedelta
             next_run = now + timedelta(minutes=total_minutes)
             
@@ -272,10 +275,9 @@ class Scheduler:
 
     def check(self) -> None:
         """Core check loop: queries AniList collection and checks missing episodes against database."""
-        # Clear previous run's traces
-        from .nyaa import active_traces, failed_traces
+        # Clear active traces for new run; failed_traces remains persistent for unresolved items
+        from .nyaa import active_traces, failed_traces, remove_failed_trace
         active_traces.clear()
-        failed_traces.clear()
 
         # Sync any unsynced offline local changes first
         try:
@@ -287,6 +289,13 @@ class Scheduler:
         if not anime_list:
             print("No anime in watching list.")
             return
+
+        # Prune failed traces & alert history for anime no longer in watching list
+        active_media_ids = {a["mediaId"] for a in anime_list}
+        stale_ids = [mid for mid in list(failed_traces.keys()) if mid not in active_media_ids]
+        for mid in stale_ids:
+            remove_failed_trace(mid)
+            clear_alert_history(mid)
 
         # Load all records from PocketBase
         pb_records = db.get_all()
@@ -315,6 +324,8 @@ class Scheduler:
                     print(f"ℹ️ Next run for {anime['media']['title']['romaji']} in {record.timeouts * interval} minutes")
                     record.timeouts -= 1
                     db.upsert(media_id, record)
+                    if media_id in failed_traces:
+                        failed_traces[media_id]["timeouts"] = record.timeouts
                     continue
 
                 # Compute airing status
