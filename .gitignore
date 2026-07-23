@@ -134,7 +134,8 @@ dist
 # TernJS port file
 
 .tern-port
-/test.py
+profile.json
+test*
 *.lock
 tempCodeRunner*
 build
