@@ -242,7 +242,7 @@
   // Navigation tabs toggle helper
   function switchTab(target) {
     state.activeTab = target;
-    
+
     // Update desktop buttons style
     DOM.navTabs.forEach(t => {
       if (t.dataset.tab === target) {
@@ -260,7 +260,7 @@
         t.className = "mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']";
       }
     });
-    
+
     // Switch views
     DOM.viewPanels.forEach(panel => {
       if (panel.id === `${target}-panel`) {
@@ -278,7 +278,7 @@
         DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
       }
     }
-    
+
     if (target === 'logs') {
       loadLogs();
       updateSearchDiagnostics();

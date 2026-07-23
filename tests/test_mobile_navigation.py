@@ -12,7 +12,7 @@ class TestMobileNavigation(unittest.TestCase):
         """Verify HTML contains mobile nav tabs for watching, logs, and settings."""
         with open(self.index_path, "r", encoding="utf-8") as f:
             html = f.read()
-        
+
         self.assertIn('data-tab="watching"', html)
         self.assertIn('data-tab="logs"', html)
         self.assertIn('data-tab="settings"', html)
@@ -23,7 +23,7 @@ class TestMobileNavigation(unittest.TestCase):
         """Verify app.js registers click listeners for mobile-nav-tab elements."""
         with open(self.app_js_path, "r", encoding="utf-8") as f:
             js = f.read()
-        
+
         self.assertIn('mobileNavTabs:', js)
         self.assertIn('DOM.mobileNavTabs.forEach', js)
         self.assertIn('switchTab(btn.dataset.tab)', js)

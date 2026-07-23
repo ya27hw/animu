@@ -140,4 +140,3 @@ def send_anime_downloaded_hook(title: str, color: int, image: str, *fields: Dict
 
     display_title = config.discord_download_title or title
     return send_embed(title=display_title, color=final_color, image=image, fields=list(fields))
-

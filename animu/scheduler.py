@@ -250,11 +250,11 @@ class Scheduler:
             # Increment timeouts and print failure log
             record.set_timeout()
             db.upsert(anime["mediaId"], record)
-            
+
             # Store persistent trace for failed run
             from .nyaa import record_failed_trace
             record_failed_trace(anime["mediaId"], anime=anime, record=record, status="NO_RESULTS")
-            
+
             # Send deduplicated alert
             cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
             alert_unresolved_anime(
