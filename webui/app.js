@@ -454,9 +454,13 @@
       };
       
       try {
-        await API.saveAnime(mediaId, payload);
+        const data = await API.saveAnime(mediaId, payload);
         closeModal(DOM.settingsDialog);
-        showToast('Anime overrides saved successfully.');
+        if (data && data.synced === false) {
+          showToast(data.warning || 'Saved locally but PocketBase sync failed.', 'warning');
+        } else {
+          showToast('Anime overrides saved successfully.');
+        }
         loadDashboard();
       } catch (e) {
         showToast(e.message, 'error');

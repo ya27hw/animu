@@ -189,15 +189,20 @@ def verify_query(
     query_explicit = get_explicit_season(search_query)
     candidate_explicit = get_explicit_season(parsed_title)
     
-    if not candidate_explicit and "season" in anime_parsed_data:
-        try:
-            val = anime_parsed_data["season"]
-            if isinstance(val, list) and val:
-                candidate_explicit = int(val[0])
-            elif val:
-                candidate_explicit = int(val)
-        except Exception:
-            pass
+    if not candidate_explicit:
+        season_val = anime_parsed_data.get("season") or anime_parsed_data.get("anime_season")
+        if season_val:
+            try:
+                if isinstance(season_val, list) and season_val:
+                    candidate_explicit = int(season_val[0])
+                elif season_val:
+                    candidate_explicit = int(season_val)
+            except Exception:
+                pass
+        if not candidate_explicit:
+            file_name = anime_parsed_data.get("file_name", "")
+            if isinstance(file_name, str) and file_name:
+                candidate_explicit = get_explicit_season(file_name)
 
     if query_explicit is not None and candidate_explicit is not None:
         if query_explicit != candidate_explicit:
