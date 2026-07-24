@@ -14,6 +14,7 @@ from .nyaa import nyaa
 from .qbittorrent import qbit
 from .database import db
 from .models import OfflineAnime
+from .history import history_manager
 
 def get_config_dict(cfg) -> dict:
     """Serializes ProfileConfig back to the camelCase JSON format for the UI."""
@@ -154,6 +155,16 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/health":
             self.send_json(200, {"ok": True})
             
+        elif path == "/api/history":
+            try:
+                items = history_manager.get_all()
+                self.send_json(200, {
+                    "count": len(items),
+                    "history": items
+                })
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+            
         else:
             self.serve_static(path)
 
@@ -260,6 +271,11 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(500, {"error": "qBittorrent rejected the torrent"})
                 return
                 
+            history_manager.add_entry(
+                title=title,
+                link=link,
+                source="manual"
+            )
             self.send_json(200, {"ok": True, "title": title, "episode": None})
 
         # Pattern matches below
@@ -330,6 +346,16 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(500, {"error": "qBittorrent rejected the download request"})
                 return
                 
+            cover_img = anime["media"].get("coverImage", {}).get("extraLarge") or anime["media"].get("coverImage", {}).get("medium")
+            history_manager.add_entry(
+                title=save_title,
+                link=link,
+                anime_title=save_title,
+                episode=episode,
+                cover_image=cover_img,
+                source="manual"
+            )
+
             # If successful and episode specified, save progress
             if episode is not None:
                 record = db.get(media_id) or OfflineAnime(media_id=media_id)
@@ -402,6 +428,20 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True, "synced": synced,
                 "warning": "Saved locally but PocketBase sync failed." if not synced else None})
             
+        else:
+            self.send_json(404, {"error": "Not found"})
+
+    def do_DELETE(self):
+        url = urllib.parse.urlparse(self.path)
+        path = url.path
+
+        if path == "/api/history":
+            history_manager.clear_all()
+            self.send_json(200, {"ok": True})
+        elif re.match(r'^/api/history/([a-zA-Z0-9-]+)$', path):
+            entry_id = re.match(r'^/api/history/([a-zA-Z0-9-]+)$', path).group(1)
+            deleted = history_manager.delete_entry(entry_id)
+            self.send_json(200, {"ok": deleted})
         else:
             self.send_json(404, {"error": "Not found"})
 
