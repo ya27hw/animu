@@ -397,7 +397,10 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 record.downloaded_episodes = []
                 
             db.upsert(media_id, record)
-            self.send_json(200, {"ok": True})
+            cached = db.local_cache.get(str(media_id), {})
+            synced = not cached.get("_unsynced", False)
+            self.send_json(200, {"ok": True, "synced": synced,
+                "warning": "Saved locally but PocketBase sync failed." if not synced else None})
             
         else:
             self.send_json(404, {"error": "Not found"})
