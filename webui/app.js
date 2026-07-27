@@ -5,8 +5,11 @@
     animeList: [],
     userName: '',
     config: {},
-    logs: { selected: 'combined', lines: 250, content: '', available: [] }
+    logs: { selected: 'combined', lines: 250, content: '', available: [] },
+    history: []
   };
+
+  const expandedHistoryIds = new Set();
 
   let downloadsCollapsed = false;
 
@@ -138,6 +141,21 @@
       const res = await fetch('/api/search-debug');
       if (!res.ok) throw new Error('Failed to fetch search diagnostics.');
       return res.json();
+    },
+    async getHistory() {
+      const res = await fetch('/api/history');
+      if (!res.ok) throw new Error('Failed to fetch download history.');
+      return res.json();
+    },
+    async clearHistory() {
+      const res = await fetch('/api/history', { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to clear download history.');
+      return res.json();
+    },
+    async deleteHistoryItem(id) {
+      const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete history item.');
+      return res.json();
     }
   };
 
@@ -179,7 +197,11 @@
     downloadsHeader: document.getElementById('downloads-header'),
     downloadsToggleIcon: document.getElementById('downloads-toggle-icon'),
     btnRefreshSearchDebug: document.getElementById('btn-refresh-search-debug'),
-    searchDebugContainer: document.getElementById('search-debug-container')
+    searchDebugContainer: document.getElementById('search-debug-container'),
+    historyList: document.getElementById('history-list'),
+    historySearchInput: document.getElementById('history-search-input'),
+    historyRefreshBtn: document.getElementById('history-refresh-btn'),
+    historyClearBtn: document.getElementById('history-clear-btn')
   };
 
   // Light/Dark Theme Switcher
@@ -239,11 +261,11 @@
     }
   });
 
-  // Navigation tabs toggle helper
+  // Navigation tabs toggle
   function switchTab(target) {
     state.activeTab = target;
 
-    // Update desktop buttons style
+    // Update desktop nav buttons style
     DOM.navTabs.forEach(t => {
       if (t.dataset.tab === target) {
         t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-tab";
@@ -252,7 +274,7 @@
       }
     });
 
-    // Update mobile buttons style
+    // Update mobile nav buttons style
     DOM.mobileNavTabs.forEach(t => {
       if (t.dataset.tab === target) {
         t.className = "mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-violet-600/10 text-violet-700 dark:text-violet-300 font-['Outfit'] active-tab";
@@ -279,11 +301,14 @@
       }
     }
 
-    if (target === 'logs') {
+    if (target === 'history') {
+      loadAndRenderHistory();
+    } else if (target === 'logs') {
       loadLogs();
       updateSearchDiagnostics();
+    } else if (target === 'settings') {
+      loadConfig();
     }
-    if (target === 'settings') loadConfig();
     if (target === 'watching') loadAnime();
   }
 
@@ -970,9 +995,269 @@
     }
   });
 
-  DOM.btnRefreshSearchDebug.addEventListener('click', () => {
-    updateSearchDiagnostics();
-  });
+  // History Helper Functions & Rendering
+  function formatRelativeTime(isoStr) {
+    if (!isoStr) return 'Unknown time';
+    try {
+      const cleaned = isoStr.replace(" ", "T", 1);
+      const date = new Date(cleaned);
+      if (isNaN(date.getTime())) return isoStr;
+      
+      const now = new Date();
+      const diffMs = now - date;
+      const diffSecs = Math.floor(diffMs / 1000);
+      const diffMins = Math.floor(diffSecs / 60);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffSecs < 60) return 'Just now';
+      if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+      if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return `${diffDays} days ago`;
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) {
+      return isoStr;
+    }
+  }
+
+  function formatFullDateTime(isoStr) {
+    if (!isoStr) return 'N/A';
+    try {
+      const cleaned = isoStr.replace(" ", "T", 1);
+      const date = new Date(cleaned);
+      if (isNaN(date.getTime())) return isoStr;
+      return date.toLocaleString([], {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    } catch (e) {
+      return isoStr;
+    }
+  }
+
+  async function loadAndRenderHistory() {
+    try {
+      const data = await API.getHistory();
+      state.history = data.history || [];
+      renderHistory();
+    } catch (e) {
+      console.error(e);
+      if (DOM.historyList) {
+        DOM.historyList.innerHTML = `
+          <div class="py-12 text-center text-rose-500 text-sm font-semibold">
+            <i class="fa-solid fa-triangle-exclamation text-2xl mb-2 block"></i>
+            Failed to load download history: ${e.message}
+          </div>
+        `;
+      }
+    }
+  }
+
+  function renderHistory() {
+    if (!DOM.historyList) return;
+
+    const query = (DOM.historySearchInput?.value || '').toLowerCase().trim();
+    let filtered = state.history;
+
+    if (query) {
+      filtered = filtered.filter(item => {
+        const t = (item.title || '').toLowerCase();
+        const a = (item.anime_title || '').toLowerCase();
+        const ep = String(item.episode || '').toLowerCase();
+        return t.includes(query) || a.includes(query) || ep.includes(query);
+      });
+    }
+
+    if (filtered.length === 0) {
+      DOM.historyList.innerHTML = `
+        <div class="p-12 text-center text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">
+          <i class="fa-solid fa-clock-rotate-left text-3xl mb-3 text-slate-300 dark:text-slate-700"></i>
+          <p class="font-semibold text-sm">${query ? 'No history entries matched your search query.' : 'No previous downloads recorded.'}</p>
+        </div>
+      `;
+      return;
+    }
+
+    DOM.historyList.innerHTML = '';
+
+    filtered.forEach(item => {
+      const isExpanded = expandedHistoryIds.has(item.id);
+      const relativeTime = formatRelativeTime(item.added_at);
+      const fullTime = formatFullDateTime(item.added_at);
+      
+      const isAuto = item.source === 'auto';
+      const sourceBadge = isAuto
+        ? `<span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">Auto</span>`
+        : `<span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Manual</span>`;
+
+      let domainBadge = 'Nyaa';
+      if (item.link && item.link.startsWith('magnet:')) {
+        domainBadge = 'Magnet';
+      }
+
+      const card = document.createElement('div');
+      card.className = "border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden bg-white dark:bg-[#111827]/80 hover:border-violet-500/40 dark:hover:border-violet-500/30 transition-all duration-200 shadow-sm";
+
+      card.innerHTML = `
+        <div class="flex items-center justify-between gap-4 p-4 sm:p-5 cursor-pointer select-none bg-slate-50/50 dark:bg-slate-900/40 hover:bg-slate-100/60 dark:hover:bg-slate-900/80 transition-colors" data-history-toggle="${item.id}">
+          <div class="flex items-center gap-3.5 min-w-0 flex-grow">
+            <div class="w-9 h-9 rounded-xl bg-violet-500/10 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-download text-sm"></i>
+            </div>
+            <div class="min-w-0 flex-grow">
+              <h4 class="font-bold text-sm sm:text-base font-['Outfit'] text-slate-800 dark:text-slate-100 truncate" title="${item.title}">${item.title}</h4>
+              <div class="flex items-center gap-3 text-xs font-semibold text-slate-400 mt-1">
+                <span class="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                  <i class="fa-regular fa-clock text-[11px]"></i>${relativeTime}
+                </span>
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-200/60 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  ${domainBadge}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3 shrink-0">
+            ${sourceBadge}
+            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+              <i class="fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-xs"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="${isExpanded ? '' : 'hidden'} border-t border-slate-100 dark:border-slate-800/80 p-5 bg-slate-50/40 dark:bg-slate-950/40 space-y-4">
+          
+          <div>
+            <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Full Torrent Title</span>
+            <p class="text-xs sm:text-sm font-semibold font-mono text-slate-800 dark:text-slate-200 select-all break-all bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/50 dark:border-slate-800">${item.title}</p>
+          </div>
+
+          <div>
+            <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Torrent Source Link</span>
+            <div class="flex items-center gap-2">
+              <a href="${item.link}" target="_blank" rel="noopener noreferrer" class="flex-grow text-xs sm:text-sm font-medium font-mono text-violet-600 dark:text-violet-400 hover:underline truncate bg-violet-500/5 dark:bg-violet-500/10 px-3.5 py-2 rounded-xl border border-violet-500/20 flex items-center gap-2">
+                <i class="fa-solid fa-up-right-from-square text-xs shrink-0"></i>
+                <span class="truncate">${item.link}</span>
+              </a>
+              <button class="px-3.5 py-2 bg-slate-200/70 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs shrink-0 transition-colors flex items-center gap-1.5 cursor-pointer" data-copy-link="${item.link}">
+                <i class="fa-regular fa-copy"></i>Copy
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            
+            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
+              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Added Timestamp</span>
+              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">${fullTime}</span>
+            </div>
+
+            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
+              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Anime / Episode</span>
+              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate block">
+                ${item.anime_title || 'N/A'}${item.episode !== null && item.episode !== undefined ? ` (Ep ${item.episode})` : ''}
+              </span>
+            </div>
+
+            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
+              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Torrent Size</span>
+              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">${item.size || 'Unknown'}</span>
+            </div>
+
+            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
+              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Seeders</span>
+              <span class="text-xs font-semibold text-emerald-500">${item.seeders || 'N/A'}</span>
+            </div>
+
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-slate-200/30 dark:border-slate-800/40">
+            ${item.cover_image ? `
+              <div class="flex items-center gap-2">
+                <img src="${item.cover_image}" class="w-7 h-7 rounded-lg object-cover" alt="Cover" />
+                <span class="text-xs font-semibold text-slate-400">${item.anime_title || ''}</span>
+              </div>
+            ` : '<div></div>'}
+
+            <button class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5" data-delete-history="${item.id}">
+              <i class="fa-solid fa-trash-can text-[11px]"></i>Remove Entry
+            </button>
+          </div>
+
+        </div>
+      `;
+
+      const toggleEl = card.querySelector(`[data-history-toggle="${item.id}"]`);
+      toggleEl.addEventListener('click', () => {
+        if (expandedHistoryIds.has(item.id)) {
+          expandedHistoryIds.delete(item.id);
+        } else {
+          expandedHistoryIds.add(item.id);
+        }
+        renderHistory();
+      });
+
+      const copyBtn = card.querySelector(`[data-copy-link]`);
+      if (copyBtn) {
+        copyBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(item.link);
+          showToast('Torrent link copied to clipboard!', 'success');
+        });
+      }
+
+      const deleteBtn = card.querySelector(`[data-delete-history="${item.id}"]`);
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await API.deleteHistoryItem(item.id);
+            state.history = state.history.filter(h => h.id !== item.id);
+            expandedHistoryIds.delete(item.id);
+            renderHistory();
+            showToast('History item removed.');
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        });
+      }
+
+      DOM.historyList.appendChild(card);
+    });
+  }
+
+  if (DOM.historyRefreshBtn) {
+    DOM.historyRefreshBtn.addEventListener('click', async () => {
+      await loadAndRenderHistory();
+      showToast('Download history refreshed.');
+    });
+  }
+
+  if (DOM.historyClearBtn) {
+    DOM.historyClearBtn.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to clear all download history?')) return;
+      try {
+        await API.clearHistory();
+        state.history = [];
+        expandedHistoryIds.clear();
+        renderHistory();
+        showToast('Download history cleared.');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    });
+  }
+
+  if (DOM.historySearchInput) {
+    DOM.historySearchInput.addEventListener('input', () => {
+      renderHistory();
+    });
+  }
 
   // Init dashboard load
   async function loadDashboard() {

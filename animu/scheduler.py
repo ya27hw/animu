@@ -10,6 +10,7 @@ from .nyaa import nyaa
 from .qbittorrent import qbit
 from .discord import alert_user, alert_unresolved_anime, clear_alert_history, send_anime_downloaded_hook
 from .utils import fix_anime_season, count_past_relations
+from .history import history_manager
 
 class Scheduler:
     def __init__(self):
@@ -50,6 +51,19 @@ class Scheduler:
                 newly_downloaded.extend(range(1, total_episodes + 1))
             
             print(f"Downloading: {title} (Episode: {episode})")
+
+            # Record history entry
+            cover_img = anime["media"].get("coverImage", {}).get("extraLarge") or anime["media"].get("coverImage", {}).get("medium")
+            history_manager.add_entry(
+                title=title,
+                link=link,
+                anime_title=romaji_title,
+                episode=episode,
+                size=torrent.get("nyaa:size") or torrent.get("size") or "Unknown",
+                seeders=torrent.get("nyaa:seeders") or torrent.get("seeders") or "N/A",
+                cover_image=cover_img,
+                source="auto"
+            )
 
         # Update offline DB record details
         record.downloaded_episodes = list(set(record.downloaded_episodes + newly_downloaded))

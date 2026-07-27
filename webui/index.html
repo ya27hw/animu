@@ -82,6 +82,9 @@
         <button data-tab="watching" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 active-tab bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
           <i class="fa-solid fa-tv text-[11px] sm:text-xs"></i>Watching
         </button>
+        <button data-tab="history" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-clock-rotate-left text-[11px] sm:text-xs"></i>History
+        </button>
         <button data-tab="logs" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
           <i class="fa-solid fa-list-check text-[11px] sm:text-xs"></i>Logs
         </button>
@@ -116,6 +119,9 @@
       <div class="px-4 py-3 space-y-1">
         <button data-tab="watching" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-violet-600/10 text-violet-700 dark:text-violet-300 font-['Outfit']">
           <i class="fa-solid fa-tv text-xs w-5 text-center"></i>Watching
+        </button>
+        <button data-tab="history" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
+          <i class="fa-solid fa-clock-rotate-left text-xs w-5 text-center"></i>History
         </button>
         <button data-tab="logs" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
           <i class="fa-solid fa-list-check text-xs w-5 text-center"></i>Logs
@@ -177,6 +183,54 @@
           <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
           <p class="font-semibold text-sm">Fetching watchlist entries...</p>
         </div>
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL: HISTORY -->
+    <section id="history-panel" class="view-panel hidden transition-all duration-300">
+      
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm flex flex-col min-h-[500px] glow-indigo">
+        
+        <!-- History Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
+          <div class="space-y-1">
+            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
+              <i class="fa-solid fa-clock-rotate-left text-violet-500 text-xl"></i>Download History
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-400">View previous torrent downloads, links, and completion timestamps sorted from newest to oldest.</p>
+          </div>
+          
+          <!-- Controls -->
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Search Filter Input -->
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+              <input type="text" id="history-search-input" placeholder="Search history..." class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl pl-9 pr-3.5 py-2 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500 w-44 sm:w-60 transition-all" />
+            </div>
+
+            <!-- Refresh Button -->
+            <button id="history-refresh-btn" class="w-10 h-10 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-lg shadow-violet-500/20 cursor-pointer transition-all duration-200" title="Refresh history">
+              <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+
+            <!-- Clear History Button -->
+            <button id="history-clear-btn" class="px-4 py-2 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/20 text-rose-500 font-semibold rounded-xl text-xs sm:text-sm transition-all duration-200 cursor-pointer flex items-center gap-2">
+              <i class="fa-solid fa-trash-can text-xs"></i>Clear History
+            </button>
+          </div>
+        </div>
+
+        <!-- History Items Container -->
+        <div id="history-list" class="space-y-4">
+          <!-- Rendered dynamically -->
+          <div class="py-16 flex flex-col items-center justify-center text-slate-400">
+            <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
+            <p class="font-semibold text-sm">Loading download history...</p>
+          </div>
+        </div>
+
       </div>
 
     </section>

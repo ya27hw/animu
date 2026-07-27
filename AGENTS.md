@@ -35,7 +35,7 @@ main.py (84 lines) — CLI entrypoint, argparsing, dispatcher
 ├── animu/models.py (40 lines)
 │   OfflineAnime dataclass: episodes, timeouts, alternative_title, etc.
 │
-├── animu/database.py (277 lines)
+├── animu/database.py (301 lines)
 │   Database class — PocketBase REST client
 │   • Auth via admin@atoona.com superuser, token refresh on 401
 │   • Local JSON cache mirror (logs/offline_db.json) — PocketBase offline fallback
@@ -69,7 +69,7 @@ main.py (84 lines) — CLI entrypoint, argparsing, dispatcher
 │   • delete_torrent() → hash lookup + /api/v2/torrents/delete
 │   Singleton: `qbit = QbitClient()` at module bottom
 │
-├── animu/scheduler.py (382 lines)
+├── animu/scheduler.py (385 lines)
 │   Scheduler — core automation loop
 │   • run_loop() — peak/off-peak minute-checking loop (2min/15min intervals)
 │   • check() → fetch watching list → handle_anime() per anime
@@ -84,7 +84,14 @@ main.py (84 lines) — CLI entrypoint, argparsing, dispatcher
 │   send_anime_downloaded_hook() — download success embed
 │   Pure HTTP POST to Discord webhook URL — no SDK
 │
-├── animu/web.py (505 lines)
+├── animu/history.py (130 lines)
+│   HistoryManager — download history persistence & REST helper
+│   • Local JSON cache mirror (logs/history.json)
+│   • Auto-seed past downloads from animu.log if empty
+│   • CRUD: add_entry(), get_all() (newest-first), delete_entry(), clear_all()
+│   Singleton: `history_manager = HistoryManager()` at module bottom
+│
+├── animu/web.py (535 lines)
 │   AnimuHTTPHandler — http.server REST API + static file server
 │   • GET /api/anime — returns watching list with PocketBase state
 │   • GET /api/logs — tail of animu.log with combined/out/error filters
@@ -94,7 +101,7 @@ main.py (84 lines) — CLI entrypoint, argparsing, dispatcher
 │   • PATCH /api/anime/:id — alternative title, starting episode, reset
 │   • Static: serves webui/index.html + webui/app.js from disk
 │
-├── animu/utils.py (391 lines)
+├── animu/utils.py (396 lines)
 │   fix_anime_season() — S2/Season II/7th Season detection
 │   count_past_relations() — prequel chain walker
 │   verify_query() — 4-factor torrent scoring (title, episode, resolution, air date)
@@ -105,7 +112,7 @@ main.py (84 lines) — CLI entrypoint, argparsing, dispatcher
 │
 └── webui/ (1,462 lines)
     index.html (542 lines) — Tailwind v4 dark-themed SPA, hamburger menu on mobile
-    app.js (952 lines) — Vanilla JS: anime grid, search, details modal, settings
+    app.js (980 lines) — Vanilla JS: anime grid, search, details modal, settings
 ```
 
 ---
