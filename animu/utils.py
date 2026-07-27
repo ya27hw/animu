@@ -53,25 +53,30 @@ def find_best_match(main_string: str, target_strings: List[str]) -> dict:
 
 def get_explicit_season(title: str) -> Optional[int]:
     """Extract explicit season number from a string, returning None if no explicit indicator is found."""
-    # Match roman numerals: Season II, III, IV
+    if not title:
+        return None
+    # Match roman numerals: Season II, III, IV or standalone II, III, IV (with word boundaries)
     roman_match = re.search(r'\b(?:season\s*)?(II|III|IV)\b', title, re.IGNORECASE)
     if roman_match:
         return {"II": 2, "III": 3, "IV": 4}.get(roman_match.group(1).upper())
     
+    # Match ordinals: 2nd Season, 3rd Season, etc.
+    ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
+    if ordinal_match:
+        return int(ordinal_match.group(1))
+
     # Match standard season notations: S2, Season 2, S02, C2 (cour 2)
     season_match = re.search(r'\b(?:s|season|c)\s*0?(\d+)\b', title, re.IGNORECASE)
     if season_match:
         return int(season_match.group(1))
         
-    # Match ordinals: 2nd Season, 3rd Season, etc.
-    ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
-    if ordinal_match:
-        return int(ordinal_match.group(1))
-        
     return None
 
 def fix_anime_season(title: str) -> dict:
     """Detect and extract season information from an anime title."""
+    if not title:
+        return {"title": "", "seasonCount": 1}
+
     # Match roman numerals season II, III, IV
     roman_regex = r'\b(?:season\s*)?(II|III|IV)\b'
     roman_match = re.search(roman_regex, title, re.IGNORECASE)
@@ -85,12 +90,21 @@ def fix_anime_season(title: str) -> dict:
             "seasonCount": roman_to_season.get(roman, 1)
         }
 
-    # Match standard season notations: s01, season 2, 2nd season, or trailing digit
-    season_regex = r's0?\d{1}|season(.*)0?\d{1}|(\d+(st|nd|rd|th)(.*)season)|[^a-zA-Z0-9]0?\d{1}$'
-    season_match = re.search(season_regex, title, re.IGNORECASE)
+    # Match ordinals: 2nd Season, 3rd Season, etc.
+    ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
+    if ordinal_match:
+        season_number = int(ordinal_match.group(1))
+        clean_title = title.replace(ordinal_match.group(0), "").strip()
+        clean_title = re.sub(r'\s+', ' ', clean_title)
+        return {
+            "title": clean_title,
+            "seasonCount": season_number
+        }
+
+    # Match standard season notations: Season 2, S2, S02
+    season_match = re.search(r'\b(?:s|season|c)\s*0?(\d+)\b', title, re.IGNORECASE)
     if season_match:
-        num_match = re.search(r'\d+', season_match.group(0))
-        season_number = int(num_match.group(0)) if num_match else 1
+        season_number = int(season_match.group(1))
         clean_title = title.replace(season_match.group(0), "").strip()
         clean_title = re.sub(r'\s+', ' ', clean_title)
         return {
@@ -130,8 +144,12 @@ def count_past_relations(media_id: int, episode_offset: int = 0, season_count: i
 
     return {"episodeOffset": episode_offset, "seasonCount": season_count}
 
-def matches_airdate_with_buffer(airing_at: float, pub_epoch: float, buffer_seconds: int = 172800) -> bool:
+def matches_airdate_with_buffer(airing_at: float, pub_epoch: float, buffer_seconds: Optional[int] = None) -> bool:
     """Verify if the torrent publication date is within reasonable bounds of the airing schedule."""
+    if buffer_seconds is None:
+        config = get_config()
+        hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+        buffer_seconds = int(hours * 3600)
     return (airing_at - buffer_seconds) < pub_epoch
 
 def _to_clean_string(val: Any) -> str:
@@ -185,10 +203,12 @@ def verify_query(
     else:
         parsed_title = str(parsed_title_val or "")
 
-    # Perform strict season conflict checks to prevent mismatching multi-season shows
+    # Season conflict checks: only hard-reject when BOTH query and candidate have
+    # explicit but DIFFERENT season numbers. Many releases (e.g. SubsPlease)
+    # omit season numbers entirely — those should NOT be rejected here.
     query_explicit = get_explicit_season(search_query)
     candidate_explicit = get_explicit_season(parsed_title)
-    
+
     if not candidate_explicit:
         season_val = anime_parsed_data.get("season") or anime_parsed_data.get("anime_season")
         if season_val:
@@ -200,32 +220,24 @@ def verify_query(
             except Exception:
                 pass
         if not candidate_explicit:
-            file_name = anime_parsed_data.get("file_name", "")
-            if isinstance(file_name, str) and file_name:
-                candidate_explicit = get_explicit_season(file_name)
+            raw_file_name = anime_parsed_data.get("file_name", "")
+            if isinstance(raw_file_name, str) and raw_file_name:
+                candidate_explicit = get_explicit_season(raw_file_name)
 
+    # Hard reject only when BOTH have explicit seasons that disagree
     if query_explicit is not None and candidate_explicit is not None:
         if query_explicit != candidate_explicit:
             return get_result(0.0, f"Season conflict (query S{query_explicit} vs torrent S{candidate_explicit})")
 
-    if candidate_explicit is not None:
-        expected_query_season = query_explicit or 1
-        if candidate_explicit != expected_query_season:
-            return get_result(0.0, f"Season conflict (torrent S{candidate_explicit} vs expected query S{expected_query_season})")
+    # If candidate explicitly says Season 1 but we want Season 2+, reject
+    if candidate_explicit is not None and query_explicit is not None:
+        if candidate_explicit != query_explicit:
+            return get_result(0.0, f"Season conflict (torrent S{candidate_explicit} vs expected query S{query_explicit})")
 
-    if query_explicit is not None and query_explicit > 1 and candidate_explicit is None:
-        parsed_episode_val = anime_parsed_data.get("episode_number")
-        is_absolute_candidate = False
-        if parsed_episode_val:
-            try:
-                if isinstance(parsed_episode_val, list):
-                    is_absolute_candidate = any(float(ep) >= 12 for ep in parsed_episode_val)
-                else:
-                    is_absolute_candidate = float(parsed_episode_val) >= 12
-            except ValueError:
-                pass
-        if not is_absolute_candidate:
-            return get_result(0.0, f"Season conflict (query is Season {query_explicit} but candidate lacks season marker and has low episode number)")
+    # If candidate has a season marker but query does not specify one (defaults S1),
+    # reject only if the candidate is explicitly a higher season
+    if candidate_explicit is not None and candidate_explicit > 1 and query_explicit is None:
+        return get_result(0.0, f"Season conflict (torrent S{candidate_explicit} but query has no season, assuming S1)")
 
     has_episodes = len(episodes) > 0
 
@@ -247,9 +259,19 @@ def verify_query(
     if sub_anime_title_string:
         targets.append(sub_anime_title_string)
     targets.extend(v_bar_split_title)
+    # Also add a season-stripped version of each target so
+    # "Youjo Senki" matches queries like "Youjo Senki S2"
+    for t in list(targets):
+        stripped = fix_anime_season(t)["title"]
+        if stripped and stripped != t:
+            targets.append(stripped)
     targets = list(set(t for t in targets if t))
 
-    title_match = find_best_match(search_query, targets)
+    # Strip quoted episode numbers (e.g., ' "01"') from search_query for title comparison
+    # e.g. 'Youjo Senki S2 "01"' → 'Youjo Senki S2'
+    clean_search_query = re.sub(r'\s*"\d+"$', '', search_query).strip()
+
+    title_match = find_best_match(clean_search_query, targets)
     best_rating = title_match["bestMatch"]["rating"]
 
     if best_rating < 0.70:
