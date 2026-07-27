@@ -1,6 +1,7 @@
 import re
 import email.utils
 import time
+import datetime
 from typing import List, Dict, Any, Optional
 from .config import get_config
 
@@ -152,6 +153,30 @@ def matches_airdate_with_buffer(airing_at: float, pub_epoch: float, buffer_secon
         buffer_seconds = int(hours * 3600)
     return (airing_at - buffer_seconds) < pub_epoch
 
+
+def _fmt_epoch(epoch: float) -> str:
+    """Format a Unix timestamp as a compact UTC string for log messages."""
+    try:
+        return datetime.datetime.utcfromtimestamp(epoch).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return str(epoch)
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration in seconds as a human-readable string (e.g. '2h 15m')."""
+    seconds = abs(int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    return " ".join(parts) if parts else "<1m"
+
 def _to_clean_string(val: Any) -> str:
     """Helper to clean string or join list of strings into a single lowercase string."""
     if isinstance(val, list):
@@ -284,8 +309,12 @@ def verify_query(
     title_match = find_best_match(clean_search_query, targets)
     best_rating = title_match["bestMatch"]["rating"]
 
+    best_target = title_match["bestMatch"].get("target", "")
     if best_rating < 0.70:
-        return get_result(0.0, f"Title similarity rating too low ({best_rating*100:.1f}% < 70.0%)")
+        return get_result(0.0,
+            f"Title similarity too low: {best_rating*100:.1f}% < 70% "
+            f"(query '{clean_search_query}' best matched '{best_target}')"
+        )
 
     resolution_match = (
         resolution == "0" or
@@ -327,28 +356,55 @@ def verify_query(
                 break
 
         if page_number == -1 and not ignore_airdate_checks:
-            return get_result(0.0, "Episode not aired yet in AniList airing schedule")
+            return get_result(0.0, "Episode not in AniList airing schedule (may not have aired yet)")
+
+        airing_at_epoch = nodes[page_number]["airingAt"] if page_number != -1 else 0.0
+        config = get_config()
+        threshold_hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+        buffer_seconds = int(threshold_hours * 3600)
 
         air_date_match = (
             ignore_airdate_checks or
             (page_number != -1 and matches_airdate_with_buffer(
-                nodes[page_number]["airingAt"],
-                pub_epoch
+                airing_at_epoch,
+                pub_epoch,
+                buffer_seconds
             ))
         )
 
         score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating
-        
+
         rejection_reason = ""
         if score < 3.88:
             failed_checks = []
             if not episode_match:
-                failed_checks.append("episode mismatch")
+                ep_found = ", ".join(str(int(e)) for e in parsed_episodes) if parsed_episodes else "none"
+                failed_checks.append(
+                    f"episode mismatch (wanted Ep{wanted_episode}, torrent has Ep{ep_found})"
+                )
             if not resolution_match:
-                failed_checks.append(f"resolution mismatch (wanted {resolution}, got {parsed_resolution})")
-            if not air_date_match:
-                failed_checks.append("air date buffer check failed (torrent published too early)")
-            rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
+                failed_checks.append(
+                    f"resolution mismatch (wanted {resolution}, got {parsed_resolution or 'none'})"
+                )
+            if not air_date_match and not ignore_airdate_checks and airing_at_epoch:
+                diff_secs = pub_epoch - (airing_at_epoch - buffer_seconds)
+                if diff_secs < 0:
+                    # Published before (airing_time - threshold)
+                    early_by = _fmt_duration(-diff_secs)
+                    failed_checks.append(
+                        f"air date: torrent uploaded {early_by} too early "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"aired {_fmt_epoch(airing_at_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+                else:
+                    failed_checks.append(
+                        f"air date check failed "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"aired {_fmt_epoch(airing_at_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+            rejection_reason = "Failed threshold — " + " | ".join(failed_checks)
 
         details = {
             "episode_match": episode_match,
@@ -385,18 +441,39 @@ def verify_query(
                 verify_range_ok = False
 
             score = float(verify_range_ok) + float(resolution_match) + float(air_date_match_batch) + best_rating
-            
+
             rejection_reason = ""
             if score < 3.88:
                 failed_checks = []
                 if not verify_range_ok:
-                    failed_checks.append("batch range mismatch")
+                    failed_checks.append(
+                        f"batch range mismatch (found '{range_str}', expected 01-{episodes[-1] if episodes else '?'})"
+                    )
                 if not resolution_match:
-                    failed_checks.append(f"resolution mismatch (wanted {resolution}, got {parsed_resolution})")
-                if not air_date_match_batch:
-                    failed_checks.append("air date check failed")
-                rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
-                
+                    failed_checks.append(
+                        f"resolution mismatch (wanted {resolution}, got {parsed_resolution or 'none'})"
+                    )
+                if not air_date_match_batch and nodes:
+                    last_node_epoch = nodes[-1]["airingAt"]
+                    config = get_config()
+                    threshold_hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+                    diff = pub_epoch - (last_node_epoch - int(threshold_hours * 3600))
+                    if diff < 0:
+                        failed_checks.append(
+                            f"air date: batch uploaded {_fmt_duration(-diff)} too early "
+                            f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                            f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                            f"threshold -{threshold_hours:.0f}h)"
+                        )
+                    else:
+                        failed_checks.append(
+                            f"air date check failed "
+                            f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                            f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                            f"threshold -{threshold_hours:.0f}h)"
+                        )
+                rejection_reason = "Failed threshold — " + " | ".join(failed_checks)
+
             details = {
                 "batch_range_match": verify_range_ok,
                 "resolution_match": resolution_match,
@@ -410,12 +487,31 @@ def verify_query(
         if score < 3.88:
             failed_checks = []
             if not is_batch:
-                failed_checks.append("not a batch torrent")
+                failed_checks.append("not a batch torrent (single-episode release)")
             if not resolution_match:
-                failed_checks.append(f"resolution mismatch (wanted {resolution}, got {parsed_resolution})")
-            if not air_date_match_batch:
-                failed_checks.append("air date check failed")
-            rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
+                failed_checks.append(
+                    f"resolution mismatch (wanted {resolution}, got {parsed_resolution or 'none'})"
+                )
+            if not air_date_match_batch and nodes:
+                last_node_epoch = nodes[-1]["airingAt"]
+                config = get_config()
+                threshold_hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+                diff = pub_epoch - (last_node_epoch - int(threshold_hours * 3600))
+                if diff < 0:
+                    failed_checks.append(
+                        f"air date: batch uploaded {_fmt_duration(-diff)} too early "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+                else:
+                    failed_checks.append(
+                        f"air date check failed "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+            rejection_reason = "Failed threshold — " + " | ".join(failed_checks)
             
         details = {
             "is_batch": is_batch,

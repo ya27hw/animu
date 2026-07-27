@@ -3,9 +3,12 @@ import httpx
 import time
 import anitopy
 import math
+import logging
 from typing import Optional, List, Dict, Any
 from .config import get_config
 from .utils import verify_query
+
+_log = logging.getLogger("combined")
 
 class NyaaClient:
     def __init__(self):
@@ -207,6 +210,12 @@ class NyaaClient:
                     "rating": rating,
                     "rejection_reason": details.get("rejection_reason", "")
                 })
+
+            reason = details.get("rejection_reason", "")
+            if reason:
+                _log.info("  ✗ Rejected: %s | %s", title, reason)
+            else:
+                _log.info("  ✓ Candidate: %s | score=%.2f", title, rating)
 
             if rating > best_rating:
                 best_rating = rating
