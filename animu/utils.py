@@ -229,11 +229,6 @@ def verify_query(
         if query_explicit != candidate_explicit:
             return get_result(0.0, f"Season conflict (query S{query_explicit} vs torrent S{candidate_explicit})")
 
-    # If candidate explicitly says Season 1 but we want Season 2+, reject
-    if candidate_explicit is not None and query_explicit is not None:
-        if candidate_explicit != query_explicit:
-            return get_result(0.0, f"Season conflict (torrent S{candidate_explicit} vs expected query S{query_explicit})")
-
     # If candidate has a season marker but query does not specify one (defaults S1),
     # reject only if the candidate is explicitly a higher season
     if candidate_explicit is not None and candidate_explicit > 1 and query_explicit is None:
@@ -259,8 +254,23 @@ def verify_query(
     if sub_anime_title_string:
         targets.append(sub_anime_title_string)
     targets.extend(v_bar_split_title)
-    # Also add a season-stripped version of each target so
-    # "Youjo Senki" matches queries like "Youjo Senki S2"
+
+    # Reconstruct season-qualified title from anitopy's split fields.
+    # anitopy parses "Mushoku Tensei S3 - 04" as anime_title="Mushoku Tensei"
+    # + anime_season="3" separately, so we rebuild "Mushoku Tensei S3" here
+    # so a query of "Mushoku Tensei S3" gets a 1.0 match, not ~0.92.
+    raw_anime_season = anime_parsed_data.get("anime_season") or anime_parsed_data.get("season")
+    if raw_anime_season and parsed_title:
+        try:
+            season_num = int(raw_anime_season) if not isinstance(raw_anime_season, list) else int(raw_anime_season[0])
+            if season_num and season_num > 1:
+                targets.append(f"{parsed_title} S{season_num}")
+                targets.append(f"{main_anime_title} S{season_num}")
+        except (ValueError, TypeError, IndexError):
+            pass
+
+    # Also add season-stripped versions so a no-season torrent can still match
+    # a season-qualified query (e.g. "Youjo Senki" torrent vs "Youjo Senki S2" query)
     for t in list(targets):
         stripped = fix_anime_season(t)["title"]
         if stripped and stripped != t:

@@ -141,7 +141,13 @@ class QbitClient:
         episode: Optional[int] = None,
         use_proxy_download: bool = False
     ) -> bool:
-        """Adds a torrent via direct magnet/URL or file upload."""
+        """Adds a torrent by downloading the .torrent file and uploading it via multipart.
+
+        We always download the .torrent file in Python rather than passing the raw URL
+        to qBittorrent. qBittorrent returns 'Ok.' even when it cannot reach Nyaa.si
+        (e.g. Oman ISP block via ddos-guard CDN), so the torrent would silently never
+        appear. By fetching in Python we control the download and can use the proxy.
+        """
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
         add_url = f"{base_url.rstrip('/')}/api/v2/torrents/add"
@@ -151,36 +157,14 @@ class QbitClient:
             return False
 
         rename = f"{title} - {episode}" if episode is not None else title
-        should_upload_file = config.use_proxy or use_proxy_download
-        
+        # Use alt_root_dir when proxy download is requested (different storage location)
         base_root_dir = config.alt_root_dir if use_proxy_download else config.root_dir
         base_root_dir = base_root_dir or "/mock"
         save_path = posixpath.join(base_root_dir, title)
 
-        if should_upload_file:
-            return self.add_torrent_file(add_url, link, save_path, rename, should_upload_file)
-        else:
-            try:
-                payload = {
-                    "urls": link,
-                    "savepath": save_path,
-                    "rename": rename,
-                    "sequentialDownload": "true",
-                    "category": "animu"
-                }
-                headers = {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Cookie": f"SID={self.sid}"
-                }
-                resp = self.client.post(add_url, data=payload, headers=headers)
-                if resp.status_code == 200 and resp.text == "Ok.":
-                    return True
-                else:
-                    print(f"Unexpected response from qBittorrent: HTTP {resp.status_code} - {resp.text}")
-                    return False
-            except Exception as e:
-                print(f"Error adding torrent: {e}")
-                return False
+        # Always use proxy if configured globally, or if this specific download needs it
+        use_proxy = config.use_proxy or use_proxy_download
+        return self.add_torrent_file(add_url, link, save_path, rename, use_proxy)
 
     def check_torrent(self, name: str) -> bool:
         """Check if a torrent matching the given name or title exists in qBittorrent."""
@@ -205,13 +189,11 @@ class QbitClient:
                 target_clean = name.lower().strip()
                 for t in torrents:
                     t_name = (t.get("name") or "").lower().strip()
-                    # Exact match or target_clean contained in torrent name (safe direction)
+                    # Exact match, or our expected name is contained in the torrent name
+                    # (e.g. rename "Mushoku Tensei S3 - 4" found inside qBittorrent name)
                     if t_name == target_clean or target_clean in t_name:
                         return True
-                    # t_name in target_clean only if t_name is long enough to be meaningful
-                    if len(t_name) >= 5 and t_name in target_clean:
-                        return True
-                    # Check save_path as a fallback
+                    # save_path fallback: the title folder should be in the save path
                     save_path = (t.get("save_path") or "").lower()
                     if target_clean in save_path:
                         return True
