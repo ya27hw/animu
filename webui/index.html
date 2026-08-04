@@ -82,6 +82,9 @@
         <button data-tab="watching" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 active-tab bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
           <i class="fa-solid fa-tv text-[11px] sm:text-xs"></i>Watching
         </button>
+        <button data-tab="discover" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-compass text-[11px] sm:text-xs"></i>Discover
+        </button>
         <button data-tab="history" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
           <i class="fa-solid fa-clock-rotate-left text-[11px] sm:text-xs"></i>History
         </button>
@@ -119,6 +122,9 @@
       <div class="px-4 py-3 space-y-1">
         <button data-tab="watching" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-violet-600/10 text-violet-700 dark:text-violet-300 font-['Outfit']">
           <i class="fa-solid fa-tv text-xs w-5 text-center"></i>Watching
+        </button>
+        <button data-tab="discover" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
+          <i class="fa-solid fa-compass text-xs w-5 text-center"></i>Discover
         </button>
         <button data-tab="history" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
           <i class="fa-solid fa-clock-rotate-left text-xs w-5 text-center"></i>History
@@ -182,6 +188,84 @@
         <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
           <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
           <p class="font-semibold text-sm">Fetching watchlist entries...</p>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL: DISCOVER -->
+    <section id="discover-panel" class="view-panel hidden transition-all duration-300">
+
+      <!-- Discover Header & Controls Card -->
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 mb-8 shadow-sm glow-purple">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
+          <div class="space-y-1">
+            <h2 class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] tracking-tight flex items-center gap-3">
+              <i class="fa-solid fa-compass text-violet-500"></i>AniList Discover
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+              Browse trending anime, popular titles, highest rated shows, or search the full AniList library.
+            </p>
+          </div>
+
+          <!-- Controls: Search Input & Rail Selectors -->
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <!-- Search Bar -->
+            <div class="relative flex-grow sm:w-72">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+              <input type="text" id="discover-search-input" placeholder="Search anime title..." class="w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl pl-9 pr-8 py-2 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500 transition-all" />
+              <button id="discover-search-clear" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <!-- Rails Switcher -->
+            <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 rounded-xl shrink-0">
+              <button id="btn-rail-trending" data-rail="trending" class="rail-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-rail">
+                <i class="fa-solid fa-fire text-amber-500 mr-1.5"></i>Trending
+              </button>
+              <button id="btn-rail-popular" data-rail="popular" class="rail-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+                <i class="fa-solid fa-chart-line text-sky-500 mr-1.5"></i>Popular
+              </button>
+              <button id="btn-rail-top" data-rail="top" class="rail-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+                <i class="fa-solid fa-star text-yellow-500 mr-1.5"></i>Top
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discover Feed View (Grid + Pagination) -->
+      <div id="discover-feed-view" class="space-y-8">
+        <!-- Grid of Discover Cards -->
+        <div id="discover-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
+            <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
+            <p class="font-semibold text-sm">Loading discover feed...</p>
+          </div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div id="discover-pagination" class="flex items-center justify-between bg-white dark:bg-[#111827]/75 border border-slate-200/60 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm">
+          <button id="btn-discover-prev" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+            <i class="fa-solid fa-chevron-left text-xs"></i>Previous
+          </button>
+          <span id="discover-page-indicator" class="text-xs sm:text-sm font-bold text-slate-500 dark:text-slate-400">Page 1</span>
+          <button id="btn-discover-next" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+            Next<i class="fa-solid fa-chevron-right text-xs"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Media Detail View Panel (In-tab / Full-width) -->
+      <div id="discover-detail-view" class="hidden space-y-8">
+        <button id="btn-back-to-discover" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 rounded-xl text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 transition-all cursor-pointer flex items-center gap-2 shadow-sm">
+          <i class="fa-solid fa-arrow-left"></i>Back to Discover
+        </button>
+
+        <div id="detail-content-container" class="space-y-8">
+          <!-- Loaded dynamically -->
         </div>
       </div>
 

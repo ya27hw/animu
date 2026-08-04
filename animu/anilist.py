@@ -10,8 +10,8 @@ class AnilistClient:
         # verify=False is useful if there are TLS/handshake proxy issues
         self.client = httpx.Client(verify=False, timeout=15)
 
-    def _query(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """Sends a GraphQL POST request to AniList with retry, proxy, and auth fallback."""
+    def _query(self, query: str, variables: Optional[Dict[str, Any]] = None, require_auth: bool = False) -> Optional[Dict[str, Any]]:
+        """Sends a GraphQL POST request to AniList with retry, proxy, and auth handling."""
         config = get_config()
         token = config.bearer_token_anilist
         
@@ -21,6 +21,9 @@ class AnilistClient:
         }
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        elif require_auth:
+            print("AniList token missing for authenticated request.")
+            return {"errors": [{"message": "AniList Bearer Token is not configured in Settings."}]}
 
         # Setup proxy if enabled
         proxy_url = None
@@ -43,14 +46,24 @@ class AnilistClient:
                     
                 status = resp.status_code
 
-                # Expired/invalid token fallback (since list queries are public)
-                if not auth_fallback_tried and token and status in (400, 401):
+                # Expired/invalid token fallback ONLY for public reads (when require_auth is False)
+                if not require_auth and not auth_fallback_tried and token and status in (400, 401):
                     headers.pop("Authorization", None)
                     auth_fallback_tried = True
                     continue
 
                 if status == 200:
                     return resp.json()
+
+                if require_auth:
+                    print(f"Authenticated AniList request failed with status {status}")
+                    try:
+                        data = resp.json()
+                        if isinstance(data, dict) and "errors" in data:
+                            return data
+                    except Exception:
+                        pass
+                    return {"errors": [{"message": f"AniList API error (status {status})"}]}
 
                 # Retry on cloudflare 502, proxy errors, or 5xx server issues
                 is_retryable = status == 502 or status == 404 or status >= 500
@@ -71,6 +84,8 @@ class AnilistClient:
                     time.sleep(delay)
                     continue
                 print(f"AniList request connection failed after {max_retries} retries: {e}")
+                if require_auth:
+                    return {"errors": [{"message": f"Connection error: {e}"}]}
                 return None
 
         return None
@@ -219,20 +234,259 @@ class AnilistClient:
                 return media["relations"].get("edges", [])
         return None
 
-    def set_anime_to_rewatching(self, media_id: int) -> bool:
-        """Update an anime entry on user list to REPEATING (Rewatching) status."""
+    def get_discover_anime(self, type_str: str = "trending", page: int = 1, per_page: int = 20) -> Dict[str, Any]:
+        """Fetch paginated anime discovery feed (trending, popular, or top)."""
+        sort_map = {
+            "trending": ["TRENDING_DESC", "POPULARITY_DESC"],
+            "popular": ["POPULARITY_DESC"],
+            "top": ["SCORE_DESC"],
+        }
+        sort = sort_map.get(type_str.lower(), ["TRENDING_DESC", "POPULARITY_DESC"])
+
         query = """
-        mutation SaveMediaListEntry($mediaId: Int, $status: MediaListStatus) {
-            SaveMediaListEntry(mediaId: $mediaId, status: $status) {
-                status
+        query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
+          Page(page: $page, perPage: $perPage) {
+            pageInfo {
+              total
+              perPage
+              currentPage
+              lastPage
+              hasNextPage
             }
+            media(type: ANIME, sort: $sort) {
+              id
+              title {
+                romaji
+                english
+                native
+              }
+              coverImage {
+                extraLarge
+                large
+                medium
+                color
+              }
+              bannerImage
+              format
+              status
+              episodes
+              duration
+              season
+              seasonYear
+              averageScore
+              meanScore
+              popularity
+              genres
+              nextAiringEpisode {
+                id
+                episode
+                timeUntilAiring
+                airingAt
+              }
+              mediaListEntry {
+                id
+                status
+                progress
+                score
+              }
+            }
+          }
         }
         """
-        resp = self._query(query, {"mediaId": media_id, "status": "REPEATING"})
+        resp = self._query(query, {"page": page, "perPage": per_page, "sort": sort})
+        if resp and "data" in resp and resp["data"] and "Page" in resp["data"]:
+            return resp["data"]["Page"]
+        return {"pageInfo": {"total": 0, "perPage": per_page, "currentPage": page, "lastPage": 1, "hasNextPage": False}, "media": []}
+
+    def search_anime(self, query_text: str, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
+        """Search anime on AniList with pagination."""
+        query = """
+        query ($search: String, $page: Int, $perPage: Int) {
+          Page(page: $page, perPage: $perPage) {
+            pageInfo {
+              total
+              perPage
+              currentPage
+              lastPage
+              hasNextPage
+            }
+            media(search: $search, type: ANIME, sort: [POPULARITY_DESC]) {
+              id
+              title {
+                romaji
+                english
+                native
+              }
+              coverImage {
+                extraLarge
+                large
+                medium
+                color
+              }
+              bannerImage
+              format
+              status
+              episodes
+              duration
+              season
+              seasonYear
+              averageScore
+              meanScore
+              popularity
+              genres
+              nextAiringEpisode {
+                id
+                episode
+                timeUntilAiring
+                airingAt
+              }
+              mediaListEntry {
+                id
+                status
+                progress
+                score
+              }
+            }
+          }
+        }
+        """
+        resp = self._query(query, {"search": query_text, "page": page, "perPage": per_page})
+        if resp and "data" in resp and resp["data"] and "Page" in resp["data"]:
+            return resp["data"]["Page"]
+        return {"pageInfo": {"total": 0, "perPage": per_page, "currentPage": page, "lastPage": 1, "hasNextPage": False}, "media": []}
+
+    def get_media_detail(self, media_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieve detailed anime metadata, airing schedule, relations, and user list entry."""
+        query = """
+        query ($id: Int) {
+          Media(id: $id, type: ANIME) {
+            id
+            title {
+              romaji
+              english
+              native
+            }
+            coverImage {
+              extraLarge
+              large
+              medium
+              color
+            }
+            bannerImage
+            description(asHtml: false)
+            format
+            status
+            episodes
+            duration
+            season
+            seasonYear
+            startDate {
+              year
+              month
+              day
+            }
+            endDate {
+              year
+              month
+              day
+            }
+            averageScore
+            meanScore
+            popularity
+            favourites
+            genres
+            synonyms
+            nextAiringEpisode {
+              id
+              episode
+              timeUntilAiring
+              airingAt
+            }
+            airingSchedule(page: 1, perPage: 25) {
+              nodes {
+                id
+                episode
+                airingAt
+                timeUntilAiring
+              }
+            }
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  type
+                  title {
+                    romaji
+                    english
+                  }
+                  format
+                  status
+                  coverImage {
+                    medium
+                    large
+                  }
+                }
+              }
+            }
+            mediaListEntry {
+              id
+              status
+              progress
+              score
+            }
+          }
+        }
+        """
+        resp = self._query(query, {"id": media_id})
         if resp and "data" in resp and resp["data"]:
-            save_entry = resp["data"].get("SaveMediaListEntry")
-            if save_entry and save_entry.get("status") == "REPEATING":
-                return True
-        return False
+            return resp["data"].get("Media")
+        return None
+
+    def save_media_list_entry(
+        self,
+        media_id: int,
+        status: Optional[str] = None,
+        progress: Optional[int] = None,
+        score: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Authenticated mutation to create or update a user's media list entry."""
+        query = """
+        mutation SaveMediaListEntry($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Float) {
+          SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, score: $score) {
+            id
+            mediaId
+            status
+            progress
+            score
+          }
+        }
+        """
+        variables: Dict[str, Any] = {"mediaId": media_id}
+        if status:
+            variables["status"] = status
+        if progress is not None:
+            variables["progress"] = progress
+        if score is not None:
+            variables["score"] = score
+
+        resp = self._query(query, variables, require_auth=True)
+        if not resp:
+            return {"success": False, "error": "No response received from AniList API."}
+
+        if "errors" in resp:
+            errors = resp["errors"]
+            msg = ", ".join([e.get("message", "Unknown error") for e in errors])
+            return {"success": False, "error": msg}
+
+        if "data" in resp and resp["data"] and resp["data"].get("SaveMediaListEntry"):
+            return {"success": True, "entry": resp["data"]["SaveMediaListEntry"]}
+
+        return {"success": False, "error": "Unexpected response payload from AniList API."}
+
+    def set_anime_to_rewatching(self, media_id: int) -> bool:
+        """Update an anime entry on user list to REPEATING (Rewatching) status."""
+        res = self.save_media_list_entry(media_id, status="REPEATING")
+        return res.get("success", False)
 
 anilist = AnilistClient()

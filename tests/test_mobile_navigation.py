@@ -14,6 +14,7 @@ class TestMobileNavigation(unittest.TestCase):
             html = f.read()
 
         self.assertIn('data-tab="watching"', html)
+        self.assertIn('data-tab="discover"', html)
         self.assertIn('data-tab="logs"', html)
         self.assertIn('data-tab="settings"', html)
         self.assertIn('mobile-nav-tab', html)
