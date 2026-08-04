@@ -57,6 +57,38 @@ def read_log_tail(file_path: str, max_lines: int = 50) -> str:
     except Exception as e:
         return f"Error reading log tail: {e}"
 
+def enrich_media_with_local_state(media_item: dict) -> dict:
+    """Merges local PocketBase record info into an AniList media item dictionary."""
+    if not isinstance(media_item, dict):
+        return media_item
+    media_id = media_item.get("id") or media_item.get("mediaId")
+    if not media_id:
+        return media_item
+
+    record = db.get(int(media_id))
+    enriched = dict(media_item)
+    if record:
+        enriched["localState"] = {
+            "tracked": True,
+            "alternativeTitle": record.alternative_title or None,
+            "startingEpisode": record.starting_episode,
+            "downloadedEpisodes": record.downloaded_episodes or [],
+            "timeouts": record.timeouts
+        }
+    else:
+        enriched["localState"] = {
+            "tracked": False,
+            "alternativeTitle": None,
+            "startingEpisode": 0,
+            "downloadedEpisodes": [],
+            "timeouts": 0
+        }
+    return enriched
+
+def enrich_media_list_with_local_state(media_list: list) -> list:
+    """Applies local state enrichment across a list of media dicts."""
+    return [enrich_media_with_local_state(m) for m in media_list]
+
 class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Override to suppress standard HTTP request printing in console logs (matches Node.js clean log)
@@ -131,6 +163,64 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/discover":
+            try:
+                params = urllib.parse.parse_qs(url.query)
+                disc_type = params.get("type", ["trending"])[0]
+                try:
+                    page = int(params.get("page", [1])[0])
+                except ValueError:
+                    page = 1
+                try:
+                    per_page = int(params.get("perPage", [20])[0])
+                except ValueError:
+                    per_page = 20
+
+                result = anilist.get_discover_anime(disc_type, page, per_page)
+                media = result.get("media", [])
+                result["media"] = enrich_media_list_with_local_state(media)
+                result["type"] = disc_type
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/search":
+            try:
+                params = urllib.parse.parse_qs(url.query)
+                q = params.get("q", [""])[0]
+                try:
+                    page = int(params.get("page", [1])[0])
+                except ValueError:
+                    page = 1
+                try:
+                    per_page = int(params.get("perPage", [20])[0])
+                except ValueError:
+                    per_page = 20
+
+                if not q:
+                    self.send_json(400, {"error": "Query parameter 'q' is required"})
+                    return
+
+                result = anilist.search_anime(q, page, per_page)
+                media = result.get("media", [])
+                result["media"] = enrich_media_list_with_local_state(media)
+                result["query"] = q
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/media/(\d+)$', path):
+            try:
+                media_id = int(re.match(r'^/api/anilist/media/(\d+)$', path).group(1))
+                media = anilist.get_media_detail(media_id)
+                if not media:
+                    self.send_json(404, {"error": "Anime not found on AniList"})
+                    return
+                enriched = enrich_media_with_local_state(media)
+                self.send_json(200, {"media": enriched})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
                 
         elif path == "/api/config":
             self.send_json(200, get_config_dict(get_config()))
@@ -172,7 +262,55 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         url = urllib.parse.urlparse(self.path)
         path = url.path
 
-        if path == "/api/test/qbittorrent":
+        if path == "/api/anilist/list":
+            body = self.read_json_body()
+            media_id = body.get("mediaId")
+            status = body.get("status")
+            progress = body.get("progress")
+            score = body.get("score")
+
+            if not media_id:
+                self.send_json(400, {"ok": False, "error": "mediaId is required"})
+                return
+
+            try:
+                media_id = int(media_id)
+            except ValueError:
+                self.send_json(400, {"ok": False, "error": "Invalid mediaId"})
+                return
+
+            prog_val = None
+            if progress is not None:
+                try:
+                    prog_val = int(progress)
+                except ValueError:
+                    self.send_json(400, {"ok": False, "error": "Invalid progress value"})
+                    return
+
+            score_val = None
+            if score is not None:
+                try:
+                    score_val = float(score)
+                except ValueError:
+                    self.send_json(400, {"ok": False, "error": "Invalid score value"})
+                    return
+
+            result = anilist.save_media_list_entry(
+                media_id=media_id,
+                status=str(status) if status else None,
+                progress=prog_val,
+                score=score_val
+            )
+
+            if result.get("success"):
+                self.send_json(200, {"ok": True, "entry": result.get("entry")})
+            else:
+                err_msg = result.get("error", "Mutation failed")
+                status_code = 401 if ("Token" in err_msg or "401" in err_msg or "Unauthorized" in err_msg) else 400
+                self.send_json(status_code, {"ok": False, "error": err_msg})
+            return
+
+        elif path == "/api/test/qbittorrent":
             body = self.read_json_body()
             qbit_url = body.get("qbitUrl", body.get("qbit_url", "")).strip()
             user = body.get("username", "").strip()
@@ -486,7 +624,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         
         # Clean pathname
         filename = path.lstrip('/')
-        if not filename or filename in ('index.html', 'settings') or re.match(r'^anime/\d+$', filename):
+        if not filename or filename in ('index.html', 'settings', 'discover') or re.match(r'^(anime|media|discover)(/\d+)?$', filename):
             filename = 'index.html'
             
         full_path = os.path.abspath(os.path.join(public_dir, filename))

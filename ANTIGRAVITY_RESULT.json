@@ -1,0 +1,44 @@
+{
+  "manifest_version": "1.0",
+  "task_id": "animu-anilist-discover-mvp",
+  "agent": "antigravity",
+  "worker": "PCT 125 (10.0.0.195)",
+  "status": "completed_with_review",
+  "source_base_commit": "059272bc10581f6b0904b70fb0976488c8408443",
+  "branch": "antigravity/t_animuAniListDiscover-manual-1",
+  "production_changes": false,
+  "changed_files": [
+    "animu/anilist.py",
+    "animu/web.py",
+    "webui/app.js",
+    "webui/index.html",
+    "tests/test_mobile_navigation.py",
+    "tests/test_anilist_discover.py"
+  ],
+  "implementation": [
+    "Added paginated AniList trending, popular, and top discovery queries.",
+    "Added AniList search and rich media detail queries with relations and airing data.",
+    "Added authenticated SaveMediaListEntry mutation handling for status, progress, and score.",
+    "Added Discover API routes, local Animu state enrichment, responsive Discover UI, search, pagination, detail panel, title-language toggle, and list editor.",
+    "Preserved scheduler integration by relying on the next CURRENT-list polling cycle."
+  ],
+  "tests": [
+    {"command": "python3 -m pytest -q", "result": "15 passed"},
+    {"command": "python3 -m unittest discover -s tests -v", "result": "15 passed"},
+    {"command": "python3 -m compileall -q animu tests", "result": "passed"},
+    {"command": "node --check webui/app.js", "result": "passed"},
+    {"command": "git diff --check", "result": "passed"},
+    {"command": "GET /api/health and GET /discover on local port 3210", "result": "200 responses"},
+    {"command": "Local browser smoke check of Discover tab and detail panel", "result": "passed; no browser console errors"}
+  ],
+  "limitations": [
+    "npm test is an existing placeholder that exits 1 with 'no test specified'.",
+    "npm run build cannot run in this checkout because tsc is not installed; the Discover UI is plain JavaScript/HTML and node --check passed.",
+    "Antigravity could not write Git metadata or commit in headless sandbox because .git/index.lock is outside the writable sandbox; Hermes extracted and independently reviewed the worker patch before committing this branch.",
+    "Upcoming/seasonal rails and Releasing Today remain outside this MVP scope."
+  ],
+  "follow_up": [
+    "Review this antigravity branch before any production deployment to CT 102.",
+    "Consider adding upcoming/seasonal and Releasing Today rails in a later phase."
+  ]
+}

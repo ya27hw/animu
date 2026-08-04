@@ -6,7 +6,19 @@
     userName: '',
     config: {},
     logs: { selected: 'combined', lines: 250, content: '', available: [] },
-    history: []
+    history: [],
+    discover: {
+      rail: 'trending',
+      searchQuery: '',
+      page: 1,
+      lastPage: 1,
+      hasNextPage: false,
+      items: [],
+      loading: false,
+      detailMediaId: null,
+      detailData: null,
+      titleLang: 'romaji'
+    }
   };
 
   const expandedHistoryIds = new Set();
@@ -156,6 +168,33 @@
       const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete history item.');
       return res.json();
+    },
+    async getDiscover(type = 'trending', page = 1) {
+      const res = await fetch(`/api/anilist/discover?type=${encodeURIComponent(type)}&page=${page}`);
+      if (!res.ok) throw new Error('Failed to load discover feed.');
+      return res.json();
+    },
+    async searchAniList(query, page = 1) {
+      const res = await fetch(`/api/anilist/search?q=${encodeURIComponent(query)}&page=${page}`);
+      if (!res.ok) throw new Error('Failed to search AniList.');
+      return res.json();
+    },
+    async getMediaDetail(mediaId) {
+      const res = await fetch(`/api/anilist/media/${mediaId}`);
+      if (!res.ok) throw new Error('Failed to load anime details.');
+      return res.json();
+    },
+    async updateListEntry(mediaId, payload) {
+      const res = await fetch('/api/anilist/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId, ...payload })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to update AniList entry.');
+      }
+      return data;
     }
   };
 
@@ -201,7 +240,19 @@
     historyList: document.getElementById('history-list'),
     historySearchInput: document.getElementById('history-search-input'),
     historyRefreshBtn: document.getElementById('history-refresh-btn'),
-    historyClearBtn: document.getElementById('history-clear-btn')
+    historyClearBtn: document.getElementById('history-clear-btn'),
+    discoverSearchInput: document.getElementById('discover-search-input'),
+    discoverSearchClear: document.getElementById('discover-search-clear'),
+    railBtns: document.querySelectorAll('.rail-btn'),
+    discoverGrid: document.getElementById('discover-grid'),
+    discoverPagination: document.getElementById('discover-pagination'),
+    btnDiscoverPrev: document.getElementById('btn-discover-prev'),
+    btnDiscoverNext: document.getElementById('btn-discover-next'),
+    discoverPageIndicator: document.getElementById('discover-page-indicator'),
+    discoverFeedView: document.getElementById('discover-feed-view'),
+    discoverDetailView: document.getElementById('discover-detail-view'),
+    btnBackToDiscover: document.getElementById('btn-back-to-discover'),
+    detailContentContainer: document.getElementById('detail-content-container')
   };
 
   // Light/Dark Theme Switcher
@@ -303,6 +354,17 @@
 
     if (target === 'history') {
       loadAndRenderHistory();
+    } else if (target === 'discover') {
+      if (state.discover.detailMediaId) {
+        if (DOM.discoverFeedView) DOM.discoverFeedView.classList.add('hidden');
+        if (DOM.discoverDetailView) DOM.discoverDetailView.classList.remove('hidden');
+      } else {
+        if (DOM.discoverFeedView) DOM.discoverFeedView.classList.remove('hidden');
+        if (DOM.discoverDetailView) DOM.discoverDetailView.classList.add('hidden');
+        if (state.discover.items.length === 0) {
+          loadDiscoverFeed();
+        }
+      }
     } else if (target === 'logs') {
       loadLogs();
       updateSearchDiagnostics();
@@ -583,8 +645,494 @@
         showToast(e.message, 'error');
         loadDashboard();
       }
+    },
+    showDiscoverDetail(mediaId) {
+      openMediaDetail(mediaId);
+    },
+    async quickAddWatching(mediaId) {
+      try {
+        const data = await API.updateListEntry(mediaId, { status: 'CURRENT' });
+        showToast('Anime added to Watching (CURRENT)! Will poll on next scheduler cycle.');
+        const item = state.discover.items.find(x => (x.id || x.mediaId) === mediaId);
+        if (item) {
+          if (!item.mediaListEntry) item.mediaListEntry = {};
+          item.mediaListEntry.status = 'CURRENT';
+          renderDiscoverGrid();
+        }
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
+    setTitleLang(lang) {
+      state.discover.titleLang = lang;
+      renderDiscoverGrid();
+      if (state.discover.detailData) {
+        renderMediaDetail();
+      }
+    },
+    async saveDetailListEntry(mediaId) {
+      const statusSelect = document.getElementById('detail-list-status');
+      const progressInput = document.getElementById('detail-list-progress');
+      const scoreInput = document.getElementById('detail-list-score');
+
+      const status = statusSelect ? statusSelect.value : 'CURRENT';
+      const progress = progressInput ? Number(progressInput.value) || 0 : 0;
+      const score = scoreInput ? Number(scoreInput.value) || 0 : 0;
+
+      const btn = document.getElementById('btn-save-detail-entry');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+      }
+
+      try {
+        const data = await API.updateListEntry(mediaId, { status, progress, score });
+        showToast('AniList entry updated successfully!', 'success');
+
+        if (state.discover.detailData) {
+          state.discover.detailData.mediaListEntry = {
+            id: data.entry ? data.entry.id : null,
+            status,
+            progress,
+            score
+          };
+          renderMediaDetail();
+        }
+
+        const item = state.discover.items.find(x => (x.id || x.mediaId) === mediaId);
+        if (item) {
+          item.mediaListEntry = { status, progress, score };
+          renderDiscoverGrid();
+        }
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>Save Entry to AniList';
+        }
+      }
     }
   };
+
+  // Discover Helper Functions
+  function getMediaTitle(title, preferredLang) {
+    if (!title) return 'Unknown Title';
+    const lang = preferredLang || state.discover.titleLang || 'romaji';
+    if (lang === 'english' && title.english) return title.english;
+    if (lang === 'native' && title.native) return title.native;
+    return title.romaji || title.english || title.native || 'Unknown Title';
+  }
+
+  let searchTimeout = null;
+
+  async function loadDiscoverFeed() {
+    if (state.discover.loading) return;
+    state.discover.loading = true;
+
+    if (DOM.discoverGrid) {
+      DOM.discoverGrid.innerHTML = `
+        <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
+          <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
+          <p class="font-semibold text-sm">Loading discover feed...</p>
+        </div>
+      `;
+    }
+
+    try {
+      let data;
+      if (state.discover.searchQuery) {
+        data = await API.searchAniList(state.discover.searchQuery, state.discover.page);
+      } else {
+        data = await API.getDiscover(state.discover.rail, state.discover.page);
+      }
+
+      const media = data.media || [];
+      const pageInfo = data.pageInfo || {};
+
+      state.discover.items = media;
+      state.discover.page = pageInfo.currentPage || state.discover.page;
+      state.discover.lastPage = pageInfo.lastPage || 1;
+      state.discover.hasNextPage = pageInfo.hasNextPage || false;
+
+      renderDiscoverGrid();
+      updateDiscoverPagination();
+    } catch (e) {
+      if (DOM.discoverGrid) {
+        DOM.discoverGrid.innerHTML = `
+          <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400 text-center">
+            <i class="fa-solid fa-triangle-exclamation text-4xl mb-4 text-rose-500"></i>
+            <p class="font-semibold text-sm text-slate-300">${e.message}</p>
+          </div>
+        `;
+      }
+    } finally {
+      state.discover.loading = false;
+    }
+  }
+
+  function renderDiscoverGrid() {
+    if (!DOM.discoverGrid) return;
+    DOM.discoverGrid.innerHTML = '';
+
+    if (!state.discover.items || state.discover.items.length === 0) {
+      DOM.discoverGrid.innerHTML = `
+        <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
+          <i class="fa-solid fa-compass-slash text-4xl mb-4 text-slate-600"></i>
+          <p class="font-semibold text-sm">No anime entries found.</p>
+        </div>
+      `;
+      return;
+    }
+
+    state.discover.items.forEach(item => {
+      const card = document.createElement('div');
+      card.className = "group overflow-hidden rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[440px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
+
+      const coverUrl = item.coverImage ? (item.coverImage.extraLarge || item.coverImage.large || item.coverImage.medium || '') : '';
+      const primaryTitle = getMediaTitle(item.title);
+      const secondaryTitle = item.title ? (item.title.english || item.title.romaji || '') : '';
+
+      const score = (item.averageScore || item.meanScore) ? `${item.averageScore || item.meanScore}%` : 'N/A';
+      const format = item.format || 'TV';
+      const episodes = item.episodes ? `${item.episodes} eps` : 'Ongoing';
+
+      const listEntry = item.mediaListEntry;
+      let listBadge = '';
+      if (listEntry && listEntry.status) {
+        const statusColors = {
+          'CURRENT': 'bg-emerald-500/90 text-white',
+          'PLANNING': 'bg-sky-500/90 text-white',
+          'COMPLETED': 'bg-blue-500/90 text-white',
+          'DROPPED': 'bg-rose-500/90 text-white',
+          'PAUSED': 'bg-amber-500/90 text-white',
+          'REPEATING': 'bg-purple-500/90 text-white'
+        };
+        const colorClass = statusColors[listEntry.status] || 'bg-slate-700 text-white';
+        listBadge = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider ${colorClass}">${listEntry.status}</span>`;
+      }
+
+      const localState = item.localState;
+      let localBadge = '';
+      if (localState && localState.tracked) {
+        const epCount = localState.downloadedEpisodes ? localState.downloadedEpisodes.length : 0;
+        localBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-600/20 border border-violet-500/30 text-violet-400"><i class="fa-solid fa-hard-drive mr-1"></i>Tracked (${epCount} downloaded)</span>`;
+      }
+
+      card.innerHTML = `
+        <div class="h-52 relative bg-slate-900 overflow-hidden flex items-end cursor-pointer" onclick="window.UI.showDiscoverDetail(${item.id})">
+          <div class="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-700" style="background-image: url('${coverUrl}')"></div>
+          <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-[#111827]/40 to-transparent"></div>
+          <div class="absolute top-3 left-3 flex flex-wrap gap-1.5 z-10">
+            <span class="bg-black/60 text-yellow-400 border border-yellow-500/30 text-[11px] font-extrabold px-2 py-0.5 rounded-md backdrop-blur-sm">
+              <i class="fa-solid fa-star text-[10px] mr-1"></i>${score}
+            </span>
+          </div>
+          <div class="absolute top-3 right-3 flex flex-wrap gap-1.5 z-10">
+            ${listBadge}
+          </div>
+          <div class="relative z-10 px-5 pb-3 w-full">
+            <h4 class="font-['Outfit'] font-bold text-base text-white line-clamp-1 leading-snug drop-shadow" title="${primaryTitle}">${primaryTitle}</h4>
+            <p class="text-xs text-slate-300 line-clamp-1 opacity-90">${secondaryTitle}</p>
+          </div>
+        </div>
+        <div class="p-5 flex-grow flex flex-col justify-between gap-4 bg-white dark:bg-transparent">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-400">
+              <span>${format} • ${episodes}</span>
+              <span>${item.seasonYear || ''} ${item.season || ''}</span>
+            </div>
+            ${item.genres && item.genres.length > 0 ? `
+              <div class="flex flex-wrap gap-1">
+                ${item.genres.slice(0, 3).map(g => `<span class="px-2 py-0.5 text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-md">${g}</span>`).join('')}
+              </div>
+            ` : ''}
+            ${localBadge ? `<div class="pt-1">${localBadge}</div>` : ''}
+          </div>
+
+          <div class="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/60">
+            <button class="flex-grow h-9 flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition-all cursor-pointer" onclick="window.UI.showDiscoverDetail(${item.id})">
+              <i class="fa-solid fa-circle-info"></i>Details
+            </button>
+            ${(!listEntry || listEntry.status !== 'CURRENT') ? `
+              <button class="h-9 px-3 flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl shadow-md shadow-violet-500/10 cursor-pointer transition-all shrink-0" onclick="window.UI.quickAddWatching(${item.id})" title="Add to Watching (CURRENT)">
+                <i class="fa-solid fa-plus"></i><span class="hidden sm:inline">Watching</span>
+              </button>
+            ` : `
+              <button class="h-9 px-3 flex items-center justify-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-bold rounded-xl shrink-0 cursor-default" title="Currently Watching">
+                <i class="fa-solid fa-check"></i><span class="hidden sm:inline">Watching</span>
+              </button>
+            `}
+          </div>
+        </div>
+      `;
+
+      DOM.discoverGrid.appendChild(card);
+    });
+  }
+
+  function updateDiscoverPagination() {
+    if (DOM.btnDiscoverPrev) DOM.btnDiscoverPrev.disabled = state.discover.page <= 1;
+    if (DOM.btnDiscoverNext) DOM.btnDiscoverNext.disabled = !state.discover.hasNextPage && state.discover.page >= state.discover.lastPage;
+    if (DOM.discoverPageIndicator) DOM.discoverPageIndicator.textContent = `Page ${state.discover.page} of ${state.discover.lastPage || 1}`;
+  }
+
+  async function openMediaDetail(mediaId) {
+    state.discover.detailMediaId = mediaId;
+    if (DOM.discoverFeedView) DOM.discoverFeedView.classList.add('hidden');
+    if (DOM.discoverDetailView) DOM.discoverDetailView.classList.remove('hidden');
+
+    if (DOM.detailContentContainer) {
+      DOM.detailContentContainer.innerHTML = `
+        <div class="py-20 flex flex-col items-center justify-center text-slate-400">
+          <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
+          <p class="font-semibold text-sm">Loading anime details...</p>
+        </div>
+      `;
+    }
+
+    try {
+      const data = await API.getMediaDetail(mediaId);
+      if (!data || !data.media) {
+        throw new Error('Anime metadata not found.');
+      }
+      state.discover.detailData = data.media;
+      renderMediaDetail();
+    } catch (e) {
+      if (DOM.detailContentContainer) {
+        DOM.detailContentContainer.innerHTML = `
+          <div class="py-20 flex flex-col items-center justify-center text-slate-400 text-center">
+            <i class="fa-solid fa-triangle-exclamation text-4xl mb-4 text-rose-500"></i>
+            <p class="font-semibold text-sm text-slate-300">${e.message}</p>
+          </div>
+        `;
+      }
+    }
+  }
+
+  function renderMediaDetail() {
+    const media = state.discover.detailData;
+    if (!media || !DOM.detailContentContainer) return;
+
+    const bannerUrl = media.bannerImage || (media.coverImage ? media.coverImage.extraLarge : '');
+    const coverUrl = media.coverImage ? (media.coverImage.extraLarge || media.coverImage.large) : '';
+    const primaryTitle = getMediaTitle(media.title, state.discover.titleLang);
+    const score = (media.averageScore || media.meanScore) ? `${media.averageScore || media.meanScore}%` : 'N/A';
+
+    const entry = media.mediaListEntry || {};
+    const currentStatus = entry.status || 'CURRENT';
+    const currentProgress = (entry.progress !== undefined && entry.progress !== null) ? entry.progress : 0;
+    const currentScore = entry.score || 0;
+
+    const localState = media.localState || {};
+
+    let descHtml = media.description || 'No description available.';
+    descHtml = descHtml.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+
+    DOM.detailContentContainer.innerHTML = `
+      <!-- Hero Banner & Header Card -->
+      <div class="relative overflow-hidden rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 shadow-lg glow-purple">
+        ${bannerUrl ? `
+          <div class="h-48 sm:h-64 relative bg-slate-900 overflow-hidden">
+            <div class="absolute inset-0 bg-cover bg-center" style="background-image: url('${bannerUrl}')"></div>
+            <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-[#111827]/50 to-transparent"></div>
+          </div>
+        ` : ''}
+
+        <div class="p-6 sm:p-8 relative z-10 ${bannerUrl ? '-mt-16 sm:-mt-20' : ''}">
+          <div class="flex flex-col sm:flex-row gap-6 items-start">
+            <img src="${coverUrl}" alt="${primaryTitle}" class="w-32 sm:w-44 h-44 sm:h-60 rounded-2xl object-cover shadow-2xl border-2 border-white dark:border-slate-800 shrink-0" />
+
+            <div class="space-y-4 flex-grow min-w-0">
+              <!-- Title & Language Selector -->
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <h1 class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-slate-900 dark:text-white leading-snug">${primaryTitle}</h1>
+                  <!-- Title Language Switcher Buttons -->
+                  <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-xl shrink-0">
+                    <button class="lang-btn px-2.5 py-1 text-[10px] font-bold rounded-lg cursor-pointer ${state.discover.titleLang === 'romaji' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}" onclick="window.UI.setTitleLang('romaji')">Romaji</button>
+                    <button class="lang-btn px-2.5 py-1 text-[10px] font-bold rounded-lg cursor-pointer ${state.discover.titleLang === 'english' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}" onclick="window.UI.setTitleLang('english')">English</button>
+                    <button class="lang-btn px-2.5 py-1 text-[10px] font-bold rounded-lg cursor-pointer ${state.discover.titleLang === 'native' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'}" onclick="window.UI.setTitleLang('native')">Native</button>
+                  </div>
+                </div>
+
+                <div class="text-xs text-slate-400 font-medium flex flex-wrap gap-x-4 gap-y-1">
+                  ${media.title && media.title.romaji ? `<span><strong>Romaji:</strong> ${media.title.romaji}</span>` : ''}
+                  ${media.title && media.title.english ? `<span><strong>English:</strong> ${media.title.english}</span>` : ''}
+                  ${media.title && media.title.native ? `<span><strong>Native:</strong> ${media.title.native}</span>` : ''}
+                </div>
+              </div>
+
+              <!-- Metadata Pills -->
+              <div class="flex flex-wrap gap-2 text-xs font-semibold">
+                <span class="px-3 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-xl flex items-center gap-1.5"><i class="fa-solid fa-star text-xs"></i>Score: ${score}</span>
+                <span class="px-3 py-1 bg-violet-500/10 text-violet-400 border border-violet-500/20 rounded-xl">${media.format || 'TV'}</span>
+                <span class="px-3 py-1 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded-xl">${media.episodes ? media.episodes + ' episodes' : 'Ongoing'}</span>
+                <span class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl">${media.status || 'UNKNOWN'}</span>
+                ${media.seasonYear ? `<span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl">${media.season || ''} ${media.seasonYear}</span>` : ''}
+              </div>
+
+              <!-- Genres -->
+              ${media.genres && media.genres.length > 0 ? `
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  ${media.genres.map(g => `<span class="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-lg">${g}</span>`).join('')}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail Grid: Left (Synopsis & Relations) / Right (AniList Manager & Local State) -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        <!-- Left Column (2 cols): Synopsis & Relations -->
+        <div class="lg:col-span-2 space-y-8">
+
+          <!-- Synopsis Card -->
+          <div class="p-6 rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 space-y-3 shadow-sm">
+            <h3 class="font-['Outfit'] font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+              <i class="fa-solid fa-align-left text-violet-500"></i>Synopsis
+            </h3>
+            <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">${descHtml}</p>
+          </div>
+
+          <!-- Airing Schedule -->
+          ${media.nextAiringEpisode ? `
+            <div class="p-6 rounded-3xl border border-sky-500/20 bg-sky-500/5 dark:bg-sky-950/10 space-y-3">
+              <h3 class="font-['Outfit'] font-bold text-lg text-sky-600 dark:text-sky-400 flex items-center gap-2">
+                <i class="fa-solid fa-calendar-day animate-pulse"></i>Next Airing Episode
+              </h3>
+              <div class="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Episode <strong>${media.nextAiringEpisode.episode}</strong> airs in <strong>${formatTimeRemaining(media.nextAiringEpisode.timeUntilAiring)}</strong>.
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Relations Section -->
+          ${media.relations && media.relations.edges && media.relations.edges.length > 0 ? `
+            <div class="p-6 rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 space-y-4 shadow-sm">
+              <h3 class="font-['Outfit'] font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                <i class="fa-solid fa-diagram-project text-violet-500"></i>Relations & Prequel Chain
+              </h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                ${media.relations.edges.map(edge => {
+                  const node = edge.node;
+                  const relType = edge.relationType ? edge.relationType.replace(/_/g, ' ') : 'RELATED';
+                  const relCover = node.coverImage ? (node.coverImage.medium || node.coverImage.large) : '';
+                  const relTitle = getMediaTitle(node.title, state.discover.titleLang);
+
+                  return `
+                    <div class="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/60 hover:border-violet-500/40 cursor-pointer transition-all" onclick="window.UI.showDiscoverDetail(${node.id})">
+                      <img src="${relCover}" alt="${relTitle}" class="w-12 h-16 rounded-xl object-cover shrink-0" />
+                      <div class="min-w-0 flex-grow">
+                        <span class="block text-[10px] font-extrabold uppercase text-violet-500 tracking-wider">${relType}</span>
+                        <h4 class="font-semibold text-xs text-slate-800 dark:text-slate-200 truncate" title="${relTitle}">${relTitle}</h4>
+                        <span class="text-[10px] text-slate-400 font-semibold">${node.format || ''}</span>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+        </div>
+
+        <!-- Right Column (1 col): AniList List Manager & Local Animu State -->
+        <div class="space-y-8">
+
+          <!-- AniList List Manager Card -->
+          <div class="p-6 rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 space-y-5 shadow-sm glow-pink">
+            <h3 class="font-['Outfit'] font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+              <i class="fa-solid fa-pen-to-square text-pink-500"></i>AniList Manager
+            </h3>
+
+            <form id="detail-anilist-form" class="space-y-4" onsubmit="event.preventDefault(); window.UI.saveDetailListEntry(${media.id});">
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">List Status</label>
+                <select id="detail-list-status" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500">
+                  <option value="CURRENT" ${currentStatus === 'CURRENT' ? 'selected' : ''}>Watching (CURRENT)</option>
+                  <option value="PLANNING" ${currentStatus === 'PLANNING' ? 'selected' : ''}>Plan to Watch (PLANNING)</option>
+                  <option value="COMPLETED" ${currentStatus === 'COMPLETED' ? 'selected' : ''}>Completed (COMPLETED)</option>
+                  <option value="REPEATING" ${currentStatus === 'REPEATING' ? 'selected' : ''}>Rewatching (REPEATING)</option>
+                  <option value="PAUSED" ${currentStatus === 'PAUSED' ? 'selected' : ''}>Paused (PAUSED)</option>
+                  <option value="DROPPED" ${currentStatus === 'DROPPED' ? 'selected' : ''}>Dropped (DROPPED)</option>
+                </select>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Progress (Eps)</label>
+                  <input type="number" id="detail-list-progress" min="0" max="${media.episodes || 9999}" value="${currentProgress}" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Score (0-100)</label>
+                  <input type="number" id="detail-list-score" min="0" max="100" step="0.1" value="${currentScore}" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500" />
+                </div>
+              </div>
+
+              <button type="submit" id="btn-save-detail-entry" class="w-full py-2.5 bg-gradient-to-r from-violet-600 to-pink-500 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-violet-500/20 hover:scale-[1.01] active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2">
+                <i class="fa-solid fa-cloud-arrow-up"></i>Save Entry to AniList
+              </button>
+            </form>
+
+            <div class="p-3.5 rounded-2xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-300 space-y-1">
+              <span class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-circle-info"></i>Scheduler Sync Note</span>
+              <p class="text-[11px] opacity-90">Setting status to <strong>CURRENT</strong> automatically allows Animu's backend scheduler to discover and download new episodes on its next cycle.</p>
+            </div>
+          </div>
+
+          <!-- Local Animu State Card -->
+          <div class="p-6 rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 space-y-4 shadow-sm">
+            <h3 class="font-['Outfit'] font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+              <i class="fa-solid fa-server text-indigo-500"></i>Local Animu State
+            </h3>
+
+            ${localState.tracked ? `
+              <div class="space-y-3 text-xs">
+                <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60">
+                  <span class="text-slate-400 font-bold">Tracked Status</span>
+                  <span class="text-emerald-500 font-bold">Active in Local DB</span>
+                </div>
+                <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60">
+                  <span class="text-slate-400 font-bold">Downloaded Episodes</span>
+                  <span class="text-slate-200 font-bold">${localState.downloadedEpisodes ? localState.downloadedEpisodes.length : 0} downloaded</span>
+                </div>
+                <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60">
+                  <span class="text-slate-400 font-bold">Starting Ep Offset</span>
+                  <span class="text-slate-200 font-bold">${localState.startingEpisode || 0}</span>
+                </div>
+                ${localState.alternativeTitle ? `
+                  <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60">
+                    <span class="text-slate-400 font-bold block mb-0.5">Custom Title Override</span>
+                    <span class="text-slate-200 font-bold truncate block">${localState.alternativeTitle}</span>
+                  </div>
+                ` : ''}
+              </div>
+            ` : `
+              <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 text-center space-y-2">
+                <i class="fa-solid fa-inbox text-2xl text-slate-500"></i>
+                <p class="text-xs text-slate-400">Not currently tracked in local Animu database. Change status to CURRENT on AniList to automatically track.</p>
+              </div>
+            `}
+          </div>
+
+        </div>
+
+      </div>
+    `;
+  }
+
+  function formatTimeRemaining(seconds) {
+    if (!seconds || seconds <= 0) return 'soon';
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    return `${mins}m`;
+  }
 
   function renderCandidates(results, mediaId, episode) {
     DOM.nyaaList.innerHTML = '';
@@ -1277,6 +1825,75 @@
       console.error(e);
       showToast('Backend offline or initialization error.', 'error');
     }
+  }
+
+  if (DOM.discoverSearchInput) {
+    DOM.discoverSearchInput.addEventListener('input', (e) => {
+      const val = e.target.value;
+      if (DOM.discoverSearchClear) {
+        if (val) DOM.discoverSearchClear.classList.remove('hidden');
+        else DOM.discoverSearchClear.classList.add('hidden');
+      }
+
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        state.discover.searchQuery = val.trim();
+        state.discover.page = 1;
+        loadDiscoverFeed();
+      }, 350);
+    });
+  }
+
+  if (DOM.discoverSearchClear) {
+    DOM.discoverSearchClear.addEventListener('click', () => {
+      DOM.discoverSearchInput.value = '';
+      DOM.discoverSearchClear.classList.add('hidden');
+      state.discover.searchQuery = '';
+      state.discover.page = 1;
+      loadDiscoverFeed();
+    });
+  }
+
+  if (DOM.railBtns) {
+    DOM.railBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        DOM.railBtns.forEach(b => {
+          b.className = "rail-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
+        });
+        btn.className = "rail-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-rail";
+
+        state.discover.rail = btn.dataset.rail;
+        state.discover.searchQuery = '';
+        if (DOM.discoverSearchInput) DOM.discoverSearchInput.value = '';
+        if (DOM.discoverSearchClear) DOM.discoverSearchClear.classList.add('hidden');
+        state.discover.page = 1;
+        loadDiscoverFeed();
+      });
+    });
+  }
+
+  if (DOM.btnDiscoverPrev) {
+    DOM.btnDiscoverPrev.addEventListener('click', () => {
+      if (state.discover.page > 1) {
+        state.discover.page--;
+        loadDiscoverFeed();
+      }
+    });
+  }
+
+  if (DOM.btnDiscoverNext) {
+    DOM.btnDiscoverNext.addEventListener('click', () => {
+      state.discover.page++;
+      loadDiscoverFeed();
+    });
+  }
+
+  if (DOM.btnBackToDiscover) {
+    DOM.btnBackToDiscover.addEventListener('click', () => {
+      state.discover.detailMediaId = null;
+      if (DOM.discoverDetailView) DOM.discoverDetailView.classList.add('hidden');
+      if (DOM.discoverFeedView) DOM.discoverFeedView.classList.remove('hidden');
+    });
   }
 
   initTheme();
