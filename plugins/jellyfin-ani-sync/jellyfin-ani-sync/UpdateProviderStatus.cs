@@ -249,9 +249,10 @@ namespace jellyfin_ani_sync {
         }
 
         private async Task<bool> CheckIfRewatchCompleted(Anime detectedAnime, int indexNumber, bool overrideCheckRewatch) {
-            if (overrideCheckRewatch ||
-                detectedAnime.MyListStatus is { Status: Status.Completed } ||
-                detectedAnime.MyListStatus is { Status: Status.Rewatching } && detectedAnime.MyListStatus.NumEpisodesWatched < indexNumber) {
+            // REPEATING is AniList's status for an anime that is already being rewatched.
+            // RewatchCompleted controls promotion from COMPLETED to REPEATING; it must not
+            // prevent progress updates for an entry that is already REPEATING.
+            if (overrideCheckRewatch || detectedAnime.MyListStatus is { Status: Status.Completed }) {
                 if (_userConfig!.RewatchCompleted) {
                     if (detectedAnime.MyListStatus != null && detectedAnime.MyListStatus.Status == Status.Completed) {
                         _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found on completed list, setting as re-watching");
@@ -262,6 +263,15 @@ namespace jellyfin_ani_sync {
                     _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found on Completed list, but user does not want to automatically set as rewatching. Skipping");
                     return true;
                 }
+            } else if (detectedAnime.MyListStatus is { Status: Status.Rewatching }) {
+                if (detectedAnime.MyListStatus.NumEpisodesWatched >= indexNumber) {
+                    _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found, but provider reports episode already watched. Skipping");
+                    return true;
+                }
+
+                // An existing REPEATING entry should continue through to UpdateAnimeStatus,
+                // regardless of the PlanToWatchOnly setting.
+                return false;
             } else if (detectedAnime.MyListStatus != null && detectedAnime.MyListStatus.NumEpisodesWatched >= indexNumber) {
                 _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found, but provider reports episode already watched. Skipping");
                 return true;
