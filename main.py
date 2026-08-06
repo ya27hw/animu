@@ -10,12 +10,27 @@ from animu.logger import setup_logging
 setup_logging()
 
 from animu.scheduler import scheduler
+from animu import readiness
+
+
+def initialize_runtime():
+    """Authenticate PocketBase or explicitly record the local offline fallback."""
+    try:
+        from animu.database import db
+        db.auth()
+        readiness.mark_database(authenticated=True, offline_safe_mode=False)
+    except Exception as exc:
+        from animu.database import db
+        offline_safe = db.offline_safe_mode_available()
+        readiness.mark_database(authenticated=False, offline_safe_mode=offline_safe, status="offline_safe_mode" if offline_safe else "unavailable")
+        print(f"Database readiness initialization failed: {type(exc).__name__}")
 
 def run_once():
     scheduler.run_once()
 
 def run_schedule():
     from animu import web
+    initialize_runtime()
     web.start()
     scheduler.run_loop()
 

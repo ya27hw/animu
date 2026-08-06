@@ -9,12 +9,27 @@ from .anilist import anilist
 from .nyaa import nyaa
 from .qbittorrent import qbit
 from .discord import alert_user, alert_unresolved_anime, clear_alert_history, send_anime_downloaded_hook
-from .utils import fix_anime_season, count_past_relations
+from .utils import fix_anime_season, count_past_relations, get_explicit_season
 from .history import history_manager
+from . import readiness
 
 class Scheduler:
     def __init__(self):
         self.is_running = False
+
+    def initialize(self) -> None:
+        """Mark scheduler initialization without performing network work."""
+        readiness.mark_scheduler_initialized()
+
+    def _run_cycle(self) -> None:
+        readiness.mark_cycle_started()
+        try:
+            self.check()
+        except Exception as exc:
+            readiness.mark_cycle_completed(success=False, error=exc)
+            raise
+        else:
+            readiness.mark_cycle_completed(success=True)
 
     def download_torrents(self, anime: Dict[str, Any], record: OfflineAnime, torrents: List[Dict[str, Any]]) -> Optional[List[int]]:
         """Download torrents via qBittorrent, send success embeds and save to DB."""
@@ -36,11 +51,26 @@ class Scheduler:
             )
 
             if not success:
+                # If the episode already exists in qBittorrent (e.g. a
+                # previously downloaded episode the offline DB does not
+                # list), count it as downloaded and continue instead of
+                # failing the whole anime.
+                if episode is not None and qbit.check_torrent_episode(romaji_title, episode):
+                    print(f"Torrent already in qBittorrent, marking {romaji_title} episode {episode} as downloaded.")
+                    newly_downloaded.append(episode)
+                    continue
+                # Persist any episodes already verified as present in this pass
+                # before failing, so a mid-loop failure never discards them and
+                # causes the anime to be re-examined from scratch next cycle.
+                if newly_downloaded:
+                    record.downloaded_episodes = list(set(record.downloaded_episodes + newly_downloaded))
+                    record.downloaded_episodes.sort()
+                    db.upsert(anime["mediaId"], record)
+                    print(f"Persisted {len(newly_downloaded)} already-present episode(s) for {romaji_title} before failing.")
                 # Increment timeout and alert user
                 record.set_timeout()
                 db.upsert(anime["mediaId"], record)
-                cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
-                alert_user(romaji_title, cover_img)
+                alert_user(romaji_title, anime["media"]["coverImage"]["extraLarge"])
                 return None
 
             if episode is not None:
@@ -133,19 +163,36 @@ class Scheduler:
         """Handle Nyaa search combinations and download matching torrents for an anime."""
         config = get_config()
         starting_episode = record.starting_episode
-        alternative_title = record.alternative_title or anime["media"]["title"]["romaji"]
-        
+        original_romaji = anime["media"]["title"]["romaji"]
+        alternative_title = record.alternative_title or original_romaji
+
+        # Stored alternative titles sometimes drop the season marker (e.g.
+        # "Mairimashita! Iruma-kun" for the 4th season). Season-conflict
+        # verification then assumes Season 1 and rejects every later-season
+        # release. If the canonical AniList title carries a season > 1 that
+        # get_explicit_season cannot see (bare trailing digit), append the
+        # S{n} token so verification accepts the correct releases. Shows whose
+        # title already carries an explicit season marker (e.g. "2nd Season")
+        # are left untouched, since their releases use absolute numbering
+        # without a season token.
+        if (record.alternative_title
+                and get_explicit_season(alternative_title) is None
+                and get_explicit_season(original_romaji) is None):
+            fx = fix_anime_season(original_romaji)
+            if fx["seasonCount"] > 1:
+                alternative_title = f"{alternative_title} S{fx['seasonCount']}"
+
         # Override title dynamically
         anime["media"]["title"]["romaji"] = alternative_title
 
-        start_episode = anime["progress"] + starting_episode
+        start_episode = anime["progress"]
         
         # NextAiringEpisode can be null if the anime is finished
         next_ep = anime["media"].get("nextAiringEpisode")
         if next_ep:
-            end_episode = next_ep["episode"] - 1 + starting_episode
+            end_episode = next_ep["episode"] - 1
         else:
-            end_episode = (anime["media"].get("episodes") or 0) + starting_episode
+            end_episode = anime["media"].get("episodes") or 0
 
         if end_episode <= start_episode:
             return
@@ -161,6 +208,35 @@ class Scheduler:
             remove_failed_trace(anime["mediaId"])
             clear_alert_history(anime["mediaId"])
             return
+
+        # Batch reconciliation: the anime may already be fully downloaded as a
+        # complete season/batch torrent (e.g. 'Season 01-02' full-pack) even
+        # though the offline DB lists no episodes. Search the file lists of
+        # completed matching qBittorrent torrents and credit the episodes that
+        # are genuinely present, so an already-downloaded anime is marked
+        # "added" instead of looping through failed per-episode searches.
+        try:
+            relations = count_past_relations(anime["mediaId"])
+            batch_season = relations.get("seasonCount", 1)
+            present_eps = qbit.check_episodes_in_batch(
+                alternative_title, list(anime_progress), season=batch_season
+            )
+            if present_eps:
+                new_eps = [ep for ep in present_eps if ep not in record.downloaded_episodes]
+                if new_eps:
+                    record.downloaded_episodes = list(set(record.downloaded_episodes + new_eps))
+                    record.downloaded_episodes.sort()
+                    db.upsert(anime["mediaId"], record)
+                    print(
+                        f"Reconciled {len(new_eps)} already-downloaded episode(s) "
+                        f"({new_eps}) for {alternative_title} from qBittorrent batch."
+                    )
+                if all(ep in record.downloaded_episodes for ep in anime_progress):
+                    if record.pending_rewatching_update:
+                        self.sync_anime_rewatching_status(anime, record)
+                    return
+        except Exception as e:
+            print(f"Batch reconciliation failed for {alternative_title}: {e}")
 
         # Search default title
         primary_torrent = nyaa.get_torrents(
@@ -243,8 +319,8 @@ class Scheduler:
                 try:
                     result = nyaa.get_torrents(
                         anime=anime,
-                        start_episode=start_episode + combo["episode_offset"],
-                        end_episode=end_episode + combo["episode_offset"],
+                        start_episode=start_episode,
+                        end_episode=end_episode,
                         starting_episode=starting_episode + combo["episode_offset"],
                         downloaded_episodes=record.downloaded_episodes,
                         alt_anime_title=combo["title"]
@@ -266,11 +342,11 @@ class Scheduler:
                 
                 # Recalculate range based on the new starting episode
                 starting_episode = best_combo["episode_offset"]
-                start_episode = anime["progress"] + starting_episode
+                start_episode = anime["progress"]
                 if next_ep:
-                    end_episode = next_ep["episode"] - 1 + starting_episode
+                    end_episode = next_ep["episode"] - 1
                 else:
-                    end_episode = (anime["media"].get("episodes") or 0) + starting_episode
+                    end_episode = anime["media"].get("episodes") or 0
 
         if primary_torrent:
             newly_downloaded = self.download_torrents(anime, record, primary_torrent)
@@ -284,7 +360,7 @@ class Scheduler:
             # Increment timeouts and print failure log
             record.set_timeout()
             db.upsert(anime["mediaId"], record)
-
+            
             # Store persistent trace for failed run
             from .nyaa import record_failed_trace
             record_failed_trace(anime["mediaId"], anime=anime, record=record, status="NO_RESULTS")
@@ -302,6 +378,7 @@ class Scheduler:
             interval = config.interval or 30
             total_minutes = record.timeouts * interval
             now = datetime.now()
+            # Calculate next run timestamp
             from datetime import timedelta
             next_run = now + timedelta(minutes=total_minutes)
             
@@ -318,7 +395,7 @@ class Scheduler:
             db.sync_local_changes()
         except Exception as e:
             print(f"Local database sync failed: {e}")
-            
+            raise RuntimeError("local database sync failed") from e
         anime_list = anilist.get_anime_user_list()
         if not anime_list:
             print("No anime in watching list.")
@@ -358,8 +435,6 @@ class Scheduler:
                     print(f"ℹ️ Next run for {anime['media']['title']['romaji']} in {record.timeouts * interval} minutes")
                     record.timeouts -= 1
                     db.upsert(media_id, record)
-                    if media_id in failed_traces:
-                        failed_traces[media_id]["timeouts"] = record.timeouts
                     continue
 
                 # Compute airing status
@@ -372,8 +447,8 @@ class Scheduler:
                 if airing_episodes == 0:
                     continue
 
-                start_episode = anime["progress"] + record.starting_episode
-                end_episode = airing_episodes + record.starting_episode
+                start_episode = anime["progress"]
+                end_episode = airing_episodes
                 
                 # Check for missing episodes
                 has_missing = False
@@ -386,45 +461,57 @@ class Scheduler:
                     execution_list.append((anime, record))
 
         # Handle matches with concurrency control
+        errors = []
         for anime, record in execution_list:
             time.sleep(2.0)  # Throttling between anime items
             try:
                 self.handle_anime(anime, record)
             except Exception as e:
                 print(f"Error handling anime {anime['media']['title']['romaji']}: {e}")
+                errors.append(e)
+        if errors:
+            raise RuntimeError(f"{len(errors)} anime handler(s) failed") from errors[0]
 
     def run_loop(self) -> None:
         """Run scheduler on a recurring loop adjusting for peak/off-peak runtimes."""
         last_run_min = -1
+        self.initialize()
+        readiness.mark_scheduler_running(True)
         print("Starting scheduler daemon loop...")
+        try:
+            while True:
+                now = time.localtime()
+                hour = now.tm_hour
+                is_peak = (hour >= 12 or hour <= 4)
+                config = get_config()
+                interval = config.interval if is_peak else config.offpeak_interval
+                interval = interval or 30
 
-        while True:
-            now = time.localtime()
-            hour = now.tm_hour
-            is_peak = (hour >= 12 or hour <= 4)
-            config = get_config()
-            interval = config.interval if is_peak else config.offpeak_interval
-            interval = interval or 30
+                if now.tm_min % interval == 0 and now.tm_min != last_run_min and not self.is_running:
+                    last_run_min = now.tm_min
+                    self.is_running = True
+                    print(f"\n>>> Running scheduler at {time.strftime('%Y-%m-%d %H:%M:%S')} <<<")
+                    try:
+                        self._run_cycle()
+                    except Exception as e:
+                        print(f"Error during scheduled execution: {e}")
+                    finally:
+                        self.is_running = False
 
-            if now.tm_min % interval == 0 and now.tm_min != last_run_min and not self.is_running:
-                last_run_min = now.tm_min
-                self.is_running = True
-                print(f"\n>>> Running scheduler at {time.strftime('%Y-%m-%d %H:%M:%S')} <<<")
-                try:
-                    self.check()
-                except Exception as e:
-                    print(f"Error during scheduled execution: {e}")
-                finally:
-                    self.is_running = False
-
-            time.sleep(10)
+                time.sleep(10)
+        finally:
+            readiness.mark_scheduler_running(False)
 
     def run_once(self) -> None:
         """Run scheduler check exactly once, then exit."""
+        self.initialize()
+        readiness.mark_scheduler_running(True)
         print("Running check cycle once...")
         try:
-            self.check()
+            self._run_cycle()
         except Exception as e:
             print(f"Error during check cycle: {e}")
+        finally:
+            readiness.mark_scheduler_running(False)
 
 scheduler = Scheduler()

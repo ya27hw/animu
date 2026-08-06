@@ -15,6 +15,7 @@ from .qbittorrent import qbit
 from .database import db
 from .models import OfflineAnime
 from .history import history_manager
+from . import readiness
 
 def get_config_dict(cfg) -> dict:
     """Serializes ProfileConfig back to the camelCase JSON format for the UI."""
@@ -64,12 +65,24 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
     def send_json(self, status: int, data: Any):
         content = json.dumps(data).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionError, OSError):
+            # Client disconnected (common behind NPM reverse proxy) — suppress
+            # the traceback that otherwise floods logs on every stale connection.
+            pass
+
+    def _safe_write(self, content: bytes):
+        """Write a static response body without noisy disconnect tracebacks."""
+        try:
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionError, OSError):
+            pass
 
     def read_json_body(self) -> dict:
         try:
@@ -153,7 +166,8 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(500, {"error": str(e)})
             
         elif path == "/api/health":
-            self.send_json(200, {"ok": True})
+            status, payload = health_response()
+            self.send_json(status, payload)
             
         elif path == "/api/history":
             try:
@@ -311,7 +325,8 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 "seeders": c["nyaa:seeders"],
                 "size": c["nyaa:size"],
                 "pubDate": c["pubDate"],
-                "score": round(c["score"], 3) if c["score"] is not None else None
+                "score": round(c["score"], 3) if c["score"] is not None else None,
+                "details": c.get("details")
             } for c in candidates[:25]]
             
             self.send_json(200, {
@@ -426,7 +441,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             cached = db.local_cache.get(str(media_id), {})
             synced = not cached.get("_unsynced", False)
             self.send_json(200, {"ok": True, "synced": synced,
-                "warning": "Saved locally but PocketBase sync failed." if not synced else None})
+                "warning": "Saved locally but PocketBase sync failed. Will retry." if not synced else None})
             
         else:
             self.send_json(404, {"error": "Not found"})
@@ -495,7 +510,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         if not full_path.startswith(os.path.abspath(public_dir)):
             self.send_response(403)
             self.end_headers()
-            self.wfile.write(b"Forbidden")
+            self._safe_write(b"Forbidden")
             return
             
         if os.path.exists(full_path) and os.path.isfile(full_path):
@@ -517,17 +532,17 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "public, max-age=0, must-revalidate")
                 self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
-                self.wfile.write(content)
+                self._safe_write(content)
                 return
             except Exception as e:
                 self.send_response(500)
                 self.end_headers()
-                self.wfile.write(str(e).encode('utf-8'))
+                self._safe_write(str(e).encode('utf-8'))
                 return
 
         self.send_response(404)
         self.end_headers()
-        self.wfile.write(b"Not found")
+        self._safe_write(b"Not found")
 
 def start_server():
     """Starts the http server synchronously."""
@@ -541,6 +556,12 @@ def start_server():
     server = http.server.HTTPServer((host, port), AnimuHTTPHandler)
     print(f"Animu Web UI running at http://localhost:{port} (bind {host})")
     server.serve_forever()
+
+
+def health_response() -> tuple[int, dict[str, Any]]:
+    """Return liveness/readiness JSON and HTTP semantics for the health endpoint."""
+    payload = readiness.health_snapshot()
+    return (200 if payload["ready"] else 503), payload
 
 def start():
     """Starts the Web UI server in a background daemon thread."""

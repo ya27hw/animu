@@ -40,21 +40,6 @@ def send_embed(
         print(f"Discord webhook error: {e}")
         return False
 
-# In-memory history for alert deduplication keyed by media_id
-alert_history: Dict[int, Dict[str, str]] = {}
-
-
-def sanitize_alert_text(text: str) -> str:
-    """Ensure no passwords, tokens, or credentials are leaked in alert messages."""
-    import re
-    if not text:
-        return ""
-    # Redact URLs containing user/pass or tokens
-    text = re.sub(r'https?://[^:\s]+:[^@\s]+@', 'https://[REDACTED]@', text)
-    text = re.sub(r'(token|password|secret|key|bearer)=[^&\s]+', r'\1=[REDACTED]', text, flags=re.IGNORECASE)
-    return text
-
-
 def alert_user(anime: str, image: str) -> bool:
     """Send warning notification for anime that failed to download."""
     config = get_config()
@@ -62,17 +47,29 @@ def alert_user(anime: str, image: str) -> bool:
         return False
     
     color_str = config.discord_fail_color or "#ff0000"
-    try:
-        color = int(color_str.replace("#", "0x"), 16)
-    except ValueError:
-        color = 0xff0000
+    color = int(color_str.replace("#", "0x"), 16)
     
     title = config.discord_fail_title or "Anime Not Added"
     
     desc_template = config.discord_fail_description or "Animu could not add {anime} to qBittorrent."
     desc = desc_template.format(anime=anime) if "{anime}" in desc_template else desc_template
     
-    return send_embed(title=title, description=sanitize_alert_text(desc), color=color, image=image)
+    return send_embed(title=title, description=desc, color=color, image=image)
+
+
+# In-memory history for alert deduplication keyed by media_id
+alert_history: Dict[int, Dict[str, str]] = {}
+
+
+def sanitize_alert_text(text: str) -> str:
+    """Ensure no passwords, tokens, or credentials are leaked in alert messages."""
+    import re as _re
+    if not text:
+        return ""
+    # Redact URLs containing user/pass or tokens
+    text = _re.sub(r'https?://[^:\s]+:[^@\s]+@', 'https://***@', text)
+    text = _re.sub(r'(token|password|secret|key|bearer)=[^&\s]+', r'\1=[REDACTED]', text, flags=_re.IGNORECASE)
+    return text
 
 
 def alert_unresolved_anime(
@@ -122,6 +119,7 @@ def alert_unresolved_anime(
 def clear_alert_history(media_id: int) -> None:
     """Clear alert history for a media_id when resolved or downloaded."""
     alert_history.pop(media_id, None)
+
 
 
 def send_anime_downloaded_hook(title: str, color: int, image: str, *fields: Dict[str, str]) -> bool:

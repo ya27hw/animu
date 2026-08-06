@@ -3,12 +3,9 @@ import httpx
 import time
 import anitopy
 import math
-import logging
 from typing import Optional, List, Dict, Any
 from .config import get_config
 from .utils import verify_query
-
-_log = logging.getLogger("combined")
 
 class NyaaClient:
     def __init__(self):
@@ -161,6 +158,7 @@ class NyaaClient:
         use_alt_url: bool,
         air_dates: Dict[str, Any],
         ignore_airdate_checks: bool,
+        starting_episode: int = 0,
         *episodes: int,
         verbose_trace: Optional[list] = None
     ) -> Optional[Dict[str, Any]]:
@@ -168,6 +166,7 @@ class NyaaClient:
         config = get_config()
         best_rating = -1.0
         best_torrent = None
+        episode_num = episodes[0] if episodes and search_mode == "EPISODE" else None
 
         for item in items:
             try:
@@ -185,9 +184,15 @@ class NyaaClient:
                 if verbose_trace is not None:
                     verbose_trace.append({
                         "title": title,
+                        "link": item.get("link", ""),
                         "seeders": 0,
+                        "episode": episode_num,
                         "rating": 0.0,
-                        "rejection_reason": "No seeders available"
+                        "rejection_reason": "No seeders available",
+                        "episode_match": None,
+                        "resolution_match": None,
+                        "air_date_match": None,
+                        "title_similarity": 0.0
                     })
                 continue
 
@@ -199,6 +204,7 @@ class NyaaClient:
                 pub_date,
                 air_dates,
                 ignore_airdate_checks,
+                starting_episode,
                 *episodes,
                 verbose=True
             )
@@ -206,16 +212,16 @@ class NyaaClient:
             if verbose_trace is not None:
                 verbose_trace.append({
                     "title": title,
+                    "link": item.get("link", ""),
                     "seeders": seeders,
+                    "episode": episode_num,
                     "rating": rating,
-                    "rejection_reason": details.get("rejection_reason", "")
+                    "rejection_reason": details.get("rejection_reason", ""),
+                    "episode_match": details.get("episode_match"),
+                    "resolution_match": details.get("resolution_match"),
+                    "air_date_match": details.get("air_date_match"),
+                    "title_similarity": details.get("title_similarity", 0.0)
                 })
-
-            reason = details.get("rejection_reason", "")
-            if reason:
-                _log.info("  ✗ Rejected: %s | %s", title, reason)
-            else:
-                _log.info("  ✓ Candidate: %s | score=%.2f", title, rating)
 
             if rating > best_rating:
                 best_rating = rating
@@ -253,6 +259,13 @@ class NyaaClient:
         )
         if air_dates is None:
             return None
+        if starting_episode:
+            # Candidate filenames use release/global numbering; align the
+            # AniList airing schedule to that same namespace once.
+            air_dates = {"nodes": [
+                {**node, "episode": node.get("episode", 0) + (starting_episode if starting_episode > 0 else 0)}
+                for node in air_dates.get("nodes", [])
+            ]}
 
         status = anime["media"].get("status")
         search_mode = "BATCH" if status == "FINISHED" and start_episode == 0 and not downloaded_episodes else "EPISODE"
@@ -282,7 +295,8 @@ class NyaaClient:
 
         found_torrents = []
         for episode in episode_list:
-            formatted_ep = f"{episode:02d}"
+            release_episode = episode + (starting_episode if starting_episode > 0 else 0)
+            formatted_ep = f"{release_episode:02d}"
             query_str = f'{anime_title} "{formatted_ep}"'
             rss_res = self.fetch_rss_feed(query_str, search_url, enable_proxy)
             trace_candidates = []
@@ -294,7 +308,8 @@ class NyaaClient:
                     search_url == (config.alt_nyaa_url or "https://nyaa.si"),
                     air_dates,
                     ignore_airdate_checks,
-                    episode,
+                    starting_episode,
+                    release_episode,
                     verbose_trace=trace_candidates
                 )
                 trace_status = "SUCCESS" if best else "NO_MATCH"
@@ -326,8 +341,14 @@ class NyaaClient:
         )
         if air_dates is None:
             return []
+        if starting_episode:
+            air_dates = {"nodes": [
+                {**node, "episode": node.get("episode", 0) + (starting_episode if starting_episode > 0 else 0)}
+                for node in air_dates.get("nodes", [])
+            ]}
 
-        formatted_ep = f"{episode:02d}"
+        release_episode = episode + (starting_episode if starting_episode > 0 else 0)
+        formatted_ep = f"{release_episode:02d}"
         rss_res = self.fetch_rss_feed(f'{anime_title} "{formatted_ep}"', search_url, enable_proxy)
         if rss_res["status"] != 200 or not rss_res["data"]:
             return []
@@ -338,20 +359,28 @@ class NyaaClient:
         candidates = []
         for item in rss_res["data"]:
             parsed = anitopy.parse(item["title"])
-            score = verify_query(
-                anime_title,
+            score_result = verify_query(
+                f'{anime_title} "{formatted_ep}"',
                 parsed,
                 res_mode,
                 "EPISODE",
                 item["pubDate"],
                 air_dates,
                 ignore_airdate_checks,
-                episode
+                release_episode,
+                verbose=True
             )
+            score, details = score_result if isinstance(score_result, tuple) else (score_result, {})
             if score > 0:
                 cand = dict(item)
                 cand["episode"] = episode
                 cand["score"] = score
+                cand["details"] = {
+                    "episode_match": details.get("episode_match"),
+                    "resolution_match": details.get("resolution_match"),
+                    "air_date_match": details.get("air_date_match"),
+                    "title_similarity": details.get("title_similarity", 0.0)
+                }
                 cand["parsedTitle"] = parsed.get("anime_title")
                 candidates.append(cand)
 

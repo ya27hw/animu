@@ -20,12 +20,18 @@
 
     const toast = document.createElement('div');
     toast.className = `p-4 rounded-2xl shadow-xl flex items-center gap-3 border text-sm font-semibold pointer-events-auto transform translate-y-4 opacity-0 transition-all duration-300 ${
-      type === 'success'
-        ? 'bg-emerald-50 dark:bg-emerald-950/90 border-emerald-200/50 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300 glow-emerald'
+    type === 'success'
+      ? 'bg-emerald-50 dark:bg-emerald-950/90 border-emerald-200/50 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300 glow-emerald'
+      : type === 'warning'
+        ? 'bg-amber-50 dark:bg-amber-950/90 border-amber-200/60 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 glow-amber'
         : 'bg-rose-50 dark:bg-rose-950/90 border-rose-200/50 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 glow-rose'
     }`;
     
-    const icon = type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-exclamation text-rose-500';
+    const icon = type === 'success'
+      ? 'fa-circle-check text-emerald-500'
+      : type === 'warning'
+        ? 'fa-triangle-exclamation text-amber-500'
+        : 'fa-circle-exclamation text-rose-500';
     toast.innerHTML = `<i class="fa-solid ${icon} text-lg shrink-0"></i><p class="flex-grow">${message}</p>`;
     
     wrapper.appendChild(toast);
@@ -214,13 +220,13 @@
     }
   }
 
-  [DOM.themeToggle, DOM.themeToggleDesktop].forEach(btn => {
-    if (btn) {
-      btn.addEventListener('click', () => {
-        const isDark = document.documentElement.classList.toggle('dark');
-        localStorage.setItem('theme', isDark ? 'dark' : 'light');
-      });
-    }
+  DOM.themeToggle.addEventListener('click', () => {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  });
+  DOM.themeToggleDesktop.addEventListener('click', () => {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
   });
 
   // Hamburger menu toggle
@@ -366,13 +372,15 @@
       const totalEpisodes = item.media.episodes || 0;
       const startingEpisode = item.media.startingEpisode || 0;
       
-      const expectedTotal = totalEpisodes > 0 ? (totalEpisodes + startingEpisode) : maxAired;
-      const displayProgress = currentProgress + startingEpisode;
+      const expectedTotal = totalEpisodes > 0 ? totalEpisodes : Math.max(0, maxAired - startingEpisode);
+      const displayProgress = currentProgress;
       const progressPercent = expectedTotal > 0 ? Math.min(100, Math.round((displayProgress / expectedTotal) * 100)) : 0;
       
       const isFinished = item.media.status === 'FINISHED';
       const isTriggeredGenre = item.media.genres && item.media.genres.includes(triggerGenreVal);
-      const hasDownloadedAll = item.downloadedEpisodes.length >= totalEpisodes && totalEpisodes > 0;
+      // When AniList does not provide a total, use the aired/derived total so
+      // finished shows can still satisfy the rewatch gate.
+      const hasDownloadedAll = expectedTotal > 0 && item.downloadedEpisodes.length >= expectedTotal;
       const pendingRewatching = item.pendingRewatchingUpdate === true;
 
       const card = document.createElement('div');
@@ -461,12 +469,15 @@
       // Render episode badge states
       const badgeGrid = document.getElementById(`badge-grid-${item.mediaId}`);
       if (expectedTotal > 0) {
-        for (let ep = startingEpisode + 1; ep <= expectedTotal; ep++) {
+        for (let ep = 1; ep <= expectedTotal; ep++) {
           const badge = document.createElement('button');
           const isDownloaded = item.downloadedEpisodes.includes(ep);
+          const hasAired = (ep + startingEpisode) <= maxAired;
           
           if (isDownloaded) {
             badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-500 transition-all cursor-pointer";
+          } else if (hasAired) {
+            badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-red-500/10 dark:bg-red-500/20 border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white dark:hover:bg-red-500 transition-all cursor-pointer";
           } else {
             badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/40 text-slate-500 dark:text-slate-400 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 hover:border-transparent transition-all cursor-pointer";
           }
@@ -505,7 +516,7 @@
         const data = await API.saveAnime(mediaId, payload);
         closeModal(DOM.settingsDialog);
         if (data && data.synced === false) {
-          showToast(data.warning || 'Saved locally but PocketBase sync failed.', 'warning');
+          showToast(data.warning || 'Saved locally. PocketBase sync pending — will retry.', 'warning');
         } else {
           showToast('Anime overrides saved successfully.');
         }
@@ -607,6 +618,18 @@
       card.className = "flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/80 hover:border-violet-500/30 transition-colors duration-200";
       
       const rating = item.score !== null ? `Score: ${item.score.toFixed(2)}` : 'Manual Index Query';
+      let detailsHTML = '';
+      if (item.details) {
+        const d = item.details;
+        detailsHTML = `
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded ${d.episode_match ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}>Episode: ${d.episode_match ? '✅ (1.0)' : '❌ (0.0)'}</span>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded ${d.resolution_match ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}>Resolution: ${d.resolution_match ? '✅ (1.0)' : '❌ (0.0)'}</span>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded ${d.air_date_match ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}>Air Date: ${d.air_date_match ? '✅ (1.0)' : '❌ (0.0)'}</span>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-500/10 text-slate-400 border border-slate-500/20">Title: ${(d.title_similarity || 0).toFixed(2)} / 1.0</span>
+          </div>
+        `;
+      }
       
       card.innerHTML = `
         <div class="flex-grow min-w-0">
@@ -616,6 +639,7 @@
             <span class="flex items-center gap-1"><i class="fa-solid fa-file-zipper"></i>${item.size}</span>
             <span class="text-violet-500 flex items-center gap-1"><i class="fa-solid fa-bolt"></i>${rating}</span>
           </div>
+          ${detailsHTML}
         </div>
         <button class="w-10 h-10 shrink-0 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-md cursor-pointer transition-all" data-download-link="${item.link}" onclick="window.UI.startDownload(${mediaId}, '${item.link}', ${episode || 'undefined'})">
           <i class="fa-solid fa-arrow-down-long"></i>
@@ -741,6 +765,16 @@
     }
   }
 
+  function escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
+  }
+
+  function formatFailureReason(reason) {
+    const text = String(reason || 'Score below verification threshold (3.88)');
+    const parts = text.replace(/^Failed threshold\s*[—-]?\s*/i, '').split(/\s+\|\s+|\s+and\s+/i).filter(Boolean);
+    return parts.map(part => `<li class="flex gap-2 items-start"><span class="text-rose-500">•</span><span>${escapeHTML(part.trim())}</span></li>`).join('');
+  }
+
   // Update Search Diagnostics
   async function updateSearchDiagnostics() {
     try {
@@ -780,10 +814,10 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 cursor-pointer select-none bg-slate-100/50 dark:bg-slate-900/40 hover:bg-slate-100 dark:hover:bg-slate-900/60 transition-colors" onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.chevron-icon')?.classList.toggle('rotate-180')">
             <div class="space-y-1">
               <div class="flex items-center gap-2">
-                <h4 class="font-bold text-sm sm:text-base font-['Outfit'] text-slate-800 dark:text-slate-200">${trace.anime_title}</h4>
+                <h4 class="font-bold text-sm sm:text-base font-['Outfit'] text-slate-800 dark:text-slate-200">${escapeHTML(trace.anime_title)}</h4>
                 ${statusBadge}
               </div>
-              <p class="text-xs text-slate-400 font-mono">Last Query: <span class="text-slate-500">${trace.search_query}</span></p>
+              <p class="text-xs text-slate-400 font-mono">Last Query: <span class="text-slate-500">${escapeHTML(trace.search_query)}</span></p>
             </div>
             <div class="flex items-center gap-3 text-xs text-slate-400 self-end sm:self-auto">
               <span>${timestampStr}</span>
@@ -792,27 +826,50 @@
           </div>
           <div class="hidden border-t border-slate-200/40 dark:border-slate-800/40 p-5 bg-white dark:bg-slate-950/20">
             <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Evaluated Nyaa Candidate Torrents (Top 3)</h5>
-            <div class="space-y-3">
+            <div class="space-y-4">
               ${hasCandidates ? trace.candidates.map((c, idx) => {
                 const totalScore = c.rating.toFixed(2);
+                const epMatch = c.episode_match;
+                const resMatch = c.resolution_match;
+                const airMatch = c.air_date_match;
+                const titleSim = (c.title_similarity || 0).toFixed(2);
+
+                // Build bullet-point breakdown
+                let breakdownHTML = '';
+                if (c.episode_match !== undefined && c.episode_match !== null) {
+                  breakdownHTML = `
+                    <ul class="space-y-1 text-[11px]">
+                      <li class="flex items-center gap-2"><span class="shrink-0 ${epMatch ? 'text-emerald-500' : 'text-red-500'} font-bold w-8">${epMatch ? '✅' : '❌'}</span>Episode Match: <span class="font-semibold">${epMatch ? '1.0' : '0.0'} / 1.0</span></li>
+                      <li class="flex items-center gap-2"><span class="shrink-0 ${resMatch ? 'text-emerald-500' : 'text-red-500'} font-bold w-8">${resMatch ? '✅' : '❌'}</span>Resolution: <span class="font-semibold">${resMatch ? '1.0' : '0.0'} / 1.0</span></li>
+                      <li class="flex items-center gap-2"><span class="shrink-0 ${airMatch ? 'text-emerald-500' : 'text-red-500'} font-bold w-8">${airMatch ? '✅' : '❌'}</span>Air Date: <span class="font-semibold">${airMatch ? '1.0' : '0.0'} / 1.0</span></li>
+                      <li class="flex items-center gap-2"><span class="shrink-0 text-slate-400 font-bold w-8">-</span>Title Similarity: <span class="font-semibold">${titleSim} / 1.0</span></li>
+                    </ul>
+                  `;
+                }
                 
                 return `
-                  <div class="flex flex-col gap-1.5 p-3 rounded-xl border border-slate-100 dark:border-slate-900/60 bg-slate-50/30 dark:bg-slate-900/10">
+                  <div class="flex flex-col gap-2 p-3 rounded-xl border border-slate-100 dark:border-slate-900/60 bg-slate-50/30 dark:bg-slate-900/10">
                     <div class="flex items-start justify-between gap-4">
-                      <span class="text-xs font-mono text-slate-600 dark:text-slate-300 break-all">${idx + 1}. ${c.title}</span>
-                      <div class="flex items-center gap-2 shrink-0">
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-900 text-slate-400">
-                          <i class="fa-solid fa-users mr-1"></i>${c.seeders}
-                        </span>
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.88 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">
-                          Score: ${totalScore}
-                        </span>
+                      <div class="min-w-0 flex-grow space-y-1.5">
+                        <span class="text-xs font-mono text-slate-600 dark:text-slate-300 break-all block">${idx + 1}. ${escapeHTML(c.title)}</span>
+                        <div class="flex items-center gap-2 text-[11px] font-semibold text-slate-400">
+                          <span><i class="fa-solid fa-seedling mr-0.5 text-emerald-500"></i>${c.seeders}</span>
+                          <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.88 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">Score: ${totalScore}</span>
+                        </div>
+                        ${breakdownHTML}
+                        <div class="mt-2 rounded-lg border border-rose-200/60 dark:border-rose-900/40 bg-rose-50/60 dark:bg-rose-950/20 p-2.5">
+                          <div class="text-[10px] font-bold uppercase tracking-wider text-rose-500 mb-1.5">Why this candidate failed</div>
+                          <ul class="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">${formatFailureReason(c.rejection_reason)}</ul>
+                        </div>
                       </div>
                     </div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                      <i class="fa-solid fa-circle-exclamation text-rose-500/80 shrink-0"></i>
-                      <span>Reason: ${c.rejection_reason || 'Score below verification threshold (3.88)'}</span>
-                    </div>
+                    ${c.link ? `
+                      <div class="flex justify-end pt-1 border-t border-slate-100 dark:border-slate-800/60">
+                        <button class="px-3 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow cursor-pointer transition-all flex items-center gap-1.5 force-download-btn" data-media="${trace.media_id}" data-link="${c.link}" data-episode="${c.episode || ''}">
+                          <i class="fa-solid fa-arrow-down-long text-[10px]"></i>Force Download
+                        </button>
+                      </div>
+                    ` : ''}
                   </div>
                 `;
               }).join('') : `
@@ -823,8 +880,26 @@
             </div>
           </div>
         `;
-        
         DOM.searchDebugContainer.appendChild(itemEl);
+      });
+      // Attach force-download handlers
+      DOM.searchDebugContainer.querySelectorAll('.force-download-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const mediaId = parseInt(btn.dataset.media);
+          const link = btn.dataset.link;
+          const episode = btn.dataset.episode ? parseInt(btn.dataset.episode) : undefined;
+          btn.disabled = true;
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Adding...';
+          try {
+            await API.downloadNyaa(mediaId, link, episode);
+            showToast('Torrent force-downloaded and marked as downloaded!', 'success');
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Downloaded';
+          } catch (e) {
+            showToast(e.message, 'error');
+            btn.innerHTML = '<i class="fa-solid fa-arrow-down-long"></i>Force Download';
+            btn.disabled = false;
+          }
+        });
       });
     } catch (e) {
       console.error('Failed to update search diagnostics:', e);

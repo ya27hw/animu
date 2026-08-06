@@ -1,27 +1,9 @@
 {
-  "apps": [
-    {
-      "name": "Animu",
-      "script": "build/main.js",
-      "watch": ["build"],
-      "ignore_watch": ["node_modules", ".git"],
-      "args": "2",
-      "max_memory_restart": "250M",
-      "min_uptime": "10s",
-      "max_restarts": 10,
-      "restart_delay": 4000,
-      "kill_timeout": 5000,
-      "wait_ready": true,
-      "listen_timeout": 10000,
-      "env": {
-        "NODE_ENV": "production"
-      },
-      "log_file": "./logs/animu.log",
-      "out_file": "./logs/animu-out.log",
-      "error_file": "./logs/animu-error.log",
-      "log_date_format": "YYYY-MM-DD HH:mm:ss Z",
-      "merge_logs": true,
-      "log_type": "json"
-    }
-  ]
+  "apps": [],
+  "metadata": {
+    "authoritative_runtime": "systemd",
+    "service": "animu.service",
+    "retired": true,
+    "reason": "The Python rewrite is run by systemd; PM2 must not start the stale build/main.js command."
+  }
 }

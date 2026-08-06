@@ -20,6 +20,7 @@ class Database:
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         self.local_db_path = os.path.join(root_dir, "logs", "offline_db.json")
         self.local_cache: Dict[str, Dict[str, Any]] = {}
+        self.local_cache_valid = False
         self._load_local_cache()
 
     def _load_local_cache(self):
@@ -27,7 +28,10 @@ class Database:
         if os.path.exists(self.local_db_path):
             try:
                 with open(self.local_db_path, "r", encoding="utf-8") as f:
-                    self.local_cache = json.load(f)
+                    value = json.load(f)
+                    if isinstance(value, dict):
+                        self.local_cache = value
+                        self.local_cache_valid = True
             except Exception as e:
                 print(f"Failed to load local DB cache: {e}")
         else:
@@ -54,6 +58,10 @@ class Database:
         resp.raise_for_status()
         self.token = resp.json()["token"]
         return self.token
+
+    def offline_safe_mode_available(self) -> bool:
+        """Return whether the local cache is available for the documented fallback path."""
+        return self.local_cache_valid and os.path.isfile(self.local_db_path)
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         """Send requests to PocketBase, handling authentication and automatic 401 token refresh."""

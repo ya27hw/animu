@@ -166,6 +166,136 @@ class QbitClient:
         use_proxy = config.use_proxy or use_proxy_download
         return self.add_torrent_file(add_url, link, save_path, rename, use_proxy)
 
+    def check_torrent_episode(self, title: str, episode: int) -> bool:
+        """Check if an episode already exists in qBittorrent.
+
+        Tolerant of season-token naming variants (e.g. 'Iruma-kun S4 - 4'
+        vs the stored 'Iruma-kun 4 - 4'). Only counts torrents with
+        progress > 0 so stale missingFiles entries are ignored.
+        """
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
+
+        if not self._ensure_auth():
+            return False
+
+        try:
+            payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": f"SID={self.sid}"
+            }
+            resp = self.client.post(info_url, data=payload, headers=headers)
+            if resp.status_code != 200:
+                return False
+
+            # Distinctive title tokens with season markers removed
+            title_norm = re.sub(r"\bs\d+\b", "", title.lower())
+            title_norm = re.sub(r"[\W_]+", " ", title_norm).strip()
+            tokens = [w for w in title_norm.split() if len(w) > 3]
+            if not tokens:
+                return False
+
+            ep_pattern = re.compile(r"(?:^|[^\w])(?:e(?:p)?\s*)?0*%d(?:$|[^\w])" % episode, re.IGNORECASE)
+            for t in resp.json() or []:
+                if t.get("progress", 0) <= 0:
+                    continue
+                t_name = (t.get("name") or "").lower()
+                if all(tok in t_name for tok in tokens) and ep_pattern.search(t_name):
+                    return True
+        except Exception as e:
+            print(f"Error checking torrent episode: {e}")
+        return False
+
+    def check_episodes_in_batch(self, title: str, episodes: list, season: int = 1) -> list:
+        """Return which of `episodes` are already present inside COMPLETED qBittorrent
+        batch torrents matching `title` (inspected by file list, not torrent name).
+
+        Handles the common case where a full-season batch (e.g. 'Season 01-02')
+        was already downloaded: the individual episodes live inside the batch's
+        files (e.g. 'S02E05.mkv') even though no per-episode torrent exists and
+        the batch's display name carries no episode number. Only fully-seeded
+        (progress >= 1) torrents are considered, and only episodes actually found
+        in the file list are returned, so partially- or wrongly-matched batches
+        are never falsely credited.
+        """
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
+        if not self._ensure_auth():
+            return []
+
+        try:
+            payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": f"SID={self.sid}"
+            }
+            resp = self.client.post(info_url, data=payload, headers=headers)
+            if resp.status_code != 200:
+                return []
+
+            title_norm = re.sub(r"\bs\d+\b", "", title.lower())
+            title_norm = re.sub(r"[\W_]+", " ", title_norm).strip()
+            tokens = [w for w in title_norm.split() if len(w) > 3]
+            if not tokens:
+                return []
+
+            target = set(episodes)
+            found: set = set()
+            files_url = f"{base_url.rstrip('/')}/api/v2/torrents/files"
+
+            for t in resp.json() or []:
+                if t.get("progress", 0) < 1:
+                    continue
+                t_name = (t.get("name") or "").lower()
+                save_path = (t.get("save_path") or "").lower()
+                if not (all(tok in t_name for tok in tokens) or all(tok in save_path for tok in tokens)):
+                    continue
+                fr = self.client.post(files_url, data={"hash": t.get("hash")}, headers=headers)
+                if fr.status_code != 200:
+                    continue
+                for f in fr.json() or []:
+                    parsed = self._parse_episode_from_filename(f.get("name") or "", season)
+                    if parsed is not None and parsed in target:
+                        found.add(parsed)
+            return sorted(found)
+        except Exception as e:
+            print(f"Error checking episodes in batch: {e}")
+            return []
+
+    def _parse_episode_from_filename(self, filename: str, season: int = 1) -> Optional[int]:
+        """Extract a season-relative episode number from a torrent file name.
+
+        Prefers season-tagged forms (S01E05, s01e05) and only accepts the given
+        season, so a multi-season batch (Season 01-02) is never credited with the
+        wrong season's episodes. Falls back to bare episode numbers when the file
+        carries no season tag at all.
+        """
+        fn = filename.lower()
+        # Season-tagged: S02E05 / s2e5 / s02e05
+        if season and season > 0:
+            m = re.search(rf"s0?{season}\s*e\s*(\d{{1,3}})", fn)
+            if m:
+                return int(m.group(1))
+            # Prefer explicit season match; if a different season tag is present, skip
+            if re.search(r"s\d{1,2}\s*e\s*\d{1,3}", fn):
+                return None
+        # Bare episode number (no season context in the name). Use explicit
+        # separator boundaries (including '_', which is a \w char in Python)
+        # so names like '..._-_07_' or ' - 13 - ' parse, while resolution
+        # tags like '1080p' or 'x265' are rejected. Only trust a bare number
+        # when the requested season (1) is unambiguous — for a later-season
+        # query a file without an S{season}E tag cannot be proven to belong to
+        # that season, so it is ignored to avoid crediting the wrong season.
+        if season > 1:
+            return None
+        m = re.search(r"(?:^|[-\[\(\s_.])(?:e(?:p)?\s*)?0*(\d{1,3})(?:[-\]\)\s_.]|$)", fn)
+        if m:
+            return int(m.group(1))
+        return None
+
     def check_torrent(self, name: str) -> bool:
         """Check if a torrent matching the given name or title exists in qBittorrent."""
         config = get_config()
