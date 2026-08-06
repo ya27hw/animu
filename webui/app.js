@@ -214,9 +214,13 @@
     }
   }
 
-  DOM.themeToggle.addEventListener('click', () => {
-    const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  [DOM.themeToggle, DOM.themeToggleDesktop].forEach(btn => {
+    if (btn) {
+      btn.addEventListener('click', () => {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      });
+    }
   });
 
   // Hamburger menu toggle

@@ -180,26 +180,46 @@ class Scheduler:
             ex3 = fix_anime_season(anime["media"]["title"]["romaji"])
             ex2 = count_past_relations(anime["mediaId"])
 
+            romaji = anime["media"]["title"]["romaji"]
+            english = anime["media"]["title"].get("english")
+
             possible_combinations = [
                 {"title": ex3["title"], "episode_offset": 0}
             ]
 
-            if anime["media"]["title"].get("english"):
-                possible_combinations.append({"title": anime["media"]["title"]["english"], "episode_offset": 0})
+            if english:
+                possible_combinations.append({"title": english, "episode_offset": 0})
 
-            if ex2["seasonCount"] > 1:
-                possible_combinations.extend([
-                    {"title": f"{ex3['title']} S{ex2['seasonCount']}", "episode_offset": ex2["episodeOffset"]},
-                    {"title": f"{ex3['title']} S{ex2['seasonCount']}", "episode_offset": 0}
-                ])
+            # Handle multi-season title variations (S2, Season 2, 2nd Season, II, III)
+            season_num = ex3.get("seasonCount", 1)
+            if season_num == 1 and ex2["seasonCount"] > 1:
+                season_num = ex2["seasonCount"]
+
+            if season_num > 1:
+                roman_map = {2: "II", 3: "III", 4: "IV", 5: "V"}
+                roman = roman_map.get(season_num, "")
+                
+                titles_to_expand = [ex3["title"]]
+                if english:
+                    eng_season = fix_anime_season(english)
+                    titles_to_expand.append(eng_season["title"])
+
+                for base in titles_to_expand:
+                    possible_combinations.extend([
+                        {"title": f"{base} S{season_num}", "episode_offset": ex2["episodeOffset"]},
+                        {"title": f"{base} S{season_num}", "episode_offset": 0},
+                        {"title": f"{base} Season {season_num}", "episode_offset": 0},
+                    ])
+                    if roman:
+                        possible_combinations.append({"title": f"{base} {roman}", "episode_offset": 0})
 
             synonyms = anime["media"].get("synonyms") or []
             for synonym in synonyms:
-                if synonym.lower() != anime["media"]["title"]["romaji"].lower():
+                if synonym.lower() != romaji.lower():
                     possible_combinations.append({"title": synonym, "episode_offset": 0})
 
-            short_name = anime["media"]["title"]["romaji"].split(":")[0]
-            if short_name != anime["media"]["title"]["romaji"]:
+            short_name = romaji.split(":")[0]
+            if short_name != romaji:
                 possible_combinations.insert(0, {"title": short_name, "episode_offset": 0})
 
             # Filter duplicates

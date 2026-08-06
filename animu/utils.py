@@ -1,6 +1,7 @@
 import re
 import email.utils
 import time
+import datetime
 from typing import List, Dict, Any, Optional
 from .config import get_config
 
@@ -53,25 +54,30 @@ def find_best_match(main_string: str, target_strings: List[str]) -> dict:
 
 def get_explicit_season(title: str) -> Optional[int]:
     """Extract explicit season number from a string, returning None if no explicit indicator is found."""
-    # Match roman numerals: Season II, III, IV
+    if not title:
+        return None
+    # Match roman numerals: Season II, III, IV or standalone II, III, IV (with word boundaries)
     roman_match = re.search(r'\b(?:season\s*)?(II|III|IV)\b', title, re.IGNORECASE)
     if roman_match:
         return {"II": 2, "III": 3, "IV": 4}.get(roman_match.group(1).upper())
     
+    # Match ordinals: 2nd Season, 3rd Season, etc.
+    ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
+    if ordinal_match:
+        return int(ordinal_match.group(1))
+
     # Match standard season notations: S2, Season 2, S02, C2 (cour 2)
     season_match = re.search(r'\b(?:s|season|c)\s*0?(\d+)\b', title, re.IGNORECASE)
     if season_match:
         return int(season_match.group(1))
         
-    # Match ordinals: 2nd Season, 3rd Season, etc.
-    ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
-    if ordinal_match:
-        return int(ordinal_match.group(1))
-        
     return None
 
 def fix_anime_season(title: str) -> dict:
     """Detect and extract season information from an anime title."""
+    if not title:
+        return {"title": "", "seasonCount": 1}
+
     # Match roman numerals season II, III, IV
     roman_regex = r'\b(?:season\s*)?(II|III|IV)\b'
     roman_match = re.search(roman_regex, title, re.IGNORECASE)
@@ -85,12 +91,21 @@ def fix_anime_season(title: str) -> dict:
             "seasonCount": roman_to_season.get(roman, 1)
         }
 
-    # Match standard season notations: s01, season 2, 2nd season, or trailing digit
-    season_regex = r's0?\d{1}|season(.*)0?\d{1}|(\d+(st|nd|rd|th)(.*)season)|[^a-zA-Z0-9]0?\d{1}$'
-    season_match = re.search(season_regex, title, re.IGNORECASE)
+    # Match ordinals: 2nd Season, 3rd Season, etc.
+    ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
+    if ordinal_match:
+        season_number = int(ordinal_match.group(1))
+        clean_title = title.replace(ordinal_match.group(0), "").strip()
+        clean_title = re.sub(r'\s+', ' ', clean_title)
+        return {
+            "title": clean_title,
+            "seasonCount": season_number
+        }
+
+    # Match standard season notations: Season 2, S2, S02
+    season_match = re.search(r'\b(?:s|season|c)\s*0?(\d+)\b', title, re.IGNORECASE)
     if season_match:
-        num_match = re.search(r'\d+', season_match.group(0))
-        season_number = int(num_match.group(0)) if num_match else 1
+        season_number = int(season_match.group(1))
         clean_title = title.replace(season_match.group(0), "").strip()
         clean_title = re.sub(r'\s+', ' ', clean_title)
         return {
@@ -130,9 +145,37 @@ def count_past_relations(media_id: int, episode_offset: int = 0, season_count: i
 
     return {"episodeOffset": episode_offset, "seasonCount": season_count}
 
-def matches_airdate_with_buffer(airing_at: float, pub_epoch: float, buffer_seconds: int = 172800) -> bool:
+def matches_airdate_with_buffer(airing_at: float, pub_epoch: float, buffer_seconds: Optional[int] = None) -> bool:
     """Verify if the torrent publication date is within reasonable bounds of the airing schedule."""
+    if buffer_seconds is None:
+        config = get_config()
+        hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+        buffer_seconds = int(hours * 3600)
     return (airing_at - buffer_seconds) < pub_epoch
+
+
+def _fmt_epoch(epoch: float) -> str:
+    """Format a Unix timestamp as a compact UTC string for log messages."""
+    try:
+        return datetime.datetime.utcfromtimestamp(epoch).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return str(epoch)
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration in seconds as a human-readable string (e.g. '2h 15m')."""
+    seconds = abs(int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    return " ".join(parts) if parts else "<1m"
 
 def _to_clean_string(val: Any) -> str:
     """Helper to clean string or join list of strings into a single lowercase string."""
@@ -185,10 +228,12 @@ def verify_query(
     else:
         parsed_title = str(parsed_title_val or "")
 
-    # Perform strict season conflict checks to prevent mismatching multi-season shows
+    # Season conflict checks: only hard-reject when BOTH query and candidate have
+    # explicit but DIFFERENT season numbers. Many releases (e.g. SubsPlease)
+    # omit season numbers entirely — those should NOT be rejected here.
     query_explicit = get_explicit_season(search_query)
     candidate_explicit = get_explicit_season(parsed_title)
-    
+
     if not candidate_explicit:
         season_val = anime_parsed_data.get("season") or anime_parsed_data.get("anime_season")
         if season_val:
@@ -200,32 +245,19 @@ def verify_query(
             except Exception:
                 pass
         if not candidate_explicit:
-            file_name = anime_parsed_data.get("file_name", "")
-            if isinstance(file_name, str) and file_name:
-                candidate_explicit = get_explicit_season(file_name)
+            raw_file_name = anime_parsed_data.get("file_name", "")
+            if isinstance(raw_file_name, str) and raw_file_name:
+                candidate_explicit = get_explicit_season(raw_file_name)
 
+    # Hard reject only when BOTH have explicit seasons that disagree
     if query_explicit is not None and candidate_explicit is not None:
         if query_explicit != candidate_explicit:
             return get_result(0.0, f"Season conflict (query S{query_explicit} vs torrent S{candidate_explicit})")
 
-    if candidate_explicit is not None:
-        expected_query_season = query_explicit or 1
-        if candidate_explicit != expected_query_season:
-            return get_result(0.0, f"Season conflict (torrent S{candidate_explicit} vs expected query S{expected_query_season})")
-
-    if query_explicit is not None and query_explicit > 1 and candidate_explicit is None:
-        parsed_episode_val = anime_parsed_data.get("episode_number")
-        is_absolute_candidate = False
-        if parsed_episode_val:
-            try:
-                if isinstance(parsed_episode_val, list):
-                    is_absolute_candidate = any(float(ep) >= 12 for ep in parsed_episode_val)
-                else:
-                    is_absolute_candidate = float(parsed_episode_val) >= 12
-            except ValueError:
-                pass
-        if not is_absolute_candidate:
-            return get_result(0.0, f"Season conflict (query is Season {query_explicit} but candidate lacks season marker and has low episode number)")
+    # If candidate has a season marker but query does not specify one (defaults S1),
+    # reject only if the candidate is explicitly a higher season
+    if candidate_explicit is not None and candidate_explicit > 1 and query_explicit is None:
+        return get_result(0.0, f"Season conflict (torrent S{candidate_explicit} but query has no season, assuming S1)")
 
     has_episodes = len(episodes) > 0
 
@@ -247,13 +279,42 @@ def verify_query(
     if sub_anime_title_string:
         targets.append(sub_anime_title_string)
     targets.extend(v_bar_split_title)
+
+    # Reconstruct season-qualified title from anitopy's split fields.
+    # anitopy parses "Mushoku Tensei S3 - 04" as anime_title="Mushoku Tensei"
+    # + anime_season="3" separately, so we rebuild "Mushoku Tensei S3" here
+    # so a query of "Mushoku Tensei S3" gets a 1.0 match, not ~0.92.
+    raw_anime_season = anime_parsed_data.get("anime_season") or anime_parsed_data.get("season")
+    if raw_anime_season and parsed_title:
+        try:
+            season_num = int(raw_anime_season) if not isinstance(raw_anime_season, list) else int(raw_anime_season[0])
+            if season_num and season_num > 1:
+                targets.append(f"{parsed_title} S{season_num}")
+                targets.append(f"{main_anime_title} S{season_num}")
+        except (ValueError, TypeError, IndexError):
+            pass
+
+    # Also add season-stripped versions so a no-season torrent can still match
+    # a season-qualified query (e.g. "Youjo Senki" torrent vs "Youjo Senki S2" query)
+    for t in list(targets):
+        stripped = fix_anime_season(t)["title"]
+        if stripped and stripped != t:
+            targets.append(stripped)
     targets = list(set(t for t in targets if t))
 
-    title_match = find_best_match(search_query, targets)
+    # Strip quoted episode numbers (e.g., ' "01"') from search_query for title comparison
+    # e.g. 'Youjo Senki S2 "01"' → 'Youjo Senki S2'
+    clean_search_query = re.sub(r'\s*"\d+"$', '', search_query).strip()
+
+    title_match = find_best_match(clean_search_query, targets)
     best_rating = title_match["bestMatch"]["rating"]
 
+    best_target = title_match["bestMatch"].get("target", "")
     if best_rating < 0.70:
-        return get_result(0.0, f"Title similarity rating too low ({best_rating*100:.1f}% < 70.0%)")
+        return get_result(0.0,
+            f"Title similarity too low: {best_rating*100:.1f}% < 70% "
+            f"(query '{clean_search_query}' best matched '{best_target}')"
+        )
 
     resolution_match = (
         resolution == "0" or
@@ -295,28 +356,55 @@ def verify_query(
                 break
 
         if page_number == -1 and not ignore_airdate_checks:
-            return get_result(0.0, "Episode not aired yet in AniList airing schedule")
+            return get_result(0.0, "Episode not in AniList airing schedule (may not have aired yet)")
+
+        airing_at_epoch = nodes[page_number]["airingAt"] if page_number != -1 else 0.0
+        config = get_config()
+        threshold_hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+        buffer_seconds = int(threshold_hours * 3600)
 
         air_date_match = (
             ignore_airdate_checks or
             (page_number != -1 and matches_airdate_with_buffer(
-                nodes[page_number]["airingAt"],
-                pub_epoch
+                airing_at_epoch,
+                pub_epoch,
+                buffer_seconds
             ))
         )
 
         score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating
-        
+
         rejection_reason = ""
         if score < 3.88:
             failed_checks = []
             if not episode_match:
-                failed_checks.append("episode mismatch")
+                ep_found = ", ".join(str(int(e)) for e in parsed_episodes) if parsed_episodes else "none"
+                failed_checks.append(
+                    f"episode mismatch (wanted Ep{wanted_episode}, torrent has Ep{ep_found})"
+                )
             if not resolution_match:
-                failed_checks.append(f"resolution mismatch (wanted {resolution}, got {parsed_resolution})")
-            if not air_date_match:
-                failed_checks.append("air date buffer check failed (torrent published too early)")
-            rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
+                failed_checks.append(
+                    f"resolution mismatch (wanted {resolution}, got {parsed_resolution or 'none'})"
+                )
+            if not air_date_match and not ignore_airdate_checks and airing_at_epoch:
+                diff_secs = pub_epoch - (airing_at_epoch - buffer_seconds)
+                if diff_secs < 0:
+                    # Published before (airing_time - threshold)
+                    early_by = _fmt_duration(-diff_secs)
+                    failed_checks.append(
+                        f"air date: torrent uploaded {early_by} too early "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"aired {_fmt_epoch(airing_at_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+                else:
+                    failed_checks.append(
+                        f"air date check failed "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"aired {_fmt_epoch(airing_at_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+            rejection_reason = "Failed threshold — " + " | ".join(failed_checks)
 
         details = {
             "episode_match": episode_match,
@@ -353,18 +441,39 @@ def verify_query(
                 verify_range_ok = False
 
             score = float(verify_range_ok) + float(resolution_match) + float(air_date_match_batch) + best_rating
-            
+
             rejection_reason = ""
             if score < 3.88:
                 failed_checks = []
                 if not verify_range_ok:
-                    failed_checks.append("batch range mismatch")
+                    failed_checks.append(
+                        f"batch range mismatch (found '{range_str}', expected 01-{episodes[-1] if episodes else '?'})"
+                    )
                 if not resolution_match:
-                    failed_checks.append(f"resolution mismatch (wanted {resolution}, got {parsed_resolution})")
-                if not air_date_match_batch:
-                    failed_checks.append("air date check failed")
-                rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
-                
+                    failed_checks.append(
+                        f"resolution mismatch (wanted {resolution}, got {parsed_resolution or 'none'})"
+                    )
+                if not air_date_match_batch and nodes:
+                    last_node_epoch = nodes[-1]["airingAt"]
+                    config = get_config()
+                    threshold_hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+                    diff = pub_epoch - (last_node_epoch - int(threshold_hours * 3600))
+                    if diff < 0:
+                        failed_checks.append(
+                            f"air date: batch uploaded {_fmt_duration(-diff)} too early "
+                            f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                            f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                            f"threshold -{threshold_hours:.0f}h)"
+                        )
+                    else:
+                        failed_checks.append(
+                            f"air date check failed "
+                            f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                            f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                            f"threshold -{threshold_hours:.0f}h)"
+                        )
+                rejection_reason = "Failed threshold — " + " | ".join(failed_checks)
+
             details = {
                 "batch_range_match": verify_range_ok,
                 "resolution_match": resolution_match,
@@ -378,12 +487,31 @@ def verify_query(
         if score < 3.88:
             failed_checks = []
             if not is_batch:
-                failed_checks.append("not a batch torrent")
+                failed_checks.append("not a batch torrent (single-episode release)")
             if not resolution_match:
-                failed_checks.append(f"resolution mismatch (wanted {resolution}, got {parsed_resolution})")
-            if not air_date_match_batch:
-                failed_checks.append("air date check failed")
-            rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
+                failed_checks.append(
+                    f"resolution mismatch (wanted {resolution}, got {parsed_resolution or 'none'})"
+                )
+            if not air_date_match_batch and nodes:
+                last_node_epoch = nodes[-1]["airingAt"]
+                config = get_config()
+                threshold_hours = getattr(config, 'air_date_threshold_hours', 48.0) or 48.0
+                diff = pub_epoch - (last_node_epoch - int(threshold_hours * 3600))
+                if diff < 0:
+                    failed_checks.append(
+                        f"air date: batch uploaded {_fmt_duration(-diff)} too early "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+                else:
+                    failed_checks.append(
+                        f"air date check failed "
+                        f"(uploaded {_fmt_epoch(pub_epoch)}, "
+                        f"last ep aired {_fmt_epoch(last_node_epoch)}, "
+                        f"threshold -{threshold_hours:.0f}h)"
+                    )
+            rejection_reason = "Failed threshold — " + " | ".join(failed_checks)
             
         details = {
             "is_batch": is_batch,

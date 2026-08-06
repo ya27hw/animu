@@ -36,6 +36,7 @@ class ProfileConfig:
     offpeak_interval: int = 25
     exclude_release_groups: List[str] = field(default_factory=list)
     set_completed_to_rewatching: bool = True
+    air_date_threshold_hours: float = 48.0
     
     # Discord options
     discord_enable_download: bool = True
@@ -82,6 +83,7 @@ MAP_JSON_TO_ATTR = {
     "offpeakInterval": "offpeak_interval",
     "excludeReleaseGroups": "exclude_release_groups",
     "setCompletedToRewatching": "set_completed_to_rewatching",
+    "airDateThresholdHours": "air_date_threshold_hours",
     "discordEnableDownload": "discord_enable_download",
     "discordEnableFail": "discord_enable_fail",
     "discordDownloadColor": "discord_download_color",
