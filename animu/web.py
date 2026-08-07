@@ -309,6 +309,27 @@ def _bool_param(value, default=False):
     return bool(value)
 
 
+def _resolve_anilist_user_id(token: Optional[str]) -> Optional[int]:
+    """Resolve a path token (numeric id or username) to an AniList user id.
+
+    Numeric tokens pass through directly; username tokens are looked up via
+    ``anilist.get_user`` so ``/following`` and ``/followers`` (which require
+    a numeric ``userId``) work with either contract.  Returns ``None`` when
+    the user cannot be resolved.
+    """
+    if not token:
+        return None
+    if token.isdigit():
+        return int(token)
+    try:
+        user = anilist.get_user(user_name=token)
+    except Exception:
+        return None
+    if user and user.get("id"):
+        return int(user["id"])
+    return None
+
+
 def _safe_error_response(result, fallback="Operation failed"):
     """Translate an AniList GraphQL response dict into a safe (status, body) pair.
 
@@ -625,10 +646,19 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
 
-        elif re.match(r'^/api/anilist/user$', path) or re.match(r'^/api/anilist/user/\d+$', path):
+        elif re.match(r'^/api/anilist/user$', path) or re.match(r'^/api/anilist/user/[^/]+$', path):
             params = urllib.parse.parse_qs(url.query)
             user_id = _int_param(params.get("id", [None])[0])
             user_name = params.get("name", [None])[0]
+            # Path-token contract (mirrors api.js getUser/getUserFollowing):
+            # /api/anilist/user/<id>  or  /api/anilist/user/<name>
+            m = re.match(r'^/api/anilist/user/([^/]+)$', path)
+            if m:
+                token = m.group(1)
+                if token.isdigit():
+                    user_id = int(token)
+                else:
+                    user_name = token
             if not user_id and not user_name:
                 # /api/anilist/viewer — convenience alias for the authenticated user
                 try:
@@ -659,9 +689,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
 
-        elif re.match(r'^/api/anilist/user/(\d+)/following$', path):
+        elif re.match(r'^/api/anilist/user/[^/]+/following$', path):
             try:
-                user_id = int(re.match(r'^/api/anilist/user/(\d+)/following$', path).group(1))
+                token = re.match(r'^/api/anilist/user/([^/]+)/following$', path).group(1)
+                user_id = _resolve_anilist_user_id(token)
+                if user_id is None:
+                    self.send_json(404, {"error": "User not found"})
+                    return
                 params = urllib.parse.parse_qs(url.query)
                 page = _int_param(params.get("page", [1])[0], default=1)
                 per_page = _int_param(params.get("perPage", [50])[0], default=50)
@@ -671,9 +705,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
 
-        elif re.match(r'^/api/anilist/user/(\d+)/followers$', path):
+        elif re.match(r'^/api/anilist/user/[^/]+/followers$', path):
             try:
-                user_id = int(re.match(r'^/api/anilist/user/(\d+)/followers$', path).group(1))
+                token = re.match(r'^/api/anilist/user/([^/]+)/followers$', path).group(1)
+                user_id = _resolve_anilist_user_id(token)
+                if user_id is None:
+                    self.send_json(404, {"error": "User not found"})
+                    return
                 params = urllib.parse.parse_qs(url.query)
                 page = _int_param(params.get("page", [1])[0], default=1)
                 per_page = _int_param(params.get("perPage", [50])[0], default=50)
