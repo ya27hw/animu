@@ -143,7 +143,24 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
     app.js (2,129 lines) — Vanilla JS: anime grid, Discover feed+search+detail, history with
     delete/re-run/ignore-redownload actions, ignored management, settings, dark theme toggle
     (class-based: @custom-variant dark in the tailwindcss style block), inline SVG favicon
+    js/features-unused/ — ARCHIVED T3 module layer (never loaded — see below)
 ```
+
+---
+
+## Frontend Architecture Decision — T3 Module Layer (2026-08-08)
+
+**Decision: Option B — clean up the dead layer** (kanban task `t_42504c23`). **`app.js` is the single source of truth** for the WebUI; `index.html` loads ONLY `/app.js`. `window.Animu` is deliberately **absent** on the live page.
+
+**Context:** a modular T3 frontend layer (`webui/js/`: core.js, api.js, list.js, downloads.js, settings-behavior.js, features/{home,engagement,lists-social,media-detail,search}.js) was merged in `fd387a7` but **never wired into index.html** — no `<script>` tags were added, so it was 100% dead code. The `window.Animu && ...` delegation guards in app.js always fell through to the legacy inline implementations.
+
+**Why not Option A (wire the modules):** wiring them in would have **regressed** tested, backend-routed features:
+- `lists-social.js` mutations are **sandbox-only** (local state via `Animu.list.updateListEntry`; no backend call) — would have undone "route quick +1 progress through backend" and the Lists end-to-end work (server-side AniList token; the browser never holds `bearerTokenAnilist`).
+- It would **double-bind** `btn-editor-save` / `btn-post-activity` / `btn-editor-delete` / list controls that app.js also binds → duplicate POSTs + duplicate fetches.
+- `settings-behavior.js` targets DOM ids that don't exist in index.html (`btn-theme-light/dark/system`, `title-language-select`; real ids: `theme-toggle`, `pref-title-lang`) — written against a different DOM contract.
+- `home.js` / `engagement.js` / `media-detail.js` / `search.js` are no-op stubs.
+
+**Implementation (commits `60ae2e0`, `04e28a9`):** removed all `window.Animu` delegation hooks from app.js; archived the 10 module files to `webui/js/features-unused/` (preserved for revival — see `webui/js/features-unused/README.md` for the revival checklist). **Rule: do not re-add `<script src="/js/...">` tags or `window.Animu` guards to app.js without revisiting this decision.**
 
 ---
 
