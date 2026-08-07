@@ -1841,6 +1841,7 @@
       const input = DOM.configForm.querySelector(`[name="${key}"]`);
       if (input) {
         if (input.type === 'checkbox') input.checked = Boolean(cfg[key]);
+        else if (Array.isArray(cfg[key])) input.value = cfg[key].join(', ');
         else input.value = cfg[key] ?? '';
       }
     });
@@ -1853,7 +1854,12 @@
     const payload = {};
     formData.forEach((val, key) => {
       const input = DOM.configForm.querySelector(`[name="${key}"]`);
-      if (input && input.type === 'checkbox') payload[key] = input.checked;
+      // excludeReleaseGroups is stored server-side as a List[str] — send the
+      // CSV input as a trimmed array instead of a raw string.
+      if (key === 'excludeReleaseGroups') {
+        payload[key] = String(val).split(',').map(s => s.trim()).filter(Boolean);
+      }
+      else if (input && input.type === 'checkbox') payload[key] = input.checked;
       else if (input && input.type === 'number') payload[key] = Number(val);
       else payload[key] = val;
     });
