@@ -1056,18 +1056,11 @@
     if (window.Animu && window.Animu.lists && typeof window.Animu.lists.quickIncrementProgress === 'function') {
       return window.Animu.lists.quickIncrementProgress(mediaId, currentEp);
     }
-    // Fallback to legacy inline implementation
+    // Fallback to legacy inline implementation — routed through the backend so
+    // the server-side AniList token authorizes the mutation.
     try {
       const newEp = currentEp + 1;
-      const mutation = `
-        mutation ($mediaId: Int, $progress: Int) {
-          SaveMediaListEntry(mediaId: $mediaId, progress: $progress) {
-            id
-            progress
-          }
-        }
-      `;
-      await queryAniList(mutation, { mediaId, progress: newEp });
+      await saveListEntryViaBackend({ mediaId, progress: newEp });
       showToast(`Updated progress to Episode ${newEp}!`);
       loadUserListsData();
     } catch (e) {
