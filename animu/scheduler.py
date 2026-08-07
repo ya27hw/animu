@@ -1,4 +1,5 @@
 import time
+import copy
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -6,7 +7,7 @@ from .config import get_config
 from .database import db
 from .models import OfflineAnime
 from .anilist import anilist
-from .nyaa import nyaa
+from .nyaa import nyaa, safe_int
 from .qbittorrent import qbit
 from .discord import alert_user, alert_unresolved_anime, clear_alert_history, send_anime_downloaded_hook
 from .utils import fix_anime_season, count_past_relations
@@ -26,7 +27,7 @@ class Scheduler:
             episode = torrent.get("episode")
             link = torrent["link"]
             title = torrent["title"]
-            
+
             # Add and check torrent
             success = qbit.add_check_torrent(
                 link=link,
@@ -49,7 +50,7 @@ class Scheduler:
                 # If it's a batch, we assume all episodes are downloaded
                 total_episodes = anime["media"].get("episodes") or 1
                 newly_downloaded.extend(range(1, total_episodes + 1))
-            
+
             print(f"Downloading: {title} (Episode: {episode})")
 
             # Record history entry
@@ -102,7 +103,7 @@ class Scheduler:
         config = get_config()
         total_episodes = anime["media"].get("episodes") or 0
         downloaded_count = len(set(downloaded))
-        
+
         return (
             bool(config.set_completed_to_rewatching) and
             anime["media"].get("status") == "FINISHED" and
@@ -131,15 +132,16 @@ class Scheduler:
 
     def handle_anime(self, anime: Dict[str, Any], record: OfflineAnime) -> None:
         """Handle Nyaa search combinations and download matching torrents for an anime."""
+        anime = copy.deepcopy(anime)
         config = get_config()
         starting_episode = record.starting_episode
         alternative_title = record.alternative_title or anime["media"]["title"]["romaji"]
-        
-        # Override title dynamically
+
+        # Override title dynamically on copy
         anime["media"]["title"]["romaji"] = alternative_title
 
         start_episode = anime["progress"] + starting_episode
-        
+
         # NextAiringEpisode can be null if the anime is finished
         next_ep = anime["media"].get("nextAiringEpisode")
         if next_ep:
@@ -173,7 +175,7 @@ class Scheduler:
 
         primary_seed_count = 0
         if primary_torrent:
-            primary_seed_count = sum(int(t.get("nyaa:seeders", 0)) for t in primary_torrent)
+            primary_seed_count = sum(safe_int(t.get("nyaa:seeders", 0)) for t in primary_torrent)
 
         # Alternative title search logic if not overridden and has no downloaded episodes
         if not record.alternative_title and not record.downloaded_episodes:
@@ -229,7 +231,7 @@ class Scheduler:
                         downloaded_episodes=record.downloaded_episodes,
                         alt_anime_title=combo["title"]
                     )
-                    seed_count = sum(int(t.get("nyaa:seeders", 0)) for t in result) if result else 0
+                    seed_count = sum(safe_int(t.get("nyaa:seeders", 0)) for t in result) if result else 0
                     if seed_count > best_seed_count:
                         best_seed_count = seed_count
                         best_combo = combo
@@ -243,7 +245,7 @@ class Scheduler:
                 record.alternative_title = best_combo["title"]
                 record.starting_episode = best_combo["episode_offset"]
                 db.upsert(anime["mediaId"], record)
-                
+
                 # Recalculate range based on the new starting episode
                 starting_episode = best_combo["episode_offset"]
                 start_episode = anime["progress"] + starting_episode
@@ -278,13 +280,13 @@ class Scheduler:
                 reason=f"No matching torrents found on Nyaa.si (Backoff timeout {record.timeouts}/10)",
                 season_info=f"Media ID {anime['mediaId']}"
             )
-            
+
             interval = config.interval or 30
             total_minutes = record.timeouts * interval
             now = datetime.now()
             from datetime import timedelta
             next_run = now + timedelta(minutes=total_minutes)
-            
+
             print(f"❌ Failed to find {anime['media']['title']['romaji']}. Next run in {total_minutes} minutes. (At {next_run.strftime('%I:%M %p')})")
 
     def check(self) -> None:
@@ -298,8 +300,11 @@ class Scheduler:
             db.sync_local_changes()
         except Exception as e:
             print(f"Local database sync failed: {e}")
-            
+
         anime_list = anilist.get_anime_user_list()
+        if anime_list is None:
+            print("[WARNING] AniList request failed; skipping cycle to preserve local state.")
+            return
         if not anime_list:
             print("No anime in watching list.")
             return
@@ -354,7 +359,7 @@ class Scheduler:
 
                 start_episode = anime["progress"] + record.starting_episode
                 end_episode = airing_episodes + record.starting_episode
-                
+
                 # Check for missing episodes
                 has_missing = False
                 for ep in range(start_episode + 1, end_episode + 1):

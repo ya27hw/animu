@@ -3,9 +3,19 @@ import httpx
 import time
 import anitopy
 import math
+import threading
 from typing import Optional, List, Dict, Any
 from .config import get_config
 from .utils import verify_query
+
+trace_lock = threading.Lock()
+
+def safe_int(val: Any, default: int = 0) -> int:
+    """Safely convert value to int with fallback on error."""
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
 
 class NyaaClient:
     def __init__(self):
@@ -81,8 +91,8 @@ class NyaaClient:
                         "guid": entry.id
                     })
 
-                # Sort by seeders descending
-                items.sort(key=lambda x: int(x["nyaa:seeders"]), reverse=True)
+                # Sort by seeders descending safely
+                items.sort(key=lambda x: safe_int(x.get("nyaa:seeders", 0)), reverse=True)
 
                 return {
                     "status": 200,
@@ -346,8 +356,8 @@ class NyaaClient:
                 cand["parsedTitle"] = parsed.get("anime_title")
                 candidates.append(cand)
 
-        # Sort by score desc, then seeders desc
-        candidates.sort(key=lambda x: (-x["score"], -int(x.get("nyaa:seeders", 0))))
+        # Sort by score desc, then seeders desc safely
+        candidates.sort(key=lambda x: (-x["score"], -safe_int(x.get("nyaa:seeders", 0))))
         return candidates
 
     def search_title_candidates(
@@ -398,23 +408,23 @@ def record_trace(media_id: int, anime_title: str, query: str, status: str, candi
     candidates_copy.sort(key=lambda x: x.get("rating", 0), reverse=True)
     top_candidates = candidates_copy[:3]
     now = time.time()
-    active_traces[media_id] = {
-        "media_id": media_id,
-        "anime_title": anime_title,
-        "english_title": english_title,
-        "season_info": season_info or {},
-        "search_query": query,
-        "status": status,
-        "candidates": top_candidates,
-        "timestamp": now,
-        "last_attempt": now,
-        "unresolved": True
-    }
+    with trace_lock:
+        active_traces[media_id] = {
+            "media_id": media_id,
+            "anime_title": anime_title,
+            "english_title": english_title,
+            "season_info": season_info or {},
+            "search_query": query,
+            "status": status,
+            "candidates": top_candidates,
+            "timestamp": now,
+            "last_attempt": now,
+            "unresolved": True
+        }
 
 
 def record_failed_trace(media_id: int, anime: dict = None, record = None, status: str = "NO_RESULTS"):
     """Persist a failed trace for an unresolved anime across scheduler runs."""
-    existing = active_traces.get(media_id)
     now = time.time()
 
     anime_obj = anime or {}
@@ -428,36 +438,39 @@ def record_failed_trace(media_id: int, anime: dict = None, record = None, status
         "status": media_data.get("status")
     }
 
-    if existing:
-        trace = dict(existing)
-        trace["unresolved"] = True
-        trace["last_attempt"] = now
-        trace["season_info"] = season_info
-        if record:
-            trace["timeouts"] = record.timeouts
-            trace["max_timeouts"] = getattr(record, "max_timeouts", 10)
-        failed_traces[media_id] = trace
-    else:
-        title = romaji_title or f"Anime-{media_id}"
-        failed_traces[media_id] = {
-            "media_id": media_id,
-            "anime_title": title,
-            "english_title": english_title,
-            "season_info": season_info,
-            "search_query": title,
-            "status": status,
-            "candidates": [],
-            "timestamp": now,
-            "last_attempt": now,
-            "timeouts": record.timeouts if record else 0,
-            "max_timeouts": getattr(record, "max_timeouts", 10) if record else 10,
-            "unresolved": True
-        }
+    with trace_lock:
+        existing = active_traces.get(media_id)
+        if existing:
+            trace = dict(existing)
+            trace["unresolved"] = True
+            trace["last_attempt"] = now
+            trace["season_info"] = season_info
+            if record:
+                trace["timeouts"] = record.timeouts
+                trace["max_timeouts"] = getattr(record, "max_timeouts", 10)
+            failed_traces[media_id] = trace
+        else:
+            title = romaji_title or f"Anime-{media_id}"
+            failed_traces[media_id] = {
+                "media_id": media_id,
+                "anime_title": title,
+                "english_title": english_title,
+                "season_info": season_info,
+                "search_query": title,
+                "status": status,
+                "candidates": [],
+                "timestamp": now,
+                "last_attempt": now,
+                "timeouts": record.timeouts if record else 0,
+                "max_timeouts": getattr(record, "max_timeouts", 10) if record else 10,
+                "unresolved": True
+            }
 
 
 def remove_failed_trace(media_id: int):
     """Evict resolved trace when missing episodes are downloaded or anime is up to date."""
-    failed_traces.pop(media_id, None)
+    with trace_lock:
+        failed_traces.pop(media_id, None)
 
 
 nyaa = NyaaClient()

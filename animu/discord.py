@@ -60,18 +60,18 @@ def alert_user(anime: str, image: str) -> bool:
     config = get_config()
     if not config.discord_enable_fail:
         return False
-    
+
     color_str = config.discord_fail_color or "#ff0000"
     try:
         color = int(color_str.replace("#", "0x"), 16)
     except ValueError:
         color = 0xff0000
-    
+
     title = config.discord_fail_title or "Anime Not Added"
-    
+
     desc_template = config.discord_fail_description or "Animu could not add {anime} to qBittorrent."
     desc = desc_template.format(anime=anime) if "{anime}" in desc_template else desc_template
-    
+
     return send_embed(title=title, description=sanitize_alert_text(desc), color=color, image=image)
 
 
@@ -129,7 +129,7 @@ def send_anime_downloaded_hook(title: str, color: int, image: str, *fields: Dict
     config = get_config()
     if not config.discord_enable_download:
         return False
-    
+
     # Map color from config if available, otherwise use parsed cover image color
     final_color = color
     if config.discord_download_color:

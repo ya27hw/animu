@@ -42,7 +42,7 @@ class HistoryManager:
             except Exception as e:
                 print(f"Error reading history.json: {e}")
                 self.items = []
-        
+
         # If history.json does not exist or is empty, try seeding from animu.log
         self._seed_from_logs()
 
@@ -62,7 +62,7 @@ class HistoryManager:
                         data = json.loads(line_str)
                         msg = data.get("message", "")
                         ts = data.get("timestamp", datetime.now(timezone.utc).isoformat())
-                        
+
                         clean_msg = re.sub(r'\x1b\[[0-9;]*m', '', msg).strip()
                         match = re.search(r'Downloading\s+(.+?)(?:\s+(?:Episode:\s*(\d+|\w+)|(\d+)))?\s+at\s+(https?://\S+)', clean_msg)
                         if match:

@@ -24,9 +24,15 @@ class QbitClient:
                 data={"username": config.username, "password": config.password},
                 headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
-            if resp.status_code == 200 and resp.text == "Ok.":
+            if resp.status_code == 200 and resp.text.strip().startswith("Ok"):
                 # httpx manages cookies automatically, but we also save the SID explicitly
                 sid = self.client.cookies.get("SID")
+                if not sid:
+                    set_cookie = resp.headers.get("set-cookie", "")
+                    match = re.search(r'SID=([^;]+)', set_cookie)
+                    if match:
+                        sid = match.group(1)
+                        self.client.cookies.set("SID", sid)
                 if sid:
                     self.sid = sid
                     self.expires = time.time() + 3000
@@ -55,8 +61,16 @@ class QbitClient:
                     data={"username": user, "password": passwd},
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
-                if resp.status_code == 200 and resp.text == "Ok.":
-                    return True, "Connection successful."
+                if resp.status_code == 200 and resp.text.strip().startswith("Ok"):
+                    sid = client.cookies.get("SID")
+                    if not sid:
+                        set_cookie = resp.headers.get("set-cookie", "")
+                        match = re.search(r'SID=([^;]+)', set_cookie)
+                        if match:
+                            sid = match.group(1)
+                    if sid:
+                        return True, "Connection successful."
+                    return True, "Connection successful (no SID cookie parsed)."
                 else:
                     return False, f"HTTP {resp.status_code}: {resp.text}"
         except Exception as e:
@@ -91,7 +105,7 @@ class QbitClient:
             else:
                 print(f"Torrent {display_title} is not checked. Proceeding anyway (200 Ok received).")
                 return True  # Trust the add response — qBittorrent needs metadata time
-                
+
         return False
 
     def safe_torrent_filename(self, name: str) -> str:
@@ -125,7 +139,7 @@ class QbitClient:
                 "sequentialDownload": "true",
                 "category": "animu"
             }
-            
+
             headers = {"Cookie": f"SID={self.sid}"}
             resp = self.client.post(auth_url, data=data, files=files, headers=headers)
             return resp.status_code == 200 and resp.text == "Ok."
@@ -151,7 +165,7 @@ class QbitClient:
 
         rename = f"{title} - {episode}" if episode is not None else title
         should_upload_file = config.use_proxy or use_proxy_download
-        
+
         base_root_dir = config.alt_root_dir if use_proxy_download else config.root_dir
         base_root_dir = base_root_dir or "/mock"
         save_path = posixpath.join(base_root_dir, title)
@@ -262,8 +276,8 @@ class QbitClient:
                 "Cookie": f"SID={self.sid}"
             }
             resp = self.client.get(
-                info_url, 
-                params={"filter": "downloading", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 10}, 
+                info_url,
+                params={"filter": "downloading", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 10},
                 headers=headers
             )
             if resp.status_code == 200:
