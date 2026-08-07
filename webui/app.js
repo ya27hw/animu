@@ -1107,8 +1107,46 @@
   // ==========================================
   let searchDebounceTimer = null;
   const searchInput = document.getElementById('global-search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  const filterOnListEl = document.getElementById('filter-on-list');
+
+  // Media ids on the user's AniList collection, lazily fetched via the backend
+  // (server-side token) and cached for the session. Powers the 'On List'
+  // search filter; only meaningful for ANIME/MANGA entity searches.
+  let myListMediaIds = null;
+  async function getMyListMediaIds() {
+    if (myListMediaIds) return myListMediaIds;
+    const ids = new Set();
+    try {
+      const params = new URLSearchParams({ userName: state.userName || '', perChunk: 500 });
+      for (const type of ['ANIME', 'MANGA']) {
+        params.set('type', type);
+        const res = await fetch(`/api/anilist/user-list?${params.toString()}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        (data.lists || []).forEach(l => (l.entries || []).forEach(e => ids.add(e.mediaId)));
+      }
+    } catch (e) {
+      // Leave the set empty — the filter then matches nothing, which is the
+      // honest outcome when the collection can't be resolved.
+    }
+    myListMediaIds = ids;
+    return ids;
+  }
+
+  // 'On List' applies to media searches only; disable it on entity tabs where
+  // a user collection membership is meaningless.
+  function updateFilterOnListAvailability() {
+    if (!filterOnListEl) return;
+    const mediaEntity = state.searchEntity === 'ANIME' || state.searchEntity === 'MANGA';
+    filterOnListEl.disabled = !mediaEntity;
+    filterOnListEl.classList.toggle('opacity-40', !mediaEntity);
+  }
   if (searchInput) {
+    // Show the clear (X) button only while the query is non-empty.
+    if (searchClearBtn) searchClearBtn.classList.toggle('hidden', !searchInput.value.trim());
     searchInput.addEventListener('input', () => {
+      if (searchClearBtn) searchClearBtn.classList.toggle('hidden', !searchInput.value.trim());
       clearTimeout(searchDebounceTimer);
       searchDebounceTimer = setTimeout(() => {
         state.searchQuery = searchInput.value.trim();
@@ -1116,11 +1154,31 @@
         loadSearchResults();
       }, 350);
     });
+    // Clear button resets the query and re-runs the search.
+    if (searchClearBtn) {
+      searchClearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        searchClearBtn.classList.add('hidden');
+        state.searchQuery = '';
+        state.searchPage = 1;
+        loadSearchResults();
+        searchInput.focus();
+      });
+    }
   }
 
   document.getElementById('btn-toggle-filters')?.addEventListener('click', () => {
     const drawer = document.getElementById('search-filter-drawer');
     if (drawer) drawer.classList.toggle('hidden');
+  });
+
+  // Any filter change re-runs the search immediately (page 1) so the filter
+  // drawer is never inert — no need to retype the query.
+  ['filter-format', 'filter-status', 'filter-season', 'filter-year', 'filter-genre', 'filter-on-list'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      state.searchPage = 1;
+      loadSearchResults();
+    });
   });
 
   document.querySelectorAll('.search-entity-tab').forEach(btn => {
@@ -1133,6 +1191,7 @@
       btn.classList.remove('bg-slate-100', 'dark:bg-slate-800', 'text-slate-400');
       state.searchEntity = btn.getAttribute('data-entity-tab');
       state.searchPage = 1;
+      updateFilterOnListAvailability();
       loadSearchResults();
     });
   });
@@ -1147,6 +1206,7 @@
   });
 
   async function loadSearch() {
+    updateFilterOnListAvailability();
     loadSearchResults();
   }
 
@@ -1196,8 +1256,17 @@
 
         const data = await queryAniList(query, vars);
         if (isStaleTab(token)) return;
-        const mediaList = data.Page.media || [];
+        let mediaList = data.Page.media || [];
         state.searchHasNext = data.Page.pageInfo.hasNextPage;
+
+        // 'On List' client-side filter: keep only media present in (or absent
+        // from) the user's AniList collection.
+        const onListVal = document.getElementById('filter-on-list')?.value || '';
+        if (onListVal) {
+          const myIds = await getMyListMediaIds();
+          if (isStaleTab(token)) return;
+          mediaList = mediaList.filter(m => onListVal === 'true' ? myIds.has(m.id) : !myIds.has(m.id));
+        }
 
         if (!append) state.searchResults = [];
 
