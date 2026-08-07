@@ -32,6 +32,14 @@
 
   const expandedHistoryIds = new Set();
   let downloadsCollapsed = false;
+  // Incremented on every tab switch; async loaders capture it and bail before
+  // writing DOM if it has moved — prevents stale responses rendering into the
+  // now-hidden panel after rapid tab switching.
+  let tabToken = 0;
+
+  function isStaleTab(token) {
+    return token !== tabToken;
+  }
 
   // Toast Notifier
   function showToast(message, type = 'success') {
@@ -417,6 +425,8 @@
   // Tab Switcher Logic
   function switchTab(tabName) {
     state.activeTab = tabName;
+    // Invalidate any in-flight async loaders from the previous tab.
+    tabToken++;
 
     DOM.navTabs.forEach(btn => {
       const match = btn.getAttribute('data-tab') === tabName;
@@ -485,6 +495,7 @@
   async function loadReleasingTodayFeed() {
     const feed = document.getElementById('releasing-today-feed');
     if (!feed) return;
+    const token = tabToken;
     try {
       const query = `
         query {
@@ -502,6 +513,7 @@
         }
       `;
       const data = await queryAniList(query);
+      if (isStaleTab(token)) return;
       const schedules = data.Page.airingSchedules || [];
       if (schedules.length === 0) {
         feed.innerHTML = '<div class="text-slate-400 py-2">No airing schedule available for today.</div>';
@@ -531,6 +543,7 @@
         `;
       }).join('');
     } catch (e) {
+      if (isStaleTab(token)) return;
       feed.innerHTML = '<div class="text-slate-400 py-2">Failed to load schedule.</div>';
     }
   }
@@ -543,6 +556,7 @@
       { id: 'rail-all-time', sort: 'POPULARITY_DESC' },
       { id: 'rail-top-100', sort: 'SCORE_DESC' }
     ];
+    const token = tabToken;
 
     for (const r of rails) {
       const container = document.getElementById(r.id);
@@ -565,9 +579,11 @@
           }
         `;
         const data = await queryAniList(query, { sort: [r.sort], status: r.status, season: r.season, seasonYear: r.year });
+        if (isStaleTab(token)) return;
         const items = data.Page.media || [];
         container.innerHTML = items.map(m => renderRailCard(m, r.sparkline)).join('');
       } catch (e) {
+        if (isStaleTab(token)) return;
         container.innerHTML = '<div class="text-slate-400 text-xs py-4">Failed to fetch rail items.</div>';
       }
     }
@@ -656,6 +672,7 @@
   async function loadSeasonalChartGrid() {
     const grid = document.getElementById('seasonal-chart-grid');
     if (!grid) return;
+    const token = tabToken;
 
     try {
       const [season, year] = state.discoverSeason.split('_');
@@ -685,6 +702,7 @@
         }
       `;
       const data = await queryAniList(query, { season, seasonYear: parseInt(year), status });
+      if (isStaleTab(token)) return;
       let items = data.Page.media || [];
 
       // Split NOT_YET_RELEASED shows: Upcoming has a scheduled air time,
@@ -743,6 +761,7 @@
       }).join('');
 
     } catch (e) {
+      if (isStaleTab(token)) return;
       grid.innerHTML = '<div class="col-span-full py-12 text-center text-slate-400 text-sm">Failed to load seasonal chart grid.</div>';
     }
   }
@@ -752,8 +771,10 @@
   // TAB 2: WATCHING (LOCAL WATCHLIST & SCHEDULER)
   // ==========================================
   async function loadWatching() {
+    const token = tabToken;
     try {
       const res = await API.getAnime();
+      if (isStaleTab(token)) return;
       state.userName = res.userName || '';
       state.animeList = res.anime || [];
 
@@ -761,6 +782,7 @@
       renderAnimeGrid(state.animeList);
       loadActiveDownloads();
     } catch (e) {
+      if (isStaleTab(token)) return;
       // Clear stale state so the previous user's list is never shown after an
       // API failure — render an explicit error/empty state instead.
       state.userName = '';
@@ -859,8 +881,10 @@
   });
 
   async function loadActiveDownloads() {
+    const token = tabToken;
     try {
       const downloads = await API.getDownloads();
+      if (isStaleTab(token)) return;
       if (!DOM.downloadsPanel) return;
       if (downloads && downloads.length > 0) {
         DOM.downloadsPanel.classList.remove('hidden');
@@ -897,6 +921,7 @@
   async function loadUserListsData() {
     const container = document.getElementById('lists-entries-container');
     if (!container) return;
+    const token = tabToken;
 
     try {
       // Fetch via the backend so the server-side AniList token is used —
@@ -912,6 +937,7 @@
         throw new Error(errBody.error || `Failed to load user list (HTTP ${res.status})`);
       }
       const data = await res.json();
+      if (isStaleTab(token)) return;
       const collections = data.lists || [];
 
       let allEntries = [];
@@ -1141,6 +1167,7 @@
   async function loadSearchResults(append = false) {
     const grid = document.getElementById('search-results-grid');
     if (!grid) return;
+    const token = tabToken;
 
     try {
       const entity = state.searchEntity;
@@ -1175,6 +1202,7 @@
         };
 
         const data = await queryAniList(query, vars);
+        if (isStaleTab(token)) return;
         const mediaList = data.Page.media || [];
         state.searchHasNext = data.Page.pageInfo.hasNextPage;
 
@@ -1243,6 +1271,7 @@
           page: state.searchPage,
           perPage: 20
         });
+        if (isStaleTab(token)) return;
         const results = data.Page[entityField] || [];
         state.searchHasNext = data.Page.pageInfo.hasNextPage;
 
@@ -1284,6 +1313,7 @@
         updateSearchPagination();
       }
     } catch (e) {
+      if (isStaleTab(token)) return;
       grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">Failed to fetch search results.</div>';
       state.searchHasNext = false;
       updateSearchPagination();
@@ -1321,6 +1351,7 @@
   async function loadActivityFeed() {
     const list = document.getElementById('activity-feed-list');
     if (!list) return;
+    const token = tabToken;
 
     try {
       const query = `
@@ -1362,6 +1393,7 @@
         }
       `;
       const data = await queryAniList(query);
+      if (isStaleTab(token)) return;
       const activities = data.Page.activities || [];
 
       if (activities.length === 0) {
@@ -1395,6 +1427,7 @@
       }).join('');
 
     } catch (e) {
+      if (isStaleTab(token)) return;
       list.innerHTML = '<div class="py-8 text-center text-slate-400 text-xs">Failed to load social activity feed.</div>';
     }
   }
@@ -1456,6 +1489,7 @@
   async function loadStats() {
     const genreContainer = document.getElementById('chart-genre-container');
     const formatContainer = document.getElementById('chart-format-container');
+    const token = tabToken;
 
     const showError = (msg) => {
       console.error('Stats load error:', msg);
@@ -1495,6 +1529,7 @@
         throw new Error(errBody.error || `Failed to load collection (HTTP ${res.status})`);
       }
       const data = await res.json();
+      if (isStaleTab(token)) return;
       const collections = data.lists || [];
 
       // Flatten all list-group entries into one array
@@ -1622,6 +1657,7 @@
       }
 
     } catch (e) {
+      if (isStaleTab(token)) return;
       showError(e.message || 'Unknown error');
     }
   }
@@ -1631,11 +1667,14 @@
   // TAB 7 & 8: HISTORY & LOGS
   // ==========================================
   async function loadHistory() {
+    const token = tabToken;
     try {
       const res = await API.getHistory();
+      if (isStaleTab(token)) return;
       state.history = res.history || [];
       renderHistoryList(state.history);
     } catch (e) {
+      if (isStaleTab(token)) return;
       showToast(e.message, 'error');
     }
   }
@@ -1698,10 +1737,13 @@
 
   async function loadLogs() {
     if (!DOM.logsBody || !DOM.logSelect || !DOM.logLines) return;
+    const token = tabToken;
     try {
       const res = await API.getLogs(DOM.logSelect.value, DOM.logLines.value);
+      if (isStaleTab(token)) return;
       DOM.logsBody.textContent = res.content || 'Console log is empty.';
     } catch (e) {
+      if (isStaleTab(token)) return;
       DOM.logsBody.textContent = `Failed to load console log: ${e.message}`;
     }
   }
@@ -1757,12 +1799,15 @@
 
   async function loadSearchDebug() {
     if (!DOM.searchDebugContainer) return;
+    const token = tabToken;
     const btn = DOM.btnRefreshSearchDebug;
     setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i>');
     try {
       const traces = await API.getSearchDebug();
+      if (isStaleTab(token)) return;
       renderSearchDebug(traces);
     } catch (e) {
+      if (isStaleTab(token)) return;
       if (DOM.searchDebugContainer) {
         DOM.searchDebugContainer.innerHTML = `<div class="p-5 text-center text-xs text-rose-500 bg-slate-50 dark:bg-slate-900/30 border border-rose-500/20 rounded-2xl">Failed to load diagnostics: ${e.message}</div>`;
       }
