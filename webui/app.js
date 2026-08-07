@@ -451,7 +451,10 @@
     else if (tabName === 'social') loadSocial();
     else if (tabName === 'stats') loadStats();
     else if (tabName === 'history') loadHistory();
-    else if (tabName === 'logs') loadLogs();
+    else if (tabName === 'logs') {
+      loadLogs();
+      loadSearchDebug();
+    }
     else if (tabName === 'settings') loadSettings();
 
     // Notify feature modules of tab switch
@@ -823,6 +826,17 @@
       `;
     }).join('');
   }
+
+  // Downloads panel collapse toggle — header click hides/shows the list and
+  // rotates the chevron.
+  DOM.downloadsHeader?.addEventListener('click', () => {
+    downloadsCollapsed = !downloadsCollapsed;
+    if (DOM.downloadsList) DOM.downloadsList.classList.toggle('hidden', downloadsCollapsed);
+    if (DOM.downloadsToggleIcon) {
+      DOM.downloadsToggleIcon.classList.toggle('fa-chevron-up', !downloadsCollapsed);
+      DOM.downloadsToggleIcon.classList.toggle('fa-chevron-down', downloadsCollapsed);
+    }
+  });
 
   async function loadActiveDownloads() {
     try {
@@ -1602,6 +1616,21 @@
     }
   }
 
+  // History search box — filters the loaded history list client-side.
+  DOM.historySearchInput?.addEventListener('input', () => {
+    const q = (DOM.historySearchInput.value || '').toLowerCase().trim();
+    if (!q) {
+      renderHistoryList(state.history);
+      return;
+    }
+    const filtered = (state.history || []).filter(item =>
+      (item.title || '').toLowerCase().includes(q)
+    );
+    renderHistoryList(filtered);
+  });
+
+  DOM.historyRefreshBtn?.addEventListener('click', () => loadHistory());
+
   function renderHistoryList(items) {
     if (!DOM.historyList) return;
     if (items.length === 0) {
@@ -1644,15 +1673,81 @@
   });
 
   async function loadLogs() {
+    if (!DOM.logsBody || !DOM.logSelect || !DOM.logLines) return;
     try {
       const res = await API.getLogs(DOM.logSelect.value, DOM.logLines.value);
       DOM.logsBody.textContent = res.content || 'Console log is empty.';
     } catch (e) {
-      showToast(e.message, 'error');
+      DOM.logsBody.textContent = `Failed to load console log: ${e.message}`;
     }
   }
 
   DOM.logRefreshBtn?.addEventListener('click', () => loadLogs());
+
+  // Auto-refresh checkbox — polls the log tail while the logs tab is visible.
+  let logAutoRefreshTimer = null;
+  DOM.logAutoRefresh?.addEventListener('change', () => {
+    if (DOM.logAutoRefresh.checked) {
+      if (!logAutoRefreshTimer) {
+        logAutoRefreshTimer = setInterval(() => {
+          if (state.activeTab === 'logs') loadLogs();
+        }, 3000);
+      }
+      loadLogs();
+    } else if (logAutoRefreshTimer) {
+      clearInterval(logAutoRefreshTimer);
+      logAutoRefreshTimer = null;
+    }
+  });
+
+  // ---- Search Diagnostics (failed-run traces) ----
+  function renderSearchDebug(traces) {
+    const container = DOM.searchDebugContainer;
+    if (!container) return;
+    if (!traces || traces.length === 0) {
+      container.innerHTML = '<div class="p-5 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">No failed runs logged in the current check cycle.</div>';
+      return;
+    }
+    container.innerHTML = traces.map(t => `
+      <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-rose-500/20 space-y-2">
+        <div class="flex items-center justify-between gap-3">
+          <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-200 line-clamp-1">${t.anime_title || `Anime-${t.media_id}`}</h4>
+          <span class="px-2 py-0.5 rounded-lg bg-rose-500/10 text-rose-500 text-[10px] font-bold uppercase shrink-0">${t.status || 'NO_RESULTS'}</span>
+        </div>
+        <p class="text-[11px] text-slate-400 font-mono break-all">Query: ${t.search_query || '-'}</p>
+        ${t.candidates && t.candidates.length ? `
+          <div class="space-y-1.5">
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Top candidates</p>
+            ${t.candidates.map(c => `
+              <div class="flex items-center justify-between gap-3 text-[11px]">
+                <span class="text-slate-500 dark:text-slate-400 line-clamp-1 flex-grow">${c.title || 'Untitled torrent'}</span>
+                <span class="font-bold ${(c.rating || 0) >= 60 ? 'text-emerald-400' : 'text-amber-400'} shrink-0">${Math.round(c.rating || 0)}%</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : '<p class="text-[11px] text-slate-500 italic">No candidates matched this cycle.</p>'}
+        ${t.last_attempt ? `<p class="text-[10px] text-slate-400">Last attempt: ${new Date(t.last_attempt * 1000).toLocaleString()}</p>` : ''}
+      </div>
+    `).join('');
+  }
+
+  async function loadSearchDebug() {
+    if (!DOM.searchDebugContainer) return;
+    const btn = DOM.btnRefreshSearchDebug;
+    setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i>');
+    try {
+      const traces = await API.getSearchDebug();
+      renderSearchDebug(traces);
+    } catch (e) {
+      if (DOM.searchDebugContainer) {
+        DOM.searchDebugContainer.innerHTML = `<div class="p-5 text-center text-xs text-rose-500 bg-slate-50 dark:bg-slate-900/30 border border-rose-500/20 rounded-2xl">Failed to load diagnostics: ${e.message}</div>`;
+      }
+    } finally {
+      setBtnLoading(btn, false);
+    }
+  }
+
+  DOM.btnRefreshSearchDebug?.addEventListener('click', loadSearchDebug);
 
 
   // ==========================================
