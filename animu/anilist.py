@@ -848,6 +848,7 @@ class AnilistClient:
               entries {
                 id
                 mediaId
+                status
                 progress
                 progressVolumes
                 repeat
@@ -918,12 +919,12 @@ class AnilistClient:
         if sort:
             variables["sort"] = sort
 
-        all_lists: List[Dict[str, Any]] = []
+        all_lists: Dict[str, Dict[str, Any]] = {}
         has_next_chunk = True
         max_chunks = 10  # Safety guard — prevents infinite loops
-        chunk = 0
+        chunk = 1
 
-        while has_next_chunk and chunk < max_chunks:
+        while has_next_chunk and chunk <= max_chunks:
             variables["chunk"] = chunk
             resp = self._query(self._media_list_collection_query(), variables)
             if not resp or "data" not in resp:
@@ -934,11 +935,17 @@ class AnilistClient:
 
             collection = data["MediaListCollection"]
             lists = collection.get("lists", [])
-            all_lists.extend(lists)
+            for lst in lists:
+                name = lst.get("name")
+                if name not in all_lists:
+                    all_lists[name] = lst
+                else:
+                    all_lists[name]["entries"].extend(lst.get("entries", []))
+                    
             has_next_chunk = collection.get("hasNextChunk", False)
             chunk += 1
 
-        return {"lists": all_lists, "hasNextChunk": False}
+        return {"lists": list(all_lists.values()), "hasNextChunk": False}
 
     # === GenreCollection ===
 

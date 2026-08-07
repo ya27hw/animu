@@ -287,22 +287,25 @@ class TestMediaListCollection(unittest.TestCase):
         ) as q:
             result = self.client.get_media_list_collection(per_chunk=1)
 
-        self.assertEqual(len(result["lists"]), 2)
+        self.assertEqual(len(result["lists"]), 1)
+        self.assertEqual(len(result["lists"][0]["entries"]), 2)
         self.assertEqual(result["lists"][0]["entries"][0]["id"], 1)
-        self.assertEqual(result["lists"][1]["entries"][0]["id"], 2)
+        self.assertEqual(result["lists"][0]["entries"][1]["id"], 2)
         self.assertEqual(q.call_count, 2)
         # Note: variables dict is reused/mutated, so we verify call count + results
         # rather than per-call chunk values
 
     def test_get_media_list_collection_max_chunks_safety(self):
         """Verify max_chunks safety guard prevents infinite loops."""
+        import copy
         chunk = {"lists": [{"name": "Current", "entries": [{"id": 1}]}], "hasNextChunk": True}
         with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
-            self.client, "_query", return_value={"data": {"MediaListCollection": chunk}}
+            self.client, "_query", side_effect=lambda *args, **kwargs: copy.deepcopy({"data": {"MediaListCollection": chunk}})
         ) as q:
             result = self.client.get_media_list_collection(per_chunk=500)
         self.assertEqual(q.call_count, 10)
-        self.assertEqual(len(result["lists"]), 10)
+        self.assertEqual(len(result["lists"]), 1)
+        self.assertEqual(len(result["lists"][0]["entries"]), 10)
 
     def test_get_media_list_collection_no_user_name(self):
         cfg = make_config(ani_user_name=None)
