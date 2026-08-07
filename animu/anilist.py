@@ -885,11 +885,12 @@ class AnilistClient:
         variables = {
             "userName": user_name,
             "type": media_type,
-            "status_in": status_in,
             "perChunk": per_chunk,
             "chunk": 0,
             "forceSingleCompletedList": force_single_completed_list,
         }
+        if status_in is not None:
+            variables["status_in"] = status_in
         if sort:
             variables["sort"] = sort
 
