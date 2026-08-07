@@ -511,9 +511,9 @@
       if (!container) continue;
       try {
         const query = `
-          query ($sort: [MediaSort], $status: MediaStatus) {
+          query ($sort: [MediaSort], $status: MediaStatus, $season: MediaSeason, $seasonYear: Int) {
             Page(page: 1, perPage: 10) {
-              media(type: ANIME, sort: $sort, status: $status) {
+              media(type: ANIME, sort: $sort, status: $status, season: $season, seasonYear: $seasonYear) {
                 id
                 title { romaji english native }
                 coverImage { extraLarge large }
@@ -526,7 +526,7 @@
             }
           }
         `;
-        const data = await queryAniList(query, { sort: [r.sort], status: r.status });
+        const data = await queryAniList(query, { sort: [r.sort], status: r.status, season: r.season, seasonYear: r.year });
         const items = data.Page.media || [];
         container.innerHTML = items.map(m => renderRailCard(m, r.sparkline)).join('');
       } catch (e) {
