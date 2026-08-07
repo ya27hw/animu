@@ -391,10 +391,16 @@
               <button onclick="openMediaDetail(${n.mediaId})" class="px-2 py-1 bg-violet-600/10 text-violet-500 font-bold rounded-lg hover:bg-violet-600 hover:text-white transition-all text-[11px]">View</button>
             </div>
           `).join('');
+        } else {
+          // Replace the static placeholder so the empty state is explicit.
+          DOM.notifList.innerHTML = '<p class="text-slate-400 text-center py-6">No new notifications</p>';
         }
       }
     } catch (e) {
+      // Never leave a stale 'No new notifications' from a previous successful
+      // poll — show the failure so the user knows the feed is unavailable.
       console.warn('Notifications poll error:', e);
+      DOM.notifList.innerHTML = '<p class="text-rose-400 text-center py-6"><i class="fa-solid fa-circle-exclamation mr-1.5"></i>Failed to load notifications.</p>';
     }
   }
 
@@ -755,6 +761,20 @@
       renderAnimeGrid(state.animeList);
       loadActiveDownloads();
     } catch (e) {
+      // Clear stale state so the previous user's list is never shown after an
+      // API failure — render an explicit error/empty state instead.
+      state.userName = '';
+      state.animeList = [];
+      if (DOM.userDisplayName) DOM.userDisplayName.textContent = 'Otaku';
+      if (DOM.animeGrid) {
+        DOM.animeGrid.innerHTML = `
+          <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
+            <i class="fa-solid fa-triangle-exclamation text-4xl mb-4 text-rose-500"></i>
+            <p class="font-semibold text-sm">Failed to load your watching list.</p>
+            <p class="text-xs mt-1">${e.message}</p>
+          </div>
+        `;
+      }
       showToast(e.message, 'error');
     }
   }
