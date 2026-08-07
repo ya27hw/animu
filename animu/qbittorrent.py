@@ -399,7 +399,12 @@ class QbitClient:
         (``stoppedDL``, ``forcedUP``, ``metaDL`` …). The UI needs to show the
         *true* state of each torrent — stopped, errored, complete, seeding,
         downloading, etc. — so we fetch the full queue (``filter=all``,
-        newest first, capped at 10) and classify each entry.
+        newest first, capped at 50 for filtering) and classify each entry.
+
+        Completed/seeding torrents (``complete``/``seeding`` kinds) are
+        excluded from the returned list — the Watching-tab queue only shows
+        work still in progress or needing attention (downloading, stalled,
+        queued, stopped, paused, checking, error).
         """
         if not self._ensure_auth():
             return []
@@ -412,7 +417,7 @@ class QbitClient:
             }
             resp = self.client.get(
                 info_url,
-                params={"filter": "all", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 10},
+                params={"filter": "all", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 50},
                 headers=headers
             )
             if resp.status_code == 200:
@@ -421,9 +426,14 @@ class QbitClient:
                 for t in torrents:
                     item = dict(t)
                     kind, label = self.classify_state(item.get("state", ""))
+                    # Skip finished torrents — they're not "active downloads".
+                    if kind in ("complete", "seeding"):
+                        continue
                     item["statusKind"] = kind
                     item["statusLabel"] = label
                     enriched.append(item)
+                    if len(enriched) >= 10:
+                        break
                 return enriched
         except Exception as e:
             print(f"Failed to fetch qBittorrent active downloads: {e}")

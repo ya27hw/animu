@@ -113,7 +113,6 @@ class AniListMutations:
             mediaId
             status
             score
-            scoreRaw
             progress
             priority
             notes
@@ -156,7 +155,9 @@ class AniListMutations:
             variables["completedAt"] = completed_at
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     def update_media_list_entries(
         self,
@@ -232,7 +233,9 @@ class AniListMutations:
             variables["completedAt"] = completed_at
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     def delete_media_list_entry(self, entry_id: int) -> Dict[str, Any]:
         """Delete a single media list entry by its id."""
@@ -240,7 +243,7 @@ class AniListMutations:
         mutation = """
         mutation DeleteMediaListEntry($id: Int) {
           DeleteMediaListEntry(id: $id) {
-            id
+            deleted
           }
         }
         """
@@ -253,7 +256,7 @@ class AniListMutations:
         mutation = """
         mutation DeleteCustomList($customList: String, $type: MediaType) {
           DeleteCustomList(customList: $customList, type: $type) {
-            id
+            deleted
           }
         }
         """
@@ -291,7 +294,9 @@ class AniListMutations:
             variables["locked"] = locked
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     def save_message_activity(
         self,
@@ -330,7 +335,9 @@ class AniListMutations:
             variables["asMod"] = as_mod
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     def save_activity_reply(
         self,
@@ -362,7 +369,9 @@ class AniListMutations:
             variables["asMod"] = as_mod
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     # ------------------------------------------------------------------
     # Likes, follows, favourites
@@ -454,7 +463,9 @@ class AniListMutations:
             variables["studioId"] = studio_id
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     def update_favourite_order(
         self,
@@ -513,7 +524,9 @@ class AniListMutations:
             variables["studioIds"] = studio_ids
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     # ------------------------------------------------------------------
     # Reviews & recommendations
@@ -557,7 +570,9 @@ class AniListMutations:
             variables["private"] = private
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     def rate_review(self, review_id: int, rating: str = "UPVOTE") -> Dict[str, Any]:
         """Rate a review (UPVOTE, NOVEL_SCORE, or null for neutral)."""
@@ -607,7 +622,9 @@ class AniListMutations:
             variables["rating"] = rating
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
     # ------------------------------------------------------------------
     # User preferences
@@ -691,7 +708,9 @@ class AniListMutations:
             variables[gkey] = value
 
         resp = _run_mutation(mutation, variables)
-        return resp.get("data", {}) if resp and "data" in resp else resp or {}
+        if resp and "data" in resp and resp.get("data") is not None:
+            return resp["data"]
+        return resp or {}
 
 
 # Module-level singleton for convenience (mirrors anilist.py pattern)

@@ -137,6 +137,7 @@ class AnilistClient:
 
         return None
 
+    @_cached(ttl=120)
     def get_anime_user_list(self) -> Optional[List[Dict[str, Any]]]:
         """Fetch user's current watching list with detailed anime info. Returns None on network/GraphQL error."""
         query = """

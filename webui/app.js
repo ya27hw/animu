@@ -896,8 +896,10 @@
   });
 
   // Human-readable ETA from qBittorrent's seconds-remaining field.
+  // qBittorrent reports 8640000 (100 days) as the "invalid/unknown ETA"
+  // sentinel and -1 for unknown — never render those as real ETAs.
   function formatEta(seconds) {
-    if (!seconds || seconds <= 0) return '';
+    if (!seconds || seconds <= 0 || seconds >= 8640000) return '';
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     if (h > 0) return ` | ETA ${h}h ${m}m`;
@@ -1174,18 +1176,18 @@
   const filterOnListEl = document.getElementById('filter-on-list');
 
   // Media ids on the user's AniList collection, lazily fetched via the backend
-  // (server-side token) and cached for the session. Powers the 'On List'
-  // search filter; only meaningful for ANIME/MANGA entity searches.
-  let myListMediaIds = null;
-  async function getMyListMediaIds() {
-    if (myListMediaIds) return myListMediaIds;
+  // (server-side token) and cached for the session per media type. Powers the
+  // 'On List' search filter; only meaningful for ANIME/MANGA entity searches.
+  // Fetches ONLY the type being searched (never both) so the filter stays fast.
+  const myListMediaIdsCache = {}; // type -> Set<mediaId>
+  async function getMyListMediaIds(type) {
+    const entityType = type || state.searchEntity || 'ANIME';
+    if (myListMediaIdsCache[entityType]) return myListMediaIdsCache[entityType];
     const ids = new Set();
     try {
-      const params = new URLSearchParams({ userName: state.userName || '', perChunk: 500 });
-      for (const type of ['ANIME', 'MANGA']) {
-        params.set('type', type);
-        const res = await fetch(`/api/anilist/user-list?${params.toString()}`);
-        if (!res.ok) continue;
+      const params = new URLSearchParams({ userName: state.userName || '', type: entityType, perChunk: 500 });
+      const res = await fetch(`/api/anilist/user-list?${params.toString()}`);
+      if (res.ok) {
         const data = await res.json();
         (data.lists || []).forEach(l => (l.entries || []).forEach(e => ids.add(e.mediaId)));
       }
@@ -1193,7 +1195,7 @@
       // Leave the set empty — the filter then matches nothing, which is the
       // honest outcome when the collection can't be resolved.
     }
-    myListMediaIds = ids;
+    myListMediaIdsCache[entityType] = ids;
     return ids;
   }
 
@@ -1323,12 +1325,27 @@
         state.searchHasNext = data.Page.pageInfo.hasNextPage;
 
         // 'On List' client-side filter: keep only media present in (or absent
-        // from) the user's AniList collection.
+        // from) the user's AniList collection. Because this filter is applied
+        // AFTER AniList returns a page, a strict filter (e.g. "not on my list"
+        // over a mostly-watched genre) can starve the grid to 1-2 cards. Keep
+        // fetching subsequent pages (bounded) until the grid has enough cards
+        // or the API reports no more pages.
         const onListVal = document.getElementById('filter-on-list')?.value || '';
         if (onListVal) {
-          const myIds = await getMyListMediaIds();
+          const myIds = await getMyListMediaIds(entity);
           if (isStaleTab(token)) return;
-          mediaList = mediaList.filter(m => onListVal === 'true' ? myIds.has(m.id) : !myIds.has(m.id));
+          const filterPage = (items) => items.filter(m => onListVal === 'true' ? myIds.has(m.id) : !myIds.has(m.id));
+          mediaList = filterPage(mediaList);
+          let probePage = state.searchPage + 1;
+          const maxProbePages = 5; // bound the extra AniList round-trips
+          while (mediaList.length < 20 && state.searchHasNext && probePage <= state.searchPage + maxProbePages) {
+            const probeVars = { ...vars, page: probePage };
+            const probeData = await queryAniList(query, probeVars);
+            if (isStaleTab(token)) return;
+            mediaList = mediaList.concat(filterPage(probeData.Page.media || []));
+            state.searchHasNext = probeData.Page.pageInfo.hasNextPage;
+            probePage += 1;
+          }
         }
 
         if (!append) state.searchResults = [];
