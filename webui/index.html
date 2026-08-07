@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Animu Control Panel</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='100%25' x2='100%25' y2='0%25'%3E%3Cstop offset='0%25' stop-color='%237c3aed'/%3E%3Cstop offset='100%25' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpolygon points='12,9 23,16 12,23' fill='%23ffffff'/%3E%3C/svg%3E" />
   <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,6 +15,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <!-- Custom Anime Theme Styling Overrides -->
   <style type="text/tailwindcss">
+    @custom-variant dark (&:where(.dark, .dark *));
+
     @layer base {
       :root {
         --font-outfit: 'Outfit', sans-serif;
@@ -56,7 +59,7 @@
     }
   </style>
 </head>
-><body class="bg-slate-50 dark:bg-[#0b0f19] text-slate-800 dark:text-slate-200 min-h-screen font-['Plus_Jakarta_Sans'] transition-colors duration-300 antialiased pb-12 overflow-x-hidden">
+<body class="bg-slate-50 dark:bg-[#0b0f19] text-slate-800 dark:text-slate-200 min-h-screen font-['Plus_Jakarta_Sans'] transition-colors duration-300 antialiased pb-12 overflow-x-hidden">
 
   <!-- Glow Background Accents -->
   <div class="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-400/10 dark:bg-indigo-600/5 blur-[120px] pointer-events-none z-0"></div>
@@ -64,35 +67,35 @@
 
   <!-- Header Navigation -->
   <header class="sticky top-0 z-50 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/75 dark:bg-[#0f1524]/75 backdrop-blur-xl transition-all duration-300">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between">
       
       <!-- Logo & Brand -->
-      <a href="/" class="flex items-center gap-3 group">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform duration-300">
-          <i class="fa-solid fa-play text-white ml-0.5 text-lg"></i>
+      <a href="/" class="flex items-center gap-2.5 group">
+        <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center shadow-md shadow-violet-500/20 group-hover:scale-105 transition-transform duration-300">
+          <i class="fa-solid fa-play text-white ml-0.5 text-sm sm:text-base"></i>
         </div>
         <div class="flex flex-col">
-          <span class="font-['Outfit'] font-extrabold text-xl tracking-tight bg-gradient-to-r from-violet-600 to-pink-500 bg-clip-text text-transparent">Animu</span>
-          <span class="text-[10px] text-slate-400 font-semibold tracking-wider uppercase -mt-1">Manager</span>
+          <span class="font-['Outfit'] font-extrabold text-lg sm:text-xl tracking-tight bg-gradient-to-r from-violet-600 to-pink-500 bg-clip-text text-transparent">Animu</span>
+          <span class="text-[9px] sm:text-[10px] text-slate-400 font-semibold tracking-wider uppercase -mt-1">Manager</span>
         </div>
       </a>
 
       <!-- Navigation Tabs (Dynamic Switch) - Desktop -->
-      <nav class="hidden md:flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 sm:p-1.5 rounded-2xl shadow-inner max-w-sm sm:max-w-none">
-        <button data-tab="watching" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 active-tab bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
-          <i class="fa-solid fa-tv text-[11px] sm:text-xs"></i>Watching
+      <nav class="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 rounded-xl shadow-inner max-w-sm sm:max-w-none">
+        <button data-tab="watching" class="nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 active-tab bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
+          <i class="fa-solid fa-tv text-[11px]"></i>Watching
         </button>
-        <button data-tab="discover" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-compass text-[11px] sm:text-xs"></i>Discover
+        <button data-tab="discover" class="nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-compass text-[11px]"></i>Discover
         </button>
-        <button data-tab="history" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-clock-rotate-left text-[11px] sm:text-xs"></i>History
+        <button data-tab="history" class="nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-clock-rotate-left text-[11px]"></i>History
         </button>
-        <button data-tab="logs" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-list-check text-[11px] sm:text-xs"></i>Logs
+        <button data-tab="logs" class="nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-list-check text-[11px]"></i>Logs
         </button>
-        <button data-tab="settings" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-sliders text-[11px] sm:text-xs"></i>Settings
+        <button data-tab="settings" class="nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
+          <i class="fa-solid fa-sliders text-[11px]"></i>Settings
         </button>
       </nav>
 
@@ -140,25 +143,25 @@
   </header>
 
   <!-- Main Container -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 relative z-10">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 relative z-10">
 
     <!-- VIEW PANEL: WATCHING -->
     <section id="watching-panel" class="view-panel transition-all duration-300">
       
       <!-- Welcome Banner Card -->
-      <div class="relative overflow-hidden rounded-3xl border border-slate-200/60 dark:border-violet-900/20 bg-white dark:bg-[#111827]/75 p-6 sm:p-8 md:p-10 mb-8 sm:mb-12 shadow-sm glow-purple">
-        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div class="space-y-2">
-            <h1 class="text-3xl sm:text-4xl font-extrabold font-['Outfit'] tracking-tight">
+      <div class="relative overflow-hidden rounded-2xl border border-slate-200/60 dark:border-violet-900/20 bg-white dark:bg-[#111827]/75 p-4 sm:p-6 mb-6 shadow-sm glow-purple">
+        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div class="space-y-1">
+            <h1 class="text-xl sm:text-2xl font-extrabold font-['Outfit'] tracking-tight">
               Welcome Back, <span id="user-display-name" class="bg-gradient-to-r from-violet-500 to-pink-500 bg-clip-text text-transparent">Otaku</span>!
             </h1>
-            <p class="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-xl">
+            <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xl">
               Connected to AniList. Managing automatically aired episodes, metadata offsets, and torrent syncing.
             </p>
           </div>
-          <div class="flex items-center gap-3 shrink-0">
-            <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
-            <div class="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400">
+          <div class="flex items-center gap-2.5 shrink-0">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">
               Scheduler Active
             </div>
           </div>
@@ -168,26 +171,26 @@
       </div>
 
       <!-- Active Downloads Panel -->
-      <div id="downloads-panel" class="hidden mb-8 p-6 rounded-3xl border border-sky-500/20 bg-sky-500/5 dark:bg-sky-950/10 space-y-4 glow-sky">
+      <div id="downloads-panel" class="hidden mb-6 p-4 rounded-2xl border border-sky-500/20 bg-sky-500/5 dark:bg-sky-950/10 space-y-3 glow-sky">
         <div class="flex items-center justify-between cursor-pointer select-none" id="downloads-header">
-          <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-sky-600 dark:text-sky-400">
+          <h3 class="font-['Outfit'] font-bold text-base flex items-center gap-2 text-sky-600 dark:text-sky-400">
             <i class="fa-solid fa-cloud-arrow-down animate-bounce"></i>Active Downloads
           </h3>
           <button class="text-sky-600 dark:text-sky-400 focus:outline-none">
-            <i id="downloads-toggle-icon" class="fa-solid fa-chevron-up text-sm"></i>
+            <i id="downloads-toggle-icon" class="fa-solid fa-chevron-up text-xs"></i>
           </button>
         </div>
-        <div id="downloads-list" class="space-y-3.5 transition-all duration-300">
+        <div id="downloads-list" class="space-y-3 transition-all duration-300">
           <!-- Rendered dynamically -->
         </div>
       </div>
 
       <!-- Grid of Cards -->
-      <div id="anime-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+      <div id="anime-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         <!-- Rendered Dynamically -->
-        <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
-          <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
-          <p class="font-semibold text-sm">Fetching watchlist entries...</p>
+        <div class="col-span-full py-12 flex flex-col items-center justify-center text-slate-400">
+          <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-violet-500"></i>
+          <p class="font-semibold text-xs sm:text-sm">Fetching watchlist entries...</p>
         </div>
       </div>
 
@@ -198,10 +201,10 @@
     <section id="discover-panel" class="view-panel hidden transition-all duration-300">
 
       <!-- Discover Header & Controls Card -->
-      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 mb-8 shadow-sm glow-purple">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
-          <div class="space-y-1">
-            <h2 class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] tracking-tight flex items-center gap-3">
+      <div class="rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-4 sm:p-5 mb-6 shadow-sm glow-purple">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div class="space-y-0.5">
+            <h2 class="text-xl sm:text-2xl font-extrabold font-['Outfit'] tracking-tight flex items-center gap-2.5">
               <i class="fa-solid fa-compass text-violet-500"></i>AniList Discover
             </h2>
             <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
@@ -275,43 +278,43 @@
     <!-- VIEW PANEL: HISTORY -->
     <section id="history-panel" class="view-panel hidden transition-all duration-300">
       
-      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm flex flex-col min-h-[500px] glow-indigo">
+      <div class="rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-4 sm:p-5 shadow-sm flex flex-col min-h-[500px] glow-indigo">
         
         <!-- History Header -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
-          <div class="space-y-1">
-            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
-              <i class="fa-solid fa-clock-rotate-left text-violet-500 text-xl"></i>Download History
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div class="space-y-0.5">
+            <h2 class="text-xl sm:text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2">
+              <i class="fa-solid fa-clock-rotate-left text-violet-500 text-lg"></i>Download History
             </h2>
-            <p class="text-xs sm:text-sm text-slate-400">View previous torrent downloads, links, and completion timestamps sorted from newest to oldest.</p>
+            <p class="text-xs text-slate-400">View previous torrent downloads, links, and completion timestamps sorted from newest to oldest.</p>
           </div>
           
           <!-- Controls -->
-          <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2.5">
             <!-- Search Filter Input -->
             <div class="relative">
-              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-              <input type="text" id="history-search-input" placeholder="Search history..." class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl pl-9 pr-3.5 py-2 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500 w-44 sm:w-60 transition-all" />
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+              <input type="text" id="history-search-input" placeholder="Search history..." class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl pl-8 pr-3 py-1.5 text-xs font-semibold outline-none focus:border-violet-500 w-44 sm:w-56 transition-all" />
             </div>
 
             <!-- Refresh Button -->
-            <button id="history-refresh-btn" class="w-10 h-10 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-lg shadow-violet-500/20 cursor-pointer transition-all duration-200" title="Refresh history">
-              <i class="fa-solid fa-arrows-rotate"></i>
+            <button id="history-refresh-btn" class="w-9 h-9 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-md shadow-violet-500/20 cursor-pointer transition-all duration-200" title="Refresh history">
+              <i class="fa-solid fa-arrows-rotate text-xs"></i>
             </button>
 
             <!-- Clear History Button -->
-            <button id="history-clear-btn" class="px-4 py-2 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/20 text-rose-500 font-semibold rounded-xl text-xs sm:text-sm transition-all duration-200 cursor-pointer flex items-center gap-2">
+            <button id="history-clear-btn" class="px-3 py-2 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/20 text-rose-500 font-semibold rounded-xl text-xs transition-all duration-200 cursor-pointer flex items-center gap-1.5">
               <i class="fa-solid fa-trash-can text-xs"></i>Clear History
             </button>
           </div>
         </div>
 
         <!-- History Items Container -->
-        <div id="history-list" class="space-y-4">
+        <div id="history-list" class="space-y-3">
           <!-- Rendered dynamically -->
-          <div class="py-16 flex flex-col items-center justify-center text-slate-400">
-            <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
-            <p class="font-semibold text-sm">Loading download history...</p>
+          <div class="py-12 flex flex-col items-center justify-center text-slate-400">
+            <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-violet-500"></i>
+            <p class="font-semibold text-xs sm:text-sm">Loading download history...</p>
           </div>
         </div>
 
@@ -323,30 +326,30 @@
     <!-- VIEW PANEL: LOGS -->
     <section id="logs-panel" class="view-panel hidden transition-all duration-300">
       
-      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm flex flex-col min-h-[500px] sm:min-h-[600px] glow-indigo">
+      <div class="rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-4 sm:p-5 shadow-sm flex flex-col min-h-[500px] sm:min-h-[550px] glow-indigo">
         
         <!-- Logs Header -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
-          <div class="space-y-1">
-            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight">System Logs</h2>
-            <p class="text-xs sm:text-sm text-slate-400">Monitor active download jobs, search routines, and execution errors.</p>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div class="space-y-0.5">
+            <h2 class="text-xl sm:text-2xl font-bold font-['Outfit'] tracking-tight">System Logs</h2>
+            <p class="text-xs text-slate-400">Monitor active download jobs, search routines, and execution errors.</p>
           </div>
           <!-- Controls -->
-          <div class="flex flex-wrap items-center gap-3">
-            <select id="log-select" class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold outline-none cursor-pointer focus:border-violet-500">
+          <div class="flex flex-wrap items-center gap-2.5">
+            <select id="log-select" class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl px-3 py-1.5 text-xs font-semibold outline-none cursor-pointer focus:border-violet-500">
               <option value="combined">Combined log</option>
             </select>
-            <select id="log-lines" class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-semibold outline-none cursor-pointer focus:border-violet-500">
+            <select id="log-lines" class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl px-3 py-1.5 text-xs font-semibold outline-none cursor-pointer focus:border-violet-500">
               <option value="100">100 Lines</option>
               <option value="250" selected>250 Lines</option>
               <option value="500">500 Lines</option>
               <option value="1000">1000 Lines</option>
             </select>
-            <button id="log-refresh-btn" class="w-10 h-10 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-lg shadow-violet-500/20 cursor-pointer transition-all duration-200" title="Refresh logs">
-              <i class="fa-solid fa-arrows-rotate"></i>
+            <button id="log-refresh-btn" class="w-9 h-9 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-md shadow-violet-500/20 cursor-pointer transition-all duration-200" title="Refresh logs">
+              <i class="fa-solid fa-arrows-rotate text-xs"></i>
             </button>
             <label class="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors">
-              <input type="checkbox" id="log-auto-refresh" class="w-4 h-4 accent-violet-600 rounded cursor-pointer" />
+              <input type="checkbox" id="log-auto-refresh" class="w-3.5 h-3.5 accent-violet-600 rounded cursor-pointer" />
               Auto-refresh
             </label>
           </div>
@@ -354,31 +357,31 @@
 
         <!-- Terminal Console -->
         <div class="flex-grow flex flex-col bg-[#050914] rounded-2xl overflow-hidden border border-slate-900 shadow-inner relative">
-          <div class="flex items-center gap-2 px-4 py-2.5 bg-slate-950/60 border-b border-slate-900 text-xs text-slate-500 select-none">
+          <div class="flex items-center gap-2 px-4 py-2 bg-slate-950/60 border-b border-slate-900 text-xs text-slate-500 select-none">
             <span class="w-2.5 h-2.5 rounded-full bg-red-500/80"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-green-500/80"></span>
             <span class="ml-2 font-mono font-bold uppercase tracking-wider text-[10px]">bash - stdout</span>
           </div>
-          <pre id="logs-body" class="flex-grow p-5 font-mono text-xs sm:text-sm text-emerald-400 overflow-y-auto leading-relaxed max-h-[450px] sm:max-h-[550px] whitespace-pre-wrap select-text">Loading console feeds...</pre>
+          <pre id="logs-body" class="flex-grow p-4 font-mono text-xs sm:text-sm text-emerald-400 overflow-y-auto leading-relaxed max-h-[400px] sm:max-h-[500px] whitespace-pre-wrap select-text">Loading console feeds...</pre>
         </div>
 
         <!-- Search Diagnostics Panel -->
-        <div class="mt-8 border-t border-slate-100 dark:border-slate-800 pt-6">
-          <div class="flex items-center justify-between mb-4">
+        <div class="mt-6 border-t border-slate-100 dark:border-slate-800 pt-5">
+          <div class="flex items-center justify-between mb-3">
             <div class="space-y-0.5">
-              <h3 class="text-lg font-bold font-['Outfit'] flex items-center gap-2 text-rose-500">
-                <i class="fa-solid fa-circle-exclamation text-base"></i>Search Diagnostics (Current Failed Runs)
+              <h3 class="text-base font-bold font-['Outfit'] flex items-center gap-2 text-rose-500">
+                <i class="fa-solid fa-circle-exclamation text-sm"></i>Search Diagnostics (Current Failed Runs)
               </h3>
               <p class="text-xs text-slate-400">Review candidate match scores and failure causes for items that failed to download in the current cycle.</p>
             </div>
-            <button type="button" id="btn-refresh-search-debug" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5" title="Refresh diagnostics">
-              <i class="fa-solid fa-arrows-rotate"></i>Refresh Traces
+            <button type="button" id="btn-refresh-search-debug" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5" title="Refresh diagnostics">
+              <i class="fa-solid fa-arrows-rotate text-xs"></i>Refresh Traces
             </button>
           </div>
-          <div id="search-debug-container" class="space-y-4">
+          <div id="search-debug-container" class="space-y-3">
             <!-- Loaded dynamically -->
-            <div class="p-5 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">
+            <div class="p-4 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">
               No failed runs logged in the current check cycle.
             </div>
           </div>
@@ -392,7 +395,7 @@
     <!-- VIEW PANEL: SETTINGS -->
     <section id="settings-panel" class="view-panel hidden transition-all duration-300">
       
-      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm glow-pink">
+      <div class="rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-4 sm:p-5 shadow-sm glow-pink">
         
         <!-- Header -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
@@ -603,6 +606,30 @@
           </div>
 
         </form>
+
+        <!-- Ignored Anime Management Panel -->
+        <div class="mt-8 border-t border-slate-100 dark:border-slate-800 pt-6">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+            <div class="space-y-0.5">
+              <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2 text-rose-500">
+                <i class="fa-solid fa-ban text-base"></i>Ignored Anime List
+              </h3>
+              <p class="text-xs text-slate-400">Titles on this list are skipped during automatic scheduler download cycles.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="text" id="input-add-ignored" placeholder="Anime title or Media ID..." class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl px-3 py-1.5 text-xs font-semibold outline-none focus:border-violet-500 w-48 sm:w-60 transition-all" />
+              <button type="button" id="btn-add-ignored" class="px-3.5 py-1.5 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white font-semibold rounded-xl text-xs shadow-md shadow-violet-500/20 cursor-pointer transition-all duration-200 flex items-center gap-1.5 shrink-0">
+                <i class="fa-solid fa-plus text-xs"></i>Add Ignored
+              </button>
+            </div>
+          </div>
+          <div id="ignored-list-container" class="space-y-2.5">
+            <!-- Loaded dynamically -->
+            <div class="p-4 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-xl">
+              No ignored titles configured.
+            </div>
+          </div>
+        </div>
 
       </div>
 

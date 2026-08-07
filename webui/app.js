@@ -7,6 +7,7 @@
     config: {},
     logs: { selected: 'combined', lines: 250, content: '', available: [] },
     history: [],
+    ignored: [],
     discover: {
       rail: 'trending',
       searchQuery: '',
@@ -170,9 +171,28 @@
       if (!res.ok) throw new Error('Failed to clear download history.');
       return res.json();
     },
-    async deleteHistoryItem(id) {
-      const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+    async deleteHistoryItem(id, action = 'delete') {
+      const res = await fetch(`/api/history/${id}?action=${encodeURIComponent(action)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete history item.');
+      return res.json();
+    },
+    async getIgnored() {
+      const res = await fetch('/api/ignored');
+      if (!res.ok) throw new Error('Failed to fetch ignored list.');
+      return res.json();
+    },
+    async addIgnored(title, mediaId) {
+      const res = await fetch('/api/ignored', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, mediaId })
+      });
+      if (!res.ok) throw new Error('Failed to add to ignored list.');
+      return res.json();
+    },
+    async deleteIgnored(idOrTitle) {
+      const res = await fetch(`/api/ignored/${encodeURIComponent(idOrTitle)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to remove from ignored list.');
       return res.json();
     },
     async getDiscover(type = 'trending', page = 1) {
@@ -258,7 +278,10 @@
     discoverFeedView: document.getElementById('discover-feed-view'),
     discoverDetailView: document.getElementById('discover-detail-view'),
     btnBackToDiscover: document.getElementById('btn-back-to-discover'),
-    detailContentContainer: document.getElementById('detail-content-container')
+    detailContentContainer: document.getElementById('detail-content-container'),
+    inputAddIgnored: document.getElementById('input-add-ignored'),
+    btnAddIgnored: document.getElementById('btn-add-ignored'),
+    ignoredListContainer: document.getElementById('ignored-list-container')
   };
 
   // Light/Dark Theme Switcher
@@ -329,9 +352,9 @@
     // Update desktop nav buttons style
     DOM.navTabs.forEach(t => {
       if (t.dataset.tab === target) {
-        t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-tab";
+        t.className = "nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-tab";
       } else {
-        t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
+        t.className = "nav-tab flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
       }
     });
 
@@ -380,6 +403,7 @@
       updateSearchDiagnostics();
     } else if (target === 'settings') {
       loadConfig();
+      loadAndRenderIgnored();
     }
     if (target === 'watching') loadAnime();
   }
@@ -446,33 +470,33 @@
       const pendingRewatching = item.pendingRewatchingUpdate === true;
 
       const card = document.createElement('div');
-      card.className = "group overflow-hidden rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[460px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
+      card.className = "group overflow-hidden rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[350px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
       
       const bannerUrl = item.media.coverImage.extraLarge || item.media.coverImage.large || '';
       
       let badgeHTML = '';
       if (isTriggeredGenre) {
-        badgeHTML = `<span class="absolute top-4 right-4 bg-violet-600/90 text-white border border-violet-500/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-violet-600/20">${triggerGenreVal}</span>`;
+        badgeHTML = `<span class="absolute top-3 right-3 bg-violet-600/90 text-white border border-violet-500/50 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md tracking-wider backdrop-blur-sm shadow-md shadow-violet-600/20">${triggerGenreVal}</span>`;
       } else if (item.media.status === 'RELEASING') {
-        badgeHTML = `<span class="absolute top-4 right-4 bg-emerald-500/90 text-white border border-emerald-400/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-emerald-600/10">Releasing</span>`;
+        badgeHTML = `<span class="absolute top-3 right-3 bg-emerald-500/90 text-white border border-emerald-400/50 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md tracking-wider backdrop-blur-sm shadow-md shadow-emerald-600/10">Releasing</span>`;
       } else if (isFinished) {
-        badgeHTML = `<span class="absolute top-4 right-4 bg-blue-500/90 text-white border border-blue-400/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-blue-600/10">Finished</span>`;
+        badgeHTML = `<span class="absolute top-3 right-3 bg-blue-500/90 text-white border border-blue-400/50 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md tracking-wider backdrop-blur-sm shadow-md shadow-blue-600/10">Finished</span>`;
       }
 
       const displayTitle = getAnimeTitle(item);
       const subTitle = item.media.title.english || item.media.title.romaji || '';
 
       card.innerHTML = `
-        <div class="h-44 relative bg-slate-900 overflow-hidden flex items-end">
+        <div class="h-32 relative bg-slate-900 overflow-hidden flex items-end">
           <div class="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-700" style="background-image: url('${bannerUrl}')"></div>
           <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-[#111827]/40 to-transparent"></div>
           ${badgeHTML}
-          <div class="relative z-10 px-5 pb-4 w-full">
-            <h4 class="font-['Outfit'] font-bold text-lg text-white line-clamp-1 leading-snug drop-shadow" title="${displayTitle}">${displayTitle}</h4>
+          <div class="relative z-10 px-4 pb-3 w-full">
+            <h4 class="font-['Outfit'] font-bold text-base text-white line-clamp-1 leading-snug drop-shadow" title="${displayTitle}">${displayTitle}</h4>
             <p class="text-xs text-slate-300 line-clamp-1 opacity-90">${subTitle}</p>
           </div>
         </div>
-        <div class="p-5 flex-grow flex flex-col justify-between gap-5 bg-white dark:bg-transparent">
+        <div class="p-3.5 sm:p-4 flex-grow flex flex-col justify-between gap-3.5 bg-white dark:bg-transparent">
           
           <!-- Mid info properties -->
           <div class="space-y-3">
@@ -802,7 +826,7 @@
 
     state.discover.items.forEach(item => {
       const card = document.createElement('div');
-      card.className = "group overflow-hidden rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[440px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
+      card.className = "group overflow-hidden rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[320px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
 
       const coverUrl = item.coverImage ? (item.coverImage.extraLarge || item.coverImage.large || item.coverImage.medium || '') : '';
       const primaryTitle = getMediaTitle(item.title);
@@ -824,7 +848,7 @@
           'REPEATING': 'bg-purple-500/90 text-white'
         };
         const colorClass = statusColors[listEntry.status] || 'bg-slate-700 text-white';
-        listBadge = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider ${colorClass}">${listEntry.status}</span>`;
+        listBadge = `<span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider ${colorClass}">${listEntry.status}</span>`;
       }
 
       const localState = item.localState;
@@ -835,7 +859,7 @@
       }
 
       card.innerHTML = `
-        <div class="h-52 relative bg-slate-900 overflow-hidden flex items-end cursor-pointer" onclick="window.UI.showDiscoverDetail(${item.id})">
+        <div class="h-36 relative bg-slate-900 overflow-hidden flex items-end cursor-pointer" onclick="window.UI.showDiscoverDetail(${item.id})">
           <div class="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-700" style="background-image: url('${coverUrl}')"></div>
           <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-[#111827]/40 to-transparent"></div>
           <div class="absolute top-3 left-3 flex flex-wrap gap-1.5 z-10">
@@ -846,12 +870,12 @@
           <div class="absolute top-3 right-3 flex flex-wrap gap-1.5 z-10">
             ${listBadge}
           </div>
-          <div class="relative z-10 px-5 pb-3 w-full">
+          <div class="relative z-10 px-4 pb-2.5 w-full">
             <h4 class="font-['Outfit'] font-bold text-base text-white line-clamp-1 leading-snug drop-shadow" title="${primaryTitle}">${primaryTitle}</h4>
             <p class="text-xs text-slate-300 line-clamp-1 opacity-90">${secondaryTitle}</p>
           </div>
         </div>
-        <div class="p-5 flex-grow flex flex-col justify-between gap-4 bg-white dark:bg-transparent">
+        <div class="p-3.5 sm:p-4 flex-grow flex flex-col justify-between gap-3 bg-white dark:bg-transparent">
           <div class="space-y-3">
             <div class="flex items-center justify-between text-xs font-semibold text-slate-400">
               <span>${format} • ${episodes}</span>
@@ -1803,7 +1827,7 @@
 
           </div>
 
-          <div class="flex items-center justify-between pt-2 border-t border-slate-200/30 dark:border-slate-800/40">
+          <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200/30 dark:border-slate-800/40">
             ${item.cover_image ? `
               <div class="flex items-center gap-2">
                 <img src="${item.cover_image}" class="w-7 h-7 rounded-lg object-cover" alt="Cover" />
@@ -1811,9 +1835,17 @@
               </div>
             ` : '<div></div>'}
 
-            <button class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5" data-delete-history="${item.id}">
-              <i class="fa-solid fa-trash-can text-[11px]"></i>Remove Entry
-            </button>
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:bg-rose-500 hover:text-white bg-rose-500/10 border border-rose-500/20 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5" data-delete-history="${item.id}" title="Remove history entry only">
+                <i class="fa-solid fa-trash-can text-[11px]"></i>Delete
+              </button>
+              <button class="px-3 py-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white bg-amber-500/10 border border-amber-500/20 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5" data-rerun-history="${item.id}" title="Remove entry & re-run episode search on next schedule cycle">
+                <i class="fa-solid fa-rotate-right text-[11px]"></i>Re-run on Next Schedule
+              </button>
+              <button class="px-3 py-1.5 text-xs font-semibold text-violet-600 dark:text-violet-400 hover:bg-violet-600 hover:text-white bg-violet-500/10 border border-violet-500/20 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5" data-ignore-redownload-history="${item.id}" title="Remove entry, add anime to ignore list & trigger immediate re-download">
+                <i class="fa-solid fa-ban text-[11px]"></i>Ignore & Re-download
+              </button>
+            </div>
           </div>
 
         </div>
@@ -1843,11 +1875,47 @@
         deleteBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           try {
-            await API.deleteHistoryItem(item.id);
+            await API.deleteHistoryItem(item.id, 'delete');
             state.history = state.history.filter(h => h.id !== item.id);
             expandedHistoryIds.delete(item.id);
             renderHistory();
             showToast('History item removed.');
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        });
+      }
+
+      const rerunBtn = card.querySelector(`[data-rerun-history="${item.id}"]`);
+      if (rerunBtn) {
+        rerunBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Delete history entry and schedule re-run for next cycle?`)) return;
+          try {
+            const res = await API.deleteHistoryItem(item.id, 'rerun');
+            state.history = state.history.filter(h => h.id !== item.id);
+            expandedHistoryIds.delete(item.id);
+            renderHistory();
+            loadDashboard(); // Refresh anime watchlist progress state
+            showToast(res.message || 'History entry deleted & re-run scheduled.');
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        });
+      }
+
+      const ignoreRedownloadBtn = card.querySelector(`[data-ignore-redownload-history="${item.id}"]`);
+      if (ignoreRedownloadBtn) {
+        ignoreRedownloadBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Delete history entry, add anime to ignore list, and trigger immediate re-download?`)) return;
+          try {
+            const res = await API.deleteHistoryItem(item.id, 'ignore-redownload');
+            state.history = state.history.filter(h => h.id !== item.id);
+            expandedHistoryIds.delete(item.id);
+            renderHistory();
+            loadAndRenderIgnored();
+            showToast(res.message || 'Entry deleted, added to ignore list, and re-download triggered.');
           } catch (err) {
             showToast(err.message, 'error');
           }
@@ -1883,6 +1951,87 @@
   if (DOM.historySearchInput) {
     DOM.historySearchInput.addEventListener('input', () => {
       renderHistory();
+    });
+  }
+
+  // Ignored list logic
+  async function loadAndRenderIgnored() {
+    if (!DOM.ignoredListContainer) return;
+    try {
+      const data = await API.getIgnored();
+      state.ignored = data.ignored || [];
+      renderIgnoredList();
+    } catch (e) {
+      if (DOM.ignoredListContainer) {
+        DOM.ignoredListContainer.innerHTML = `<div class="p-4 text-center text-xs text-rose-500 font-semibold">Failed to load ignored list: ${e.message}</div>`;
+      }
+    }
+  }
+
+  function renderIgnoredList() {
+    if (!DOM.ignoredListContainer) return;
+    if (!state.ignored || state.ignored.length === 0) {
+      DOM.ignoredListContainer.innerHTML = `
+        <div class="p-4 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-xl">
+          No ignored titles configured.
+        </div>
+      `;
+      return;
+    }
+
+    DOM.ignoredListContainer.innerHTML = '';
+    state.ignored.forEach(item => {
+      const row = document.createElement('div');
+      row.className = "flex items-center justify-between gap-3 p-3 bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800/60 rounded-xl text-xs";
+      const titleDisplay = item.title || `Media ID ${item.media_id}`;
+      const mediaIdBadge = item.media_id ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono">ID ${item.media_id}</span>` : '';
+      
+      row.innerHTML = `
+        <div class="flex items-center gap-2.5 min-w-0 flex-grow">
+          <i class="fa-solid fa-ban text-rose-500 text-sm shrink-0"></i>
+          <span class="font-bold text-slate-700 dark:text-slate-200 truncate" title="${titleDisplay}">${titleDisplay}</span>
+          ${mediaIdBadge}
+        </div>
+        <button type="button" class="px-2.5 py-1 text-[11px] font-semibold text-rose-500 hover:bg-rose-500 hover:text-white bg-rose-500/10 border border-rose-500/20 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1" data-remove-ignored="${item.id || item.title}">
+          <i class="fa-solid fa-xmark text-[10px]"></i>Remove
+        </button>
+      `;
+
+      const removeBtn = row.querySelector('[data-remove-ignored]');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', async () => {
+          try {
+            await API.deleteIgnored(item.id || item.media_id || item.title);
+            showToast(`Removed '${titleDisplay}' from ignore list.`);
+            await loadAndRenderIgnored();
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        });
+      }
+
+      DOM.ignoredListContainer.appendChild(row);
+    });
+  }
+
+  if (DOM.btnAddIgnored) {
+    DOM.btnAddIgnored.addEventListener('click', async () => {
+      const val = (DOM.inputAddIgnored?.value || '').trim();
+      if (!val) {
+        showToast('Please enter a title or Media ID to ignore.', 'warning');
+        return;
+      }
+      try {
+        const isNum = /^\d+$/.test(val);
+        const title = isNum ? '' : val;
+        const mediaId = isNum ? Number(val) : null;
+        await API.addIgnored(title, mediaId);
+        if (DOM.inputAddIgnored) DOM.inputAddIgnored.value = '';
+        showToast(`Added '${val}' to ignore list.`);
+        await loadAndRenderIgnored();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     });
   }
 

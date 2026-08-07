@@ -11,6 +11,7 @@ from .qbittorrent import qbit
 from .discord import alert_user, alert_unresolved_anime, clear_alert_history, send_anime_downloaded_hook
 from .utils import fix_anime_season, count_past_relations, get_explicit_season
 from .history import history_manager
+from .ignored import ignored_manager
 from . import readiness
 
 class Scheduler:
@@ -419,6 +420,14 @@ class Scheduler:
 
         for anime in anime_list:
             media_id = anime["mediaId"]
+            romaji_title = anime["media"]["title"]["romaji"]
+            english_title = anime["media"]["title"].get("english")
+            synonyms = anime["media"].get("synonyms") or []
+
+            if ignored_manager.is_ignored(romaji_title, media_id=media_id, english_title=english_title, synonyms=synonyms):
+                print(f"[IGNORED] {romaji_title} skipped")
+                continue
+
             record = pb_map.get(media_id)
 
             print(f"[SYNC_STATE] {anime['media']['title']['romaji']} (ID {media_id}) "
