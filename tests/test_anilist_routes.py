@@ -127,6 +127,24 @@ class TestAniListRoutes(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["user"]["name"], "testuser")
 
+    @patch("animu.web.anilist.get_user")
+    def test_user_route_path_id(self, user):
+        """Path-id contract: /api/anilist/user/<id> must look up by id, not viewer."""
+        user.return_value = {"id": 123, "name": "testuser"}
+        status, data = self.request("GET", "/api/anilist/user/123")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["user"]["id"], 123)
+        user.assert_called_once_with(user_id=123, user_name=None)
+
+    @patch("animu.web.anilist.get_user")
+    def test_user_route_path_name(self, user):
+        """Path-name contract: /api/anilist/user/<name> must look up by name."""
+        user.return_value = {"id": 123, "name": "Aymr"}
+        status, data = self.request("GET", "/api/anilist/user/Aymr")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["user"]["name"], "Aymr")
+        user.assert_called_once_with(user_id=None, user_name="Aymr")
+
     @patch("animu.web.anilist.get_viewer")
     def test_viewer_route(self, viewer):
         viewer.return_value = {"id": 456, "name": "viewer"}
@@ -208,6 +226,24 @@ class TestAniListRoutes(unittest.TestCase):
         status, data = self.request("GET", "/api/anilist/user/5/following?page=1")
         self.assertEqual(status, 200)
         self.assertEqual(data["following"][0]["id"], 1)
+
+    @patch("animu.web.anilist.get_following")
+    @patch("animu.web.anilist.get_user", return_value={"id": 42, "name": "Aymr"})
+    def test_following_route_path_name(self, get_user, following):
+        """Username path token resolves to an id before calling get_following."""
+        following.return_value = {"pageInfo": {"hasNextPage": False}, "following": [{"id": 1}]}
+        status, data = self.request("GET", "/api/anilist/user/Aymr/following?page=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["following"][0]["id"], 1)
+        following.assert_called_once_with(42, page=1, per_page=50, sort=None)
+
+    @patch("animu.web.anilist.get_following")
+    @patch("animu.web.anilist.get_user", return_value=None)
+    def test_following_route_path_name_not_found(self, get_user, following):
+        """Unresolvable username yields 404 and never calls get_following."""
+        status, data = self.request("GET", "/api/anilist/user/ghost/following?page=1")
+        self.assertEqual(status, 404)
+        following.assert_not_called()
 
     @patch("animu.web.anilist.get_followers")
     def test_followers_route(self, followers):
