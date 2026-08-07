@@ -19,6 +19,7 @@
     listsViewMode: 'grid',
     searchQuery: '',
     searchEntity: 'ANIME',
+    searchSort: 'POPULARITY_DESC',
     searchFilters: { format: '', status: '', season: '', year: '', genre: '', onList: '' },
     searchPage: 1,
     searchResults: [],
@@ -1061,6 +1062,15 @@
     });
   });
 
+  // Discover rail 'View All' buttons: jump to Search with the rail's sort applied.
+  document.querySelectorAll('[data-tab="search"][data-search-sort]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.searchSort = btn.getAttribute('data-search-sort') || 'POPULARITY_DESC';
+      state.searchPage = 1;
+      switchTab('search');
+    });
+  });
+
   async function loadSearch() {
     loadSearchResults();
   }
@@ -1073,10 +1083,10 @@
       const entity = state.searchEntity;
       if (entity === 'ANIME' || entity === 'MANGA') {
         const query = `
-          query ($search: String, $page: Int, $perPage: Int, $type: MediaType, $format: MediaFormat, $status: MediaStatus, $season: MediaSeason, $seasonYear: Int, $genre: String) {
+          query ($search: String, $page: Int, $perPage: Int, $type: MediaType, $format: MediaFormat, $status: MediaStatus, $season: MediaSeason, $seasonYear: Int, $genre: String, $sort: [MediaSort]) {
             Page(page: $page, perPage: $perPage) {
               pageInfo { hasNextPage }
-              media(search: $search, type: $type, format: $format, status: $status, season: $season, seasonYear: $seasonYear, genre: $genre, sort: POPULARITY_DESC) {
+              media(search: $search, type: $type, format: $format, status: $status, season: $season, seasonYear: $seasonYear, genre: $genre, sort: $sort) {
                 id
                 title { romaji english native }
                 coverImage { extraLarge large }
@@ -1093,6 +1103,7 @@
           page: state.searchPage,
           perPage: 20,
           type: entity,
+          sort: state.searchSort || 'POPULARITY_DESC',
           format: document.getElementById('filter-format')?.value || undefined,
           status: document.getElementById('filter-status')?.value || undefined,
           season: document.getElementById('filter-season')?.value || undefined,
@@ -1112,12 +1123,13 @@
         grid.innerHTML = mediaList.map(m => {
           const title = formatTitle(m.title);
           const score = m.averageScore ? `${m.averageScore}%` : 'N/A';
+          const coverUrl = (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large)) || '';
           const isDownloaded = state.animeList.some(a => a.mediaId === m.id);
 
           return `
             <div onclick="openMediaDetail(${m.id})" class="group rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 overflow-hidden hover:border-violet-500 transition-all cursor-pointer flex flex-col shadow-sm">
               <div class="aspect-[2/3] w-full relative overflow-hidden bg-slate-950">
-                <img src="${m.coverImage.extraLarge || m.coverImage.large}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                <img src="${coverUrl}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                 <div class="absolute top-2 left-2 flex flex-col gap-1">
                   <span class="px-2 py-0.5 rounded-lg bg-slate-950/80 backdrop-blur-md text-[10px] font-bold text-amber-400">
                     <i class="fa-solid fa-star text-[9px] mr-1"></i>${score}
