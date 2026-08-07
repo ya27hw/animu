@@ -1244,8 +1244,10 @@
           STUDIO: 'studios',
           USER: 'users'
         }[entity];
-        // Field shape differs per entity: Character/Staff expose `image`,
-        // User exposes `avatar`, Studio has no artwork at all.
+        // Field shape differs per entity: Character/Staff expose an object
+        // `name { full native }` + `image`, User exposes a plain `name` string +
+        // `avatar`, Studio exposes a plain `name` string and no artwork.
+        const nameField = (entity === 'CHARACTER' || entity === 'STAFF') ? 'name { full native }' : 'name';
         const imgField = entity === 'USER' ? 'avatar { large medium }' : 'image { large medium }';
         const query = `
           query ($search: String, $page: Int, $perPage: Int) {
@@ -1253,7 +1255,7 @@
               pageInfo { hasNextPage }
               ${entityField}(search: $search) {
                 id
-                name { full native }
+                ${nameField}
                 ${entity === 'STUDIO' ? '' : imgField}
               }
             }
@@ -1284,7 +1286,10 @@
         }[entity];
 
         const cards = results.map(r => {
-          const name = r.name && (r.name.full || r.name.native) ? (r.name.full || r.name.native) : 'Unknown';
+          // Character/Staff return name objects; User/Studio return plain strings.
+          const name = typeof r.name === 'object' && r.name
+            ? (r.name.full || r.name.native || 'Unknown')
+            : (r.name || 'Unknown');
           const art = r.image || r.avatar;
           const img = art && (art.large || art.medium) ? (art.large || art.medium) : '';
           const profileUrl = siteBase === 'user' ? `https://anilist.co/user/${encodeURIComponent(name)}` : `https://anilist.co/${siteBase}/${r.id}`;
@@ -1307,6 +1312,11 @@
       }
     } catch (e) {
       if (isStaleTab(token)) return;
+      if (append && state.searchResults.length > 0) {
+        // Keep already-rendered results; surface the failure as a toast.
+        showToast(e.message || 'Failed to load more results.', 'error');
+        return;
+      }
       grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">Failed to fetch search results.</div>';
       state.searchHasNext = false;
       updateSearchPagination();
