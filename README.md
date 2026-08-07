@@ -7,41 +7,43 @@ Special thanks to Uncle Sam 💙 for the webUI
 
 Conveniently downloads you the latest anime releases locally, without having to access a third-party site.
 
-
 ## Why did I make this?
 
 Simply put, I got bored of continuously accessing websites filled with intrusive ads. The optimal solution would have been to install adblock (duh), but why not take the hard, long path?
 
 ## How does this work? (in simple terms)
 
-You give the program your Anilist profile. It looks at your current "*WATCHING*" list, determines what episodes you are missing, and proceeds to download them for you! You are then free to do whatever you want with the downloaded files, whether it be hosting them locally on a media server, or just downloading them for a road trip!
+You give the program your AniList profile. It looks at your current "*WATCHING*" list, determines what episodes you are missing, and proceeds to download them for you! You are then free to do whatever you want with the downloaded files, whether it be hosting them locally on a media server, or just downloading them for a road trip!
+
+## Features
+
+- **Auto-downloader** — polls your AniList WATCHING list, searches Nyaa for missing episodes, downloads via qBittorrent, tracks progress in PocketBase (with offline JSON fallback)
+- **Discover tab** — browse AniList (Trending / Popular / Upcoming / Seasonal), search the catalog, view rich media detail, and one-tap add to your list — which feeds the auto-downloader
+- **History with actions** — delete entries, re-run on next schedule, or ignore & re-download; persistent ignore list so the scheduler skips shows you don't want
+- **WebUI** — Watching / Discover / History / Logs / Settings tabs, dark theme, mobile nav
+- **Discord notifications** — download success + failure alerts via webhook
+- **Jellyfin sync plugin** (in `plugins/`) — Jellyfin → AniList progress sync
+
+## Stack
+
+**Python 3** rewrite (no compilation step, no Firebase):
+- `animu/` — core modules: scheduler, AniList GraphQL client, Nyaa RSS + scoring, qBittorrent client, PocketBase persistence, history & ignore stores, `http.server` REST/static web server
+- `webui/` — vanilla JS + Tailwind CSS v4 (in-browser engine), FontAwesome
+- `plugins/jellyfin-ani-sync/` — C# Jellyfin plugin fork (AniList-only)
 
 ## How do I set this up?
 
-NOTE : Firebase server that's used to store your animelists is currently private.
-You could make your own, however. These instructions are for future me.
+> NOTE: This is the Python rewrite (default branch `python-rewrite`). The old Node.js v4.3.0 tree with Firebase is legacy.
 
-1. `npm install`
-2. Download qbittorrent
-3. Enable Web UI 
-4. Create, then fill in `profile.json` with the following details:
+1. `pip install -r requirements.txt` (httpx, feedparser, rapidfuzz, schedule, colorama, anitopy)
+2. Download qBittorrent, enable its Web UI
+3. Create `profile.json` (see `AGENTS.md` / `animu/config.py` for the camelCase↔snake_case mapping) with:
+   - `qbit_url`, `username`, `password` — your qBittorrent Web UI
+   - `aniUserName` — your AniList username
+   - `bearerTokenAnilist` — AniList personal access token (needed for list mutations; scheduler reads work without it)
+   - `resolution` — "480", "720" or "1080" (1080 recommended)
+   - `root_dir` — where downloads should be stored
+   - `useProxy` / proxy settings — recommended `true` if Nyaa is blocked on your ISP (routes via a proxy like Gluetun)
+4. Run: `python3 main.py --schedule`
 
-
-* _torrent_url_ ,where your qbittorrent webUI server is set up at, usually gonna be "http://localhost:8080/"
-
-*  _username_ and _password_ of your qbittorrent webUI server
-
-* _email_ and _emailPassword_, both obtained from firebase (details on how to sign up shall be implemented later!)
-  
-* Get your Anilist username and fill it in _aniUserName_
-
-* Choose which _resolution_ to download anime. "480","720" or "1080" accepted (1080 recommended because it's been tested extensively)
-
-* _root_dir_, where you want your downloads to be stored.
-
-* _token_, _guildId_, _clientId_, all taken from a Discord Bot
-
-5. Run `ts-node main.ts` (P.S you might need VPN)
-
-## Current Development Status
-I love this ngl
+For deployment to the live CT 102 instance and full architecture details, see **`AGENTS.md`**.
