@@ -135,7 +135,8 @@ dist
 
 .tern-port
 profile.json
-test*
+# Only the known-bad leftover test is ignored; all real tests are tracked.
+tests/test_nyaa_episode_offsets.py
 *.lock
 tempCodeRunner*
 build

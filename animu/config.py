@@ -16,6 +16,12 @@ class ProfileConfig:
     email_password: Optional[str] = None
     ani_user_name: Optional[str] = None
     bearer_token_anilist: Optional[str] = None
+    # AniList OAuth2 settings (authorization-code flow + implicit/PIN fallback)
+    anilist_client_id: Optional[str] = None
+    anilist_client_secret: Optional[str] = None
+    anilist_redirect_uri: Optional[str] = None
+    # Token issuance timestamp (epoch seconds) for 1-year expiry tracking
+    anilist_token_issued_at: Optional[int] = None
     id: Optional[int] = None
     resolution: str = "1080"
     root_dir: str = "/storage/media/anime"
@@ -63,6 +69,10 @@ MAP_JSON_TO_ATTR = {
     "emailPassword": "email_password",
     "aniUserName": "ani_user_name",
     "bearerTokenAnilist": "bearer_token_anilist",
+    "anilistClientId": "anilist_client_id",
+    "anilistClientSecret": "anilist_client_secret",
+    "anilistRedirectUri": "anilist_redirect_uri",
+    "anilistTokenIssuedAt": "anilist_token_issued_at",
     "id": "id",
     "resolution": "resolution",
     "rootDir": "root_dir",

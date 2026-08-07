@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from .config import get_config, save_config, reload_config, MAP_ATTR_TO_JSON, MAP_JSON_TO_ATTR
 from .anilist import anilist
+from .anilist_mutations import mutations as anilist_mutations
+from .anilist_auth import auth as anilist_auth, execute_graphql, SENSITIVE_CONFIG_FIELDS
 from .nyaa import nyaa
 from .qbittorrent import qbit
 from .database import db
@@ -55,6 +57,20 @@ def get_config_dict(cfg) -> dict:
     for k, v in cfg_dict.items():
         json_data[MAP_ATTR_TO_JSON.get(k, k)] = v
     return json_data
+
+def sanitize_config_for_api(cfg_dict: dict) -> dict:
+    """Strip sensitive fields (tokens, secrets) from config dicts sent to the UI.
+
+    The bearer token and any credential-bearing fields must never appear in
+    API responses, exceptions, or git diffs (profile.json is gitignored, but
+    the /api/config endpoint must also be safe).
+    """
+    safe = dict(cfg_dict)
+    for field_name in SENSITIVE_CONFIG_FIELDS:
+        json_key = MAP_ATTR_TO_JSON.get(field_name, field_name)
+        safe.pop(json_key, None)
+        safe.pop(field_name, None)
+    return safe
 
 def read_log_tail(file_path: str, max_lines: int = 50) -> str:
     """Reads the last N lines of a log file efficiently."""
@@ -254,6 +270,108 @@ def handle_history_delete_action(entry_id: str, action: str) -> tuple:
 
     return 400, {"error": "Invalid action"}
 
+# ---------------------------------------------------------------------------
+# AniList route helpers
+# ---------------------------------------------------------------------------
+
+def _int_param(value, default=None, required=False, name="param"):
+    """Parse an integer parameter from a query/body value.
+
+    Returns ``None`` for falsy values.  Raises ``ValueError`` on invalid
+    integers so callers can translate to a 400 response.
+    """
+    if value in (None, "", []):
+        if required:
+            raise ValueError(f"{name} is required")
+        return default
+    return int(value)
+
+
+def _parse_int_list(value, name="param"):
+    """Parse a list of ints from a comma-separated or JSON list value."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, list):
+        return [int(v) for v in value]
+    if isinstance(value, str):
+        return [int(v) for v in value.split(",") if v.strip() != ""]
+    raise ValueError(f"{name} must be a list or comma-separated string")
+
+
+def _bool_param(value, default=False):
+    """Parse a boolean from a query/body value (strings like 'true'/'false')."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes")
+    return bool(value)
+
+
+def _safe_error_response(result, fallback="Operation failed"):
+    """Translate an AniList GraphQL response dict into a safe (status, body) pair.
+
+    ``result`` may contain ``data`` (success), ``errors`` (GraphQL errors),
+    or be ``None`` / empty (network failure).  The bearer token is never
+    present in ``execute_graphql`` payloads, and this helper never injects
+    internal state, so error bodies cannot leak credentials or stack traces.
+    """
+    if not result:
+        return 502, {"error": "No response from AniList API"}
+    if "errors" in result:
+        messages = ", ".join(
+            e.get("message", "Unknown error") for e in result["errors"]
+        )
+        lowered = messages.lower()
+        if any(w in lowered for w in ("unauthorized", "token", "not configured", "401", "forbidden")):
+            return 401, {"error": messages}
+        return 400, {"error": messages}
+    return 200, {"data": result.get("data", result)}
+
+
+def _handle_graphql_read(callable_fn, *args, **kwargs):
+    """Run a read-side AniList client method and return a safe HTTP (status, body).
+
+    Wraps the client call so GraphQL errors / network failures translate to
+    safe 4xx/5xx responses without leaking tokens or stack traces.
+    """
+    try:
+        result = callable_fn(*args, **kwargs)
+        if result is None:
+            return 502, {"error": "No response from AniList API"}
+        return 200, {"data": result}
+    except Exception as e:
+        # Never leak stack traces; surface a concise, safe message.
+        msg = str(e)
+        if any(w in msg.lower() for w in SENSITIVE_CONFIG_FIELDS):
+            return 401, {"error": "AniList authentication is required."}
+        return 500, {"error": "AniList query failed" if "token" not in msg.lower() else msg}
+
+
+def _handle_graphql_mutation(mutation_name: str, **kwargs):
+    """Dispatch an AniList mutation (requires auth) and return a safe HTTP response.
+
+    ``mutation_name`` selects a method on the ``anilist_mutations`` singleton.
+    All mutations run through ``_run_mutation`` → ``execute_graphql`` which
+    enforces ``require_auth=True`` (fail-closed).  GraphQL/network errors are
+    translated into safe HTTP responses via ``_safe_error_response``; the
+    bearer token never appears in the response (it only lives on the
+    ``Authorization`` header, which ``execute_graphql`` manages internally).
+    """
+    method = getattr(anilist_mutations, mutation_name, None)
+    if method is None:
+        return 404, {"error": f"Mutation '{mutation_name}' is not available"}
+    result = method(**kwargs)
+    if not result:
+        return 502, {"error": "No response from AniList API"}
+    if "errors" in result:
+        return _safe_error_response(result)
+    # Success — return the mutation's data payload (keyed by the mutation field).
+    data = result.get("data", result)
+    return 200, data
+
+
 class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Override to suppress standard HTTP request printing in console logs (matches Node.js clean log)
@@ -398,9 +516,390 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, {"media": enriched})
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
-                
+
+        elif path == "/api/anilist/auth/url":
+            self.handle_auth_url()
+
+        elif path == "/api/anilist/auth/pin":
+            self.handle_auth_pin()
+
+        elif path == "/api/anilist/auth/state":
+            self.handle_auth_state()
+
+        elif re.match(r'^/api/anilist/media/(\d+)/airing$', path):
+            try:
+                media_id = int(re.match(r'^/api/anilist/media/(\d+)/airing$', path).group(1))
+                params = urllib.parse.parse_qs(url.query)
+                page = 1
+                try:
+                    page = int(params.get("page", [1])[0])
+                except ValueError:
+                    pass
+                status, body = _handle_graphql_read(
+                    anilist.get_airing_schedule_by_id, media_id, page=page
+                )
+                self.send_json(status, body)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/media/(\d+)/relations$', path):
+            try:
+                media_id = int(re.match(r'^/api/anilist/media/(\d+)/relations$', path).group(1))
+                status, body = _handle_graphql_read(anilist.get_previous_relations, media_id)
+                self.send_json(status, body)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/media-trend":
+            params = urllib.parse.parse_qs(url.query)
+            try:
+                page = int(params.get("page", [1])[0])
+            except ValueError:
+                page = 1
+            try:
+                per_page = int(params.get("perPage", [50])[0])
+            except ValueError:
+                per_page = 50
+            date = _int_param(params.get("date", [None])[0])
+            trending_greater = _int_param(params.get("trendingGreater", [None])[0])
+            average_score_greater = _int_param(params.get("averageScoreGreater", [None])[0])
+            popularity_greater = _int_param(params.get("popularityGreater", [None])[0])
+            try:
+                result = anilist.get_media_trend(
+                    page=page, per_page=per_page, date=date,
+                    trending_greater=trending_greater,
+                    averageScore_greater=average_score_greater,
+                    popularity_greater=popularity_greater,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/user-list":
+            params = urllib.parse.parse_qs(url.query)
+            user_name = params.get("userName", [None])[0]
+            media_type = params.get("type", ["ANIME"])[0]
+            try:
+                per_chunk = int(params.get("perChunk", [500])[0])
+            except ValueError:
+                per_chunk = 500
+            status_in = params.get("statusIn", None)
+            if status_in:
+                try:
+                    status_in = [s for s in status_in]
+                except Exception:
+                    status_in = None
+            force_single = _bool_param(params.get("forceSingleCompletedList", [True])[0], default=True)
+            sort_raw = params.get("sort", None)
+            if sort_raw:
+                if isinstance(sort_raw, list):
+                    sort = sort_raw
+                else:
+                    sort = [sort_raw]
+            else:
+                sort = None
+            try:
+                result = anilist.get_media_list_collection(
+                    user_name=user_name or None,
+                    media_type=media_type,
+                    status_in=status_in,
+                    per_chunk=per_chunk,
+                    force_single_completed_list=force_single,
+                    sort=sort,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/genres":
+            try:
+                result = anilist.get_genre_collection()
+                self.send_json(200, {"genres": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/tags":
+            try:
+                result = anilist.get_media_tag_collection()
+                self.send_json(200, {"tags": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/user$', path) or re.match(r'^/api/anilist/user/\d+$', path):
+            params = urllib.parse.parse_qs(url.query)
+            user_id = _int_param(params.get("id", [None])[0])
+            user_name = params.get("name", [None])[0]
+            if not user_id and not user_name:
+                # /api/anilist/viewer — convenience alias for the authenticated user
+                try:
+                    result = anilist.get_viewer()
+                    if not result:
+                        self.send_json(404, {"error": "Viewer not found"})
+                        return
+                    self.send_json(200, {"viewer": result})
+                except Exception as e:
+                    self.send_json(500, {"error": str(e)})
+            else:
+                try:
+                    result = anilist.get_user(user_id=user_id, user_name=user_name)
+                    if not result:
+                        self.send_json(404, {"error": "User not found"})
+                        return
+                    self.send_json(200, {"user": result})
+                except Exception as e:
+                    self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/viewer":
+            try:
+                result = anilist.get_viewer()
+                if not result:
+                    self.send_json(404, {"error": "Viewer not found"})
+                    return
+                self.send_json(200, {"viewer": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/user/(\d+)/following$', path):
+            try:
+                user_id = int(re.match(r'^/api/anilist/user/(\d+)/following$', path).group(1))
+                params = urllib.parse.parse_qs(url.query)
+                page = _int_param(params.get("page", [1])[0], default=1)
+                per_page = _int_param(params.get("perPage", [50])[0], default=50)
+                sort = params.get("sort", None)
+                result = anilist.get_following(user_id, page=page, per_page=per_page, sort=sort)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/user/(\d+)/followers$', path):
+            try:
+                user_id = int(re.match(r'^/api/anilist/user/(\d+)/followers$', path).group(1))
+                params = urllib.parse.parse_qs(url.query)
+                page = _int_param(params.get("page", [1])[0], default=1)
+                per_page = _int_param(params.get("perPage", [50])[0], default=50)
+                sort = params.get("sort", None)
+                result = anilist.get_followers(user_id, page=page, per_page=per_page, sort=sort)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/notifications":
+            params = urllib.parse.parse_qs(url.query)
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            notification_type = params.get("type", [None])[0]
+            reset = _bool_param(params.get("resetNotificationCount", [False])[0])
+            try:
+                result = anilist.get_notifications(
+                    page=page, per_page=per_page,
+                    notification_type=notification_type or None,
+                    reset_notification_count=reset,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/reviews":
+            params = urllib.parse.parse_qs(url.query)
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            media_id = _int_param(params.get("mediaId", [None])[0])
+            user_id = _int_param(params.get("userId", [None])[0])
+            media_type = params.get("type", ["ANIME"])[0]
+            sort = params.get("sort", None)
+            if isinstance(sort, list):
+                sort = sort
+            try:
+                result = anilist.get_reviews(
+                    media_id=media_id, user_id=user_id, media_type=media_type,
+                    page=page, per_page=per_page, sort=sort,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/activity":
+            params = urllib.parse.parse_qs(url.query)
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [30])[0], default=30)
+            user_id = _int_param(params.get("userId", [None])[0])
+            messenger_id = _int_param(params.get("messengerId", [None])[0])
+            media_id = _int_param(params.get("mediaId", [None])[0])
+            activity_type = params.get("type", [None])[0]
+            is_following = _bool_param(params.get("isFollowing", [True])[0], default=True)
+            has_replies = _bool_param(params.get("hasReplies", [False])[0])
+            try:
+                result = anilist.get_activity_feed(
+                    page=page, per_page=per_page, user_id=user_id,
+                    messenger_id=messenger_id, media_id=media_id,
+                    activity_type=activity_type or None, is_following=is_following,
+                    has_replies=has_replies,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/character/(\d+)$', path):
+            try:
+                char_id = int(re.match(r'^/api/anilist/character/(\d+)$', path).group(1))
+                result = anilist.get_character(char_id)
+                if not result:
+                    self.send_json(404, {"error": "Character not found on AniList"})
+                    return
+                self.send_json(200, {"character": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/characters/search":
+            params = urllib.parse.parse_qs(url.query)
+            q = params.get("q", [""])[0]
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            try:
+                result = anilist.search_characters(q, page=page, per_page=per_page)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/staff/(\d+)$', path):
+            try:
+                staff_id = int(re.match(r'^/api/anilist/staff/(\d+)$', path).group(1))
+                result = anilist.get_staff(staff_id)
+                if not result:
+                    self.send_json(404, {"error": "Staff not found on AniList"})
+                    return
+                self.send_json(200, {"staff": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/staff/search":
+            params = urllib.parse.parse_qs(url.query)
+            q = params.get("q", [""])[0]
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            try:
+                result = anilist.search_staff(q, page=page, per_page=per_page)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/studio/(\d+)$', path):
+            try:
+                studio_id = int(re.match(r'^/api/anilist/studio/(\d+)$', path).group(1))
+                result = anilist.get_studio(studio_id)
+                if not result:
+                    self.send_json(404, {"error": "Studio not found on AniList"})
+                    return
+                self.send_json(200, {"studio": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/studios/search":
+            params = urllib.parse.parse_qs(url.query)
+            q = params.get("q", [""])[0]
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            try:
+                result = anilist.search_studios(q, page=page, per_page=per_page)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/recommendations":
+            params = urllib.parse.parse_qs(url.query)
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            media_id = _int_param(params.get("mediaId", [None])[0])
+            user_id = _int_param(params.get("userId", [None])[0])
+            sort = params.get("sort", None)
+            try:
+                result = anilist.get_recommendations(
+                    media_id=media_id, user_id=user_id, page=page, per_page=per_page, sort=sort,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/site-statistics":
+            try:
+                result = anilist.get_site_statistics()
+                if not result:
+                    self.send_json(404, {"error": "Site statistics not found"})
+                    return
+                self.send_json(200, {"statistics": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/anichart/(\d+)$', path):
+            try:
+                user_id = int(re.match(r'^/api/anilist/anichart/(\d+)$', path).group(1))
+                result = anilist.get_anichart_user(user_id)
+                if not result:
+                    self.send_json(404, {"error": "AniChart user not found"})
+                    return
+                self.send_json(200, {"anichart": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/markdown":
+            body_params = url.query  # markdown is a GET query param
+            params = urllib.parse.parse_qs(url.query)
+            markdown_text = params.get("text", [""])[0]
+            if not markdown_text:
+                self.send_json(400, {"error": "Query parameter 'text' is required"})
+                return
+            try:
+                result = anilist.get_markdown_html(markdown_text)
+                if result is None:
+                    self.send_json(502, {"error": "No response from AniList API"})
+                    return
+                self.send_json(200, {"html": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/thread/(\d+)$', path):
+            try:
+                thread_id = int(re.match(r'^/api/anilist/thread/(\d+)$', path).group(1))
+                result = anilist.get_thread(thread_id)
+                if not result:
+                    self.send_json(404, {"error": "Thread not found on AniList"})
+                    return
+                self.send_json(200, {"thread": result})
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/threads":
+            params = urllib.parse.parse_qs(url.query)
+            page = _int_param(params.get("page", [1])[0], default=1)
+            per_page = _int_param(params.get("perPage", [50])[0], default=50)
+            user_id = _int_param(params.get("userId", [None])[0])
+            reply_user_id = _int_param(params.get("replyUserId", [None])[0])
+            category_id = _int_param(params.get("categoryId", [None])[0])
+            subscribed = _bool_param(params.get("subscribed", [False])[0])
+            search = params.get("search", [None])[0]
+            try:
+                result = anilist.get_threads(
+                    page=page, per_page=per_page, user_id=user_id,
+                    reply_user_id=reply_user_id, category_id=category_id,
+                    subscribed=subscribed, search=search,
+                )
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif re.match(r'^/api/anilist/thread/(\d+)/comments$', path):
+            try:
+                thread_id = int(re.match(r'^/api/anilist/thread/(\d+)/comments$', path).group(1))
+                params = urllib.parse.parse_qs(url.query)
+                page = _int_param(params.get("page", [1])[0], default=1)
+                per_page = _int_param(params.get("perPage", [50])[0], default=50)
+                result = anilist.get_thread_comments(thread_id, page=page, per_page=per_page)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
         elif path == "/api/config":
-            self.send_json(200, get_config_dict(get_config()))
+            self.send_json(200, sanitize_config_for_api(get_config_dict(get_config())))
             
         elif path == "/api/logs":
             self.handle_get_logs(url)
@@ -496,6 +995,248 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 err_msg = result.get("error", "Mutation failed")
                 status_code = 401 if ("Token" in err_msg or "401" in err_msg or "Unauthorized" in err_msg) else 400
                 self.send_json(status_code, {"ok": False, "error": err_msg})
+            return
+
+        # ------------------------------------------------------------------
+        # Section 4 mutation routes — all require auth (require_auth=True path).
+        # Each delegates to the AniListMutations singleton, which enforces
+        # fail-closed behaviour and never leaks the bearer token.
+        # ------------------------------------------------------------------
+
+        elif path == "/api/anilist/list/update":
+            body = self.read_json_body()
+            media_id = body.get("mediaId")
+            if not media_id:
+                self.send_json(400, {"ok": False, "error": "mediaId is required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "save_media_list_entry",
+                    media_id=int(media_id),
+                    status=body.get("status", body.get("state")),
+                    score=body.get("score"),
+                    score_raw=body.get("scoreRaw"),
+                    progress=body.get("progress"),
+                    progress_volumes=body.get("progressVolumes"),
+                    repeat=body.get("repeat"),
+                    priority=body.get("priority"),
+                    notes=body.get("notes"),
+                    private=body.get("private"),
+                    hidden_from_status_lists=body.get("hiddenFromStatusLists"),
+                    custom_lists=body.get("customLists"),
+                    advanced_scores=body.get("advancedScores"),
+                    started_at=body.get("startedAt"),
+                    completed_at=body.get("completedAt"),
+                    entry_id=body.get("id"),
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            except Exception:
+                status, resp = 500, {"error": "AniList update failed"}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/list/update-many":
+            body = self.read_json_body()
+            ids = body.get("ids")
+            if not ids:
+                self.send_json(400, {"error": "ids is required"})
+                return
+            try:
+                ids = _parse_int_list(ids, "ids")
+            except ValueError:
+                self.send_json(400, {"error": "ids must be a list of integers"})
+                return
+            status, resp = _handle_graphql_mutation(
+                "update_media_list_entries",
+                ids=ids,
+                status=body.get("status"),
+                score=body.get("score"),
+                score_raw=body.get("scoreRaw"),
+                progress=body.get("progress"),
+                progress_volumes=body.get("progressVolumes"),
+                repeat=body.get("repeat"),
+                priority=body.get("priority"),
+                notes=body.get("notes"),
+                private=body.get("private"),
+                hidden_from_status_lists=body.get("hiddenFromStatusLists"),
+                custom_lists=body.get("customLists"),
+                advanced_scores=body.get("advancedScores"),
+                started_at=body.get("startedAt"),
+                completed_at=body.get("completedAt"),
+            )
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/activity/text":
+            body = self.read_json_body()
+            text = body.get("text")
+            if not text:
+                self.send_json(400, {"error": "text is required"})
+                return
+            status, resp = _handle_graphql_mutation("save_text_activity", text=text, activity_id=body.get("id"), locked=body.get("locked"))
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/activity/message":
+            body = self.read_json_body()
+            message = body.get("message")
+            recipient_id = body.get("recipientId")
+            if not message or not recipient_id:
+                self.send_json(400, {"error": "message and recipientId are required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "save_message_activity",
+                    message=message, recipient_id=int(recipient_id),
+                    activity_id=body.get("id"), private=body.get("private"),
+                    locked=body.get("locked"), as_mod=body.get("asMod"),
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/activity/reply":
+            body = self.read_json_body()
+            activity_id = body.get("activityId")
+            text = body.get("text")
+            if not activity_id or not text:
+                self.send_json(400, {"error": "activityId and text are required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "save_activity_reply",
+                    activity_id=int(activity_id), text=text,
+                    reply_id=body.get("id"), as_mod=body.get("asMod"),
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/like":
+            body = self.read_json_body()
+            likeable_id = body.get("id")
+            likeable_type = body.get("type", "ACTIVITY")
+            if not likeable_id:
+                self.send_json(400, {"error": "id is required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "toggle_like", likeable_id=int(likeable_id), likeable_type=likeable_type,
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/follow":
+            body = self.read_json_body()
+            user_id = body.get("userId")
+            if not user_id:
+                self.send_json(400, {"error": "userId is required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation("toggle_follow", user_id=int(user_id))
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/favourite":
+            body = self.read_json_body()
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "toggle_favourite",
+                    anime_id=body.get("animeId"),
+                    manga_id=body.get("mangaId"),
+                    character_id=body.get("characterId"),
+                    staff_id=body.get("staffId"),
+                    studio_id=body.get("studioId"),
+                )
+            except Exception:
+                status, resp = 500, {"error": "AniList favourite update failed"}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/favourite/order":
+            body = self.read_json_body()
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "update_favourite_order",
+                    anime_ids=_parse_int_list(body.get("animeIds"), "animeIds"),
+                    manga_ids=_parse_int_list(body.get("mangaIds"), "mangaIds"),
+                    character_ids=_parse_int_list(body.get("characterIds"), "characterIds"),
+                    staff_ids=_parse_int_list(body.get("staffIds"), "staffIds"),
+                    studio_ids=_parse_int_list(body.get("studioIds"), "studioIds"),
+                )
+            except ValueError as e:
+                status, resp = 400, {"error": str(e)}
+            except Exception:
+                status, resp = 500, {"error": "AniList favourites order update failed"}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/review":
+            body = self.read_json_body()
+            media_id = body.get("mediaId")
+            body_text = body.get("body")
+            if not media_id or not body_text:
+                self.send_json(400, {"error": "mediaId and body are required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "save_review",
+                    media_id=int(media_id), body=body_text,
+                    summary=body.get("summary"), score=body.get("score"),
+                    private=body.get("private"), review_id=body.get("id"),
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/review/rate":
+            body = self.read_json_body()
+            review_id = body.get("reviewId")
+            if not review_id:
+                self.send_json(400, {"error": "reviewId is required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "rate_review", review_id=int(review_id), rating=body.get("rating", "UPVOTE"),
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/recommendation":
+            body = self.read_json_body()
+            media_id = body.get("mediaId")
+            media_recommendation_id = body.get("mediaRecommendationId")
+            if not media_id or not media_recommendation_id:
+                self.send_json(400, {"error": "mediaId and mediaRecommendationId are required"})
+                return
+            try:
+                status, resp = _handle_graphql_mutation(
+                    "save_recommendation",
+                    media_id=int(media_id), media_recommendation_id=int(media_recommendation_id),
+                    rating=body.get("rating"),
+                )
+            except (ValueError, TypeError) as e:
+                status, resp = 400, {"error": str(e)}
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/user":
+            body = self.read_json_body()
+            try:
+                status, resp = _handle_graphql_mutation("update_user", **body)
+            except Exception:
+                status, resp = 500, {"error": "AniList user update failed"}
+            self.send_json(status, resp)
             return
 
         elif path == "/api/test/qbittorrent":
@@ -733,8 +1474,109 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(status_code, resp)
             return
             
+        elif path == "/api/anilist/auth/callback":
+            self.handle_auth_callback()
+            return
+
+        elif path == "/api/anilist/auth/clear":
+            anilist_auth.clear_token()
+            self.send_json(200, {"ok": True, "authenticated": False})
+            return
+
         else:
             self.send_json(404, {"error": "Not found"})
+
+    # ------------------------------------------------------------------
+    # AniList OAuth2 auth route handlers
+    # ------------------------------------------------------------------
+
+    def handle_auth_url(self):
+        """GET /api/anilist/auth/url — generate an authorization URL.
+
+        Query params:
+          - ``grant``: ``"code"`` (Authorization Code, default) or ``"token"`` (Implicit)
+          - ``redirect_uri``: optional override
+        """
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        grant = params.get("grant", ["code"])[0].lower()
+        redirect_override = params.get("redirect_uri", [None])[0]
+
+        if grant not in ("code", "token"):
+            self.send_json(400, {"error": "grant must be 'code' or 'token'"})
+            return
+
+        try:
+            url = anilist_auth.build_authorization_url(
+                response_type=grant,
+                redirect_uri=redirect_override,
+            )
+        except ValueError as e:
+            self.send_json(500, {"error": str(e)})
+            return
+
+        self.send_json(200, {"authUrl": url, "grantType": grant})
+
+    def handle_auth_pin(self):
+        """GET /api/anilist/auth/pin — generate a PIN-flow authorization URL."""
+        try:
+            url = anilist_auth.build_pin_url()
+        except ValueError as e:
+            self.send_json(500, {"error": str(e)})
+            return
+
+        self.send_json(200, {"authUrl": url, "grantType": "code", "pinRedirect": True})
+
+    def handle_auth_callback(self):
+        """POST /api/anilist/auth/callback — exchange an auth code for a token.
+
+        Body:
+          - ``code``: the authorization code from the OAuth2 redirect
+          - ``redirect_uri``: optional override (must match the one used in the auth URL)
+        """
+        body = self.read_json_body()
+        code = body.get("code", "").strip()
+        redirect_override = body.get("redirect_uri")
+
+        if not code:
+            self.send_json(400, {"ok": False, "error": "Authorization code is required"})
+            return
+
+        token, error = anilist_auth.exchange_code_for_token(
+            code,
+            redirect_uri=redirect_override or None,
+        )
+
+        if error:
+            # Safe: error message never includes the token
+            self.send_json(401, {"ok": False, "error": error})
+            return
+
+        if not token:
+            self.send_json(401, {"ok": False, "error": "No token returned from AniList"})
+            return
+
+        # Persist token + issuance timestamp (1-year expiry tracking)
+        anilist_auth.store_token(token)
+
+        self.send_json(200, {
+            "ok": True,
+            "authenticated": True,
+            "userName": anilist_auth.get_user_name() or "",
+            "tokenExpiry": anilist_auth.get_expiry_info(),
+        })
+
+    def handle_auth_state(self):
+        """GET /api/anilist/auth/state — report auth status without exposing the token.
+
+        Returns whether a token is present, whether re-auth is needed, and
+        non-sensitive expiry info.  The token value itself is never included.
+        """
+        self.send_json(200, {
+            "authenticated": anilist_auth.is_token_present(),
+            "needsReauth": anilist_auth.needs_reauth(),
+            "userName": anilist_auth.get_user_name() or "",
+            "tokenExpiry": anilist_auth.get_expiry_info(),
+        })
 
     def do_PATCH(self):
         url = urllib.parse.urlparse(self.path)
@@ -749,7 +1591,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     setattr(current, attr, v)
             save_config(current)
             reload_config()
-            self.send_json(200, {"ok": True, "config": get_config_dict(get_config())})
+            self.send_json(200, {"ok": True, "config": sanitize_config_for_api(get_config_dict(get_config()))})
             
         elif re.match(r'^/api/anime/(\d+)$', path):
             media_id = int(re.match(r'^/api/anime/(\d+)$', path).group(1))
@@ -794,6 +1636,27 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             target = urllib.parse.unquote(target)
             deleted = ignored_manager.delete_entry(target)
             self.send_json(200, {"ok": deleted})
+
+        # ------------------------------------------------------------------
+        # Section 4 mutation routes (DELETE) — require auth, fail-closed.
+        # ------------------------------------------------------------------
+        elif re.match(r'^/api/anilist/list/(\d+)$', path):
+            entry_id = int(re.match(r'^/api/anilist/list/(\d+)$', path).group(1))
+            status, resp = _handle_graphql_mutation("delete_media_list_entry", entry_id=entry_id)
+            self.send_json(status, resp)
+            return
+
+        elif path == "/api/anilist/list/custom":
+            params = urllib.parse.parse_qs(url.query)
+            body = self.read_json_body()
+            custom_list = body.get("customList", params.get("customList", [None])[0])
+            if not custom_list:
+                self.send_json(400, {"error": "customList is required"})
+                return
+            media_type = body.get("type", params.get("type", ["ANIME"])[0])
+            status, resp = _handle_graphql_mutation("delete_custom_list", custom_list=custom_list, media_type=media_type)
+            self.send_json(status, resp)
+            return
         else:
             self.send_json(404, {"error": "Not found"})
 

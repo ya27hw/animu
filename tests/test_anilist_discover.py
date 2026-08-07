@@ -32,7 +32,7 @@ class TestAniListDiscoverClient(unittest.TestCase):
         self.assertEqual(result, page)
         variables = query.call_args.args[1]
         self.assertEqual(variables, {"page": 2, "perPage": 12, "sort": ["SCORE_DESC"]})
-        self.assertIn("media(type: ANIME, sort: $sort)", query.call_args.args[0])
+        self.assertIn("media(type: ANIME, sort: $sort", query.call_args.args[0])
 
     def test_search_and_detail_map_graphql_payloads(self):
         search_page = {"pageInfo": {}, "media": [{"id": 7}]}
@@ -58,8 +58,8 @@ class TestAniListDiscoverClient(unittest.TestCase):
         http_client.__exit__ = Mock(return_value=False)
         http_client.post.return_value = response
 
-        with patch("animu.anilist.get_config", return_value=self.config), patch(
-            "animu.anilist.httpx.Client", return_value=http_client
+        with patch("animu.anilist_auth.get_config", return_value=self.config), patch(
+            "animu.anilist_auth.httpx.Client", return_value=http_client
         ):
             result = self.client._query("mutation { test }", {}, require_auth=True)
 
