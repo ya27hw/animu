@@ -485,11 +485,6 @@
       loadSettings();
       loadAuthState();
     }
-
-    // Notify feature modules of tab switch
-    if (window.Animu && window.Animu.bus) {
-      window.Animu.bus.emit('tab:switch', tabName);
-    }
   }
 
   DOM.navTabs.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
@@ -987,11 +982,6 @@
   // TAB 3: LISTS (FULL ANILIST COLLECTION)
   // ==========================================
   async function loadLists() {
-    // Delegate to feature module if registered
-    if (window.Animu && window.Animu.lists && typeof window.Animu.lists.loadLists === 'function') {
-      return window.Animu.lists.loadLists();
-    }
-    // Fallback to legacy inline implementation
     loadUserListsData();
   }
 
@@ -1129,12 +1119,8 @@
 
   // Quick Progress Increment Handler
   window.quickIncrementProgress = async function(mediaId, currentEp) {
-    // Delegate to feature module if registered
-    if (window.Animu && window.Animu.lists && typeof window.Animu.lists.quickIncrementProgress === 'function') {
-      return window.Animu.lists.quickIncrementProgress(mediaId, currentEp);
-    }
-    // Fallback to legacy inline implementation — routed through the backend so
-    // the server-side AniList token authorizes the mutation.
+    // Routed through the backend so the server-side AniList token authorizes
+    // the mutation (the browser never holds bearerTokenAnilist).
     try {
       const newEp = currentEp + 1;
       await saveListEntryViaBackend({ mediaId, progress: newEp });
@@ -1489,11 +1475,6 @@
   // TAB 5: SOCIAL HUB (ACTIVITIES & PROFILES)
   // ==========================================
   async function loadSocial() {
-    // Delegate to feature module if registered
-    if (window.Animu && window.Animu.lists && typeof window.Animu.lists.loadSocial === 'function') {
-      return window.Animu.lists.loadSocial();
-    }
-    // Fallback to legacy inline implementation
     loadActivityFeed();
   }
 
@@ -1605,11 +1586,6 @@
   document.getElementById('btn-post-activity')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-post-activity');
     if (btn.disabled) return;
-    // Delegate to feature module if registered
-    if (window.Animu && window.Animu.lists && typeof window.Animu.lists.postTextActivity === 'function') {
-      return window.Animu.lists.postTextActivity();
-    }
-    // Fallback to legacy inline implementation
     const input = document.getElementById('activity-input');
     if (!input || !input.value.trim()) return;
     setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Posting...');
@@ -2343,11 +2319,6 @@
   let activeListEditorEntryId = null;
 
   window.openListEditor = function(mediaId, entryId) {
-    // Delegate to feature module if registered
-    if (window.Animu && window.Animu.lists && typeof window.Animu.lists.openListEditor === 'function') {
-      return window.Animu.lists.openListEditor(mediaId);
-    }
-    // Fallback to legacy inline implementation
     state.activeListEditorMedia = mediaId;
     // Prefer the caller-provided entry id; fall back to the loaded collection.
     const entry = state.listEntriesByMedia ? state.listEntriesByMedia[mediaId] : null;
