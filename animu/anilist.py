@@ -851,6 +851,7 @@ class AnilistClient:
                   meanScore
                   popularity
                   genres
+                  tags { name }
                   description
                   nextAiringEpisode { id episode timeUntilAiring airingAt }
                 }
