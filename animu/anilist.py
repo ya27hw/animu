@@ -143,6 +143,7 @@ class AnilistClient:
                     color
                   }
                   genres
+                  description(asHtml: false)
                   format
                   episodes
                   status
