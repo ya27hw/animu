@@ -210,6 +210,16 @@
       if (!res.ok) throw new Error('Failed to fetch active downloads.');
       return res.json();
     },
+    async retryDownload(hash) {
+      const res = await fetch(`/api/downloads/${hash}/retry`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to retry torrent.');
+      return res.json();
+    },
+    async removeDownload(hash, deleteFiles = false) {
+      const res = await fetch(`/api/downloads/${hash}${deleteFiles ? '?deleteFiles=true' : ''}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to remove torrent.');
+      return res.json();
+    },
     async getSearchDebug() {
       const res = await fetch('/api/search-debug');
       if (!res.ok) throw new Error('Failed to fetch search diagnostics.');
@@ -471,7 +481,10 @@
       loadLogs();
       loadSearchDebug();
     }
-    else if (tabName === 'settings') loadSettings();
+    else if (tabName === 'settings') {
+      loadSettings();
+      loadAuthState();
+    }
 
     // Notify feature modules of tab switch
     if (window.Animu && window.Animu.bus) {
@@ -815,31 +828,38 @@
 
     DOM.animeGrid.innerHTML = list.map(item => {
       const media = item.media || {};
-      const title = item.media.alternativeTitle || formatTitle(media.title);
+      const mediaId = item.mediaId;
+      const title = media.alternativeTitle || formatTitle(media.title);
       const cover = media.coverImage?.extraLarge || media.coverImage?.medium || '';
       const totalEp = media.episodes || '?';
       const progress = item.progress || 0;
-      const downloaded = item.downloadedEpisodes || [];
+      // Incomplete records may lack downloadedEpisodes — always fall back to
+      // an empty array so the Local Download State section renders every time.
+      const downloaded = Array.isArray(item.downloadedEpisodes) ? item.downloadedEpisodes : [];
+      const hasCover = !!cover;
 
       return `
         <div class="group relative rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 overflow-hidden shadow-sm hover:shadow-xl hover:border-violet-500/50 transition-all duration-300 flex flex-col">
           <div class="aspect-[16/9] w-full relative overflow-hidden bg-slate-900">
-            <img src="${cover}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+            ${hasCover
+              ? `<img src="${cover}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onerror="this.style.display='none'" />`
+              : '<div class="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900"><i class="fa-solid fa-tv text-3xl text-slate-600"></i></div>'
+            }
             <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-transparent to-transparent"></div>
 
             <div class="absolute top-3 left-3 right-3 flex items-center justify-between">
               <span class="px-2.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-bold text-violet-400">
                 Ep ${progress} / ${totalEp}
               </span>
-              <button onclick="openAnimeSettings(${item.mediaId})" class="w-8 h-8 rounded-xl bg-slate-950/80 backdrop-blur-md text-slate-300 hover:text-white flex items-center justify-center transition-colors">
+              ${mediaId != null ? `<button onclick="openAnimeSettings(${mediaId})" class="w-8 h-8 rounded-xl bg-slate-950/80 backdrop-blur-md text-slate-300 hover:text-white flex items-center justify-center transition-colors">
                 <i class="fa-solid fa-gear text-xs"></i>
-              </button>
+              </button>` : ''}
             </div>
           </div>
 
           <div class="p-5 flex flex-col justify-between flex-grow space-y-4">
             <div>
-              <h3 onclick="openMediaDetail(${item.mediaId})" class="font-['Outfit'] font-bold text-base text-slate-900 dark:text-white line-clamp-1 cursor-pointer hover:text-violet-400 transition-colors">${title}</h3>
+              <h3 ${mediaId != null ? `onclick="openMediaDetail(${mediaId})"` : ''} class="font-['Outfit'] font-bold text-base text-slate-900 dark:text-white line-clamp-1 ${mediaId != null ? 'cursor-pointer hover:text-violet-400 transition-colors' : ''}">${title}</h3>
               <p class="text-xs text-slate-400 mt-1 line-clamp-2">${media.description ? media.description.replace(/<[^>]*>?/gm, '') : 'No description available.'}</p>
             </div>
 
@@ -856,12 +876,12 @@
 
             <!-- Action buttons -->
             <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button onclick="openNyaaDialog(${item.mediaId})" class="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md shadow-violet-500/20 transition-all flex items-center justify-center gap-1.5">
+              ${mediaId != null ? `<button onclick="openNyaaDialog(${mediaId})" class="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md shadow-violet-500/20 transition-all flex items-center justify-center gap-1.5">
                 <i class="fa-solid fa-magnifying-glass"></i>Nyaa Search
               </button>
-              <button onclick="openMediaDetail(${item.mediaId})" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5">
+              <button onclick="openMediaDetail(${mediaId})" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5">
                 <i class="fa-solid fa-circle-info"></i>Details
-              </button>
+              </button>` : '<span class="col-span-full text-[11px] text-slate-500 italic">Incomplete record — no media actions available.</span>'}
             </div>
           </div>
         </div>
@@ -880,6 +900,16 @@
     }
   });
 
+  // Human-readable ETA from qBittorrent's seconds-remaining field.
+  function formatEta(seconds) {
+    if (!seconds || seconds <= 0) return '';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return ` | ETA ${h}h ${m}m`;
+    if (m > 0) return ` | ETA ${m}m`;
+    return ` | ETA ${seconds}s`;
+  }
+
   async function loadActiveDownloads() {
     const token = tabToken;
     try {
@@ -888,15 +918,41 @@
       if (!DOM.downloadsPanel) return;
       if (downloads && downloads.length > 0) {
         DOM.downloadsPanel.classList.remove('hidden');
-        DOM.downloadsList.innerHTML = downloads.map(d => `
-          <div class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-sky-500/20 flex items-center justify-between text-xs">
-            <div class="space-y-0.5">
-              <p class="font-bold text-slate-800 dark:text-slate-200">${d.name}</p>
-              <p class="text-sky-400 font-mono">${(d.progress * 100).toFixed(1)}% | ${d.dlspeed ? (d.dlspeed / 1024 / 1024).toFixed(1) : 0} MB/s</p>
+        DOM.downloadsList.innerHTML = downloads.map(d => {
+          const kind = d.statusKind || 'unknown';
+          const label = d.statusLabel || d.state || 'Unknown';
+          const badgeClass = {
+            downloading: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+            stalled: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+            checking: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+            queued: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
+            paused: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
+            stopped: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+            complete: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+            seeding: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+            error: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+          }[kind] || 'bg-slate-500/15 text-slate-400 border-slate-500/30';
+          const pct = Math.min(100, Math.max(0, (d.progress || 0) * 100)).toFixed(1);
+          const speed = d.dlspeed ? ` | ${(d.dlspeed / 1024 / 1024).toFixed(1)} MB/s down` : '';
+          const eta = formatEta(d.eta);
+          const retryable = ['stopped', 'paused', 'error', 'queued', 'stalled', 'checking'].includes(kind);
+          const hash = d.hash || '';
+          return `
+            <div class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-sky-500/20 flex items-center justify-between gap-3 text-xs">
+              <div class="space-y-0.5 min-w-0">
+                <p class="font-bold text-slate-800 dark:text-slate-200 truncate" title="${(d.name || '').replace(/"/g, '&quot;')}">${d.name || '(unnamed torrent)'}</p>
+                <p class="text-sky-400 font-mono">${pct}%${speed}${eta}</p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="px-2.5 py-1 rounded-xl border font-bold uppercase tracking-wider text-[10px] ${badgeClass}">${label}</span>
+                ${hash ? `
+                  ${retryable ? `<button onclick="retryTorrent('${hash}')" class="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500 border border-amber-500/20 hover:text-white text-amber-400 font-bold text-[10px] uppercase transition-colors cursor-pointer" title="Resume / retry"><i class="fa-solid fa-rotate-right"></i></button>` : ''}
+                  <button onclick="removeTorrent('${hash}')" class="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500 border border-rose-500/20 hover:text-white text-rose-400 font-bold text-[10px] uppercase transition-colors cursor-pointer" title="Remove from queue (keeps files on disk)"><i class="fa-solid fa-trash"></i></button>
+                ` : ''}
+              </div>
             </div>
-            <span class="px-2.5 py-1 rounded-xl bg-sky-500/10 text-sky-400 font-bold uppercase tracking-wider text-[10px]">${d.state}</span>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       } else {
         DOM.downloadsPanel.classList.add('hidden');
       }
@@ -904,6 +960,27 @@
       console.warn('Failed to load active downloads:', e);
     }
   }
+
+  window.retryTorrent = async function (hash) {
+    try {
+      await API.retryDownload(hash);
+      showToast('Torrent resumed.', 'success');
+      loadActiveDownloads();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  window.removeTorrent = async function (hash) {
+    if (!confirm('Remove this torrent from the queue? Files on disk are kept.')) return;
+    try {
+      await API.removeDownload(hash);
+      showToast('Torrent removed.', 'success');
+      loadActiveDownloads();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
 
 
   // ==========================================
@@ -1773,18 +1850,24 @@
       return;
     }
 
-    DOM.historyList.innerHTML = items.map(item => `
+    DOM.historyList.innerHTML = items.map(item => {
+      // Bare-title entries (no torrent name) get a fallback label so the
+      // history list never shows an empty/undefined title.
+      const title = item.title || item.anime_title || 'Untitled download';
+      const subtitle = item.episode != null && item.episode !== '' ? `Ep ${item.episode}` : null;
+      return `
       <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
           ${item.cover_image ? `<img src="${item.cover_image}" class="w-10 h-12 object-cover rounded-xl" />` : '<i class="fa-solid fa-download text-violet-500 text-lg"></i>'}
-          <div>
-            <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-200">${item.title}</h4>
+          <div class="min-w-0">
+            <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-200 truncate">${title}${subtitle ? ` <span class="text-violet-400">· ${subtitle}</span>` : ''}</h4>
             <span class="text-[10px] text-slate-400">${item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Just now'}</span>
           </div>
         </div>
-        <button onclick="deleteHistoryEntry('${item.id}')" class="text-rose-500 hover:text-rose-600 p-2"><i class="fa-solid fa-trash"></i></button>
+        <button onclick="deleteHistoryEntry('${item.id}')" class="text-rose-500 hover:text-rose-600 p-2 shrink-0"><i class="fa-solid fa-trash"></i></button>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   window.deleteHistoryEntry = async function(id) {
@@ -1943,6 +2026,120 @@
     } finally {
       setBtnLoading(DOM.btnSubmitConfig, false);
     }
+  });
+
+  // ---- Live OAuth status box ----
+  // Reflects the real auth state from /api/anilist/auth/state instead of a
+  // hardcoded "Active Token / Expires: Never" box.
+
+  async function loadAuthState() {
+    const d = {
+      indicator: document.getElementById('auth-status-indicator'),
+      statusText: document.getElementById('auth-status-text'),
+      expiryText: document.getElementById('token-expiry-text'),
+      warning: document.getElementById('token-expiry-warning'),
+      ok: document.getElementById('token-expiry-ok'),
+      btn: document.getElementById('btn-anilist-oauth'),
+    };
+    if (!d.statusText) return; // Settings panel not in DOM
+
+    try {
+      const res = await fetch('/api/anilist/auth/state');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const state = await res.json();
+      const connected = Boolean(state.authenticated);
+      const needsReauth = Boolean(state.needsReauth);
+      const expiry = state.tokenExpiry || {};
+
+      if (!connected) {
+        if (d.indicator) d.indicator.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shrink-0';
+        if (d.statusText) d.statusText.textContent = 'OAuth Status: Not connected';
+        if (d.expiryText) d.expiryText.textContent = '';
+        if (d.warning) d.warning.classList.add('hidden');
+        if (d.ok) d.ok.classList.add('hidden');
+        if (d.btn) d.btn.innerHTML = '<i class="fa-solid fa-right-to-bracket text-[10px]"></i>Connect';
+        return;
+      }
+
+      if (d.indicator) d.indicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block shrink-0';
+      if (d.statusText) d.statusText.textContent = `OAuth Status: Connected${state.userName ? ` as ${state.userName}` : ''}`;
+      if (d.btn) d.btn.innerHTML = '<i class="fa-solid fa-right-to-bracket text-[10px]"></i>Reconnect';
+
+      if (needsReauth) {
+        if (d.expiryText) d.expiryText.textContent = 'Expired';
+        if (d.warning) {
+          d.warning.classList.remove('hidden');
+          const warnText = document.getElementById('token-expiry-text-warning');
+          if (warnText) warnText.textContent = 'Token expired — re-authentication required.';
+        }
+        if (d.ok) d.ok.classList.add('hidden');
+      } else if (expiry.daysRemaining !== undefined && expiry.daysRemaining >= 0 && expiry.daysRemaining <= 30) {
+        if (d.expiryText) d.expiryText.textContent = `Expires in ${expiry.daysRemaining} day(s)`;
+        if (d.warning) {
+          d.warning.classList.remove('hidden');
+          const warnText = document.getElementById('token-expiry-text-warning');
+          if (warnText) warnText.textContent = `Token expires in ${expiry.daysRemaining} day(s). Re-authenticate soon.`;
+        }
+        if (d.ok) d.ok.classList.add('hidden');
+      } else {
+        if (d.expiryText) d.expiryText.textContent =
+          expiry.daysRemaining !== undefined && expiry.daysRemaining >= 0
+            ? `Expires in ${expiry.daysRemaining} days`
+            : 'Expiry: persistent token';
+        if (d.warning) d.warning.classList.add('hidden');
+        if (d.ok) d.ok.classList.remove('hidden');
+      }
+    } catch (err) {
+      if (d.indicator) d.indicator.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shrink-0';
+      if (d.statusText) d.statusText.textContent = 'OAuth Status: Unable to check';
+      if (d.expiryText) d.expiryText.textContent = '';
+      if (d.warning) d.warning.classList.add('hidden');
+      if (d.ok) d.ok.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('btn-anilist-oauth')?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/anilist/auth/url?grant=token');
+      if (!res.ok) throw new Error('Could not generate AniList auth URL.');
+      const data = await res.json();
+      const url = data.authUrl || data.url;
+      if (!url) throw new Error('No auth URL returned.');
+      const popup = window.open(url, 'anilist-oauth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+      if (!popup) {
+        showToast('Popup blocked — opening auth in a new tab.', 'warning');
+        window.open(url, '_blank');
+        return;
+      }
+      function onMessage(event) {
+        if (event.origin !== window.location.origin) return;
+        if (event.data && event.data.type === 'anilist-auth-complete') {
+          window.removeEventListener('message', onMessage);
+          showToast(event.data.ok ? 'AniList authentication successful!' : `Auth failed: ${event.data.error || 'Unknown error'}`, event.data.ok ? 'success' : 'error');
+          loadAuthState();
+        }
+      }
+      window.addEventListener('message', onMessage);
+      const checker = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checker);
+          window.removeEventListener('message', onMessage);
+          loadAuthState();
+        }
+      }, 1000);
+    } catch (err) {
+      showToast(`Auth error: ${err.message}`, 'error');
+    }
+  });
+
+  // Reveal-on-demand toggle for the masked Discord webhook field.
+  document.getElementById('btn-toggle-webhook')?.addEventListener('click', () => {
+    const input = document.getElementById('webhook-input');
+    if (!input) return;
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    const icon = document.querySelector('#btn-toggle-webhook i');
+    if (icon) icon.className = show ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
   });
 
 
