@@ -829,7 +829,6 @@ class AnilistClient:
                 progressVolumes
                 repeat
                 score
-                scoreRaw
                 priority
                 private
                 notes
@@ -851,6 +850,7 @@ class AnilistClient:
                   meanScore
                   popularity
                   genres
+                  description
                   nextAiringEpisode { id episode timeUntilAiring airingAt }
                 }
               }
