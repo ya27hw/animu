@@ -1,6 +1,7 @@
 import http.server
 import json
 import os
+import subprocess
 import httpx
 import re
 import posixpath
@@ -17,6 +18,29 @@ from .models import OfflineAnime
 from .history import history_manager
 from .ignored import ignored_manager
 from . import readiness
+
+# Cache-busting version for the SPA assets. NPM's global assets.conf caches
+# .js/.css with a long max-age and strips the backend Cache-Control header, so
+# without a versioned URL a deploy leaves browsers on stale JS. Derive from git
+# HEAD when available, else fall back to app.js mtime.
+def _asset_version() -> str:
+    try:
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        out = subprocess.check_output(
+            ["git", "-C", root, "rev-parse", "--short", "HEAD"],
+            timeout=2, stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        if out:
+            return out
+    except Exception:
+        pass
+    try:
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        return str(int(os.path.getmtime(os.path.join(root, 'webui', 'app.js'))))
+    except Exception:
+        return "dev"
+
+ASSET_VERSION = _asset_version()
 
 def get_config_dict(cfg) -> dict:
     """Serializes ProfileConfig back to the camelCase JSON format for the UI."""
@@ -840,6 +864,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             try:
                 with open(full_path, 'rb') as f:
                     content = f.read()
+                # Cache-bust SPA assets: NPM caches .js/.css with a long
+                # max-age and strips our Cache-Control, so version the URL.
+                if filename == 'index.html':
+                    content = content.replace(
+                        b'src="/app.js"',
+                        ('src="/app.js?v=' + ASSET_VERSION + '"').encode(),
+                    )
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Cache-Control", "public, max-age=0, must-revalidate")
