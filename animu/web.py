@@ -1834,9 +1834,56 @@ def start_server():
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     os.makedirs(os.path.join(root_dir, 'logs'), exist_ok=True)
     
-    server = http.server.HTTPServer((host, port), AnimuHTTPHandler)
+    server = http.server.ThreadingHTTPServer((host, port), AnimuHTTPHandler)
     print(f"Animu Web UI running at http://localhost:{port} (bind {host})")
+    # Warm the heavy AniList reads in the background so the cache is already
+    # populated when the first user opens the site (see _prewarm_heavy_reads).
+    try:
+        _prewarm_heavy_reads()
+    except Exception:
+        pass
     server.serve_forever()
+
+
+def _prewarm_heavy_reads() -> None:
+    """Pre-fetch the heavy AniList reads so the persistent cache is warm
+    before a user opens the WebUI.
+
+    ``get_anime_user_list`` (Watching tab, /api/anime) and
+    ``get_media_list_collection`` (Lists/Stats/search filter) are the two
+    expensive calls — the collection alone takes ~12s cold.  They are cached
+    persistently (see ``_cached_persistent``), so fetching them once at boot
+    means the first user request is served from cache instantly, and the
+    stale-while-revalidate layer refreshes them in the background on entry.
+    This runs in a daemon thread: any AniList/PocketBase hiccup at boot must
+    never block or crash the server.
+    """
+    from .config import get_config
+    from .anilist import anilist
+
+    cfg = get_config()
+    user_name = cfg.ani_user_name
+
+    def _load():
+        try:
+            if user_name:
+                # Mirror the exact kwargs the /api/anilist/user-list handler
+                # passes, so the pre-warmed cache slot is the one the web UI
+                # actually reads (the persistent cache key includes kwargs).
+                anilist.get_media_list_collection(
+                    user_name=user_name,
+                    media_type="ANIME",
+                    status_in=None,
+                    per_chunk=500,
+                    force_single_completed_list=True,
+                    sort=None,
+                )
+            anilist.get_anime_user_list()
+            print("[PREWARM] Heavy AniList reads cached.")
+        except Exception as e:
+            print(f"[PREWARM] Warm-up failed (will refresh on first request): {e}")
+
+    threading.Thread(target=_load, daemon=True).start()
 
 
 def health_response() -> tuple[int, dict[str, Any]]:

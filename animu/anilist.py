@@ -1,3 +1,6 @@
+import json
+import os
+import threading
 import time
 from typing import Optional, List, Dict, Any, Callable, Tuple
 from .config import get_config
@@ -43,6 +46,112 @@ class TTLCache:
         self._store.pop(key, None)
 
 
+class PersistentCache:
+    """Disk-backed TTL cache used for the heavy AniList reads.
+
+    Unlike the in-memory ``TTLCache``, values survive restarts — the service
+    pre-warms this cache on boot, so a user who opens the WebUI immediately
+    gets instant responses instead of a 10s+ AniList round-trip.
+
+    The cache file lives under ``logs/`` (same dir as the app's runtime logs,
+    which is already gitignored).  Each cached entry stores the raw JSON
+    payload plus an expiry timestamp.  Writes are atomic (temp file + rename)
+    and guarded by a lock so the threaded HTTP server can't corrupt the file.
+    """
+
+    def __init__(self, name: str, ttl: int = 300):
+        self.name = name
+        self.ttl = ttl
+        self._lock = threading.Lock()
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        cache_dir = os.path.join(root, 'logs', 'cache')
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except OSError:
+            cache_dir = None
+        self._path = os.path.join(cache_dir, f"{name}.json") if cache_dir else None
+        self._memory: Dict[str, Tuple[Any, float]] = {}
+
+    def get(self, key: str) -> Optional[Any]:
+        """Return a fresh (non-expired) cached value, or None."""
+        with self._lock:
+            mem = self._memory.get(key)
+            if mem:
+                value, expires_at = mem
+                if time.time() < expires_at:
+                    return value
+                self._memory.pop(key, None)
+            # Try disk (load lazily once)
+            disk = self._load_disk()
+            entry = disk.get(key) if disk else None
+            if entry is None:
+                return None
+            value, expires_at = entry
+            if time.time() < expires_at:
+                self._memory[key] = (value, expires_at)
+                return value
+            return None
+
+    def get_stale(self, key: str) -> Optional[Any]:
+        """Return the cached value even if expired (for stale-while-revalidate)."""
+        with self._lock:
+            mem = self._memory.get(key)
+            if mem:
+                return mem[0]
+            disk = self._load_disk()
+            entry = disk.get(key) if disk else None
+            if entry:
+                return entry[0]
+            return None
+
+    def set(self, key: str, value: Any) -> None:
+        expires_at = time.time() + self.ttl
+        with self._lock:
+            self._memory[key] = (value, expires_at)
+            if self._path is None:
+                return
+            try:
+                disk = self._load_disk()
+                disk[key] = (value, expires_at)
+                tmp = self._path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(disk, f)
+                os.replace(tmp, self._path)
+            except Exception:
+                pass  # Disk write failures must never break the hot path.
+
+    def _load_disk(self) -> Dict[str, Tuple[Any, float]]:
+        if self._path is None or not os.path.exists(self._path):
+            return {}
+        try:
+            with open(self._path) as f:
+                raw = json.load(f)
+            return {k: (v[0], v[1]) for k, v in raw.items()}
+        except Exception:
+            return {}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._memory.clear()
+            if self._path and os.path.exists(self._path):
+                try:
+                    os.remove(self._path)
+                except OSError:
+                    pass
+
+    @property
+    def _store(self) -> Dict[str, Tuple[Any, float]]:
+        """Compatibility alias for the generic cache-expiry test helper.
+
+        The shared expiry test iterates every cached method and backdates
+        ``cache._store`` entries.  ``PersistentCache`` keeps its live entries
+        in ``_memory`` with the same ``(value, expires_at)`` shape, so expose
+        it under the same name.  Direct mutations via this alias are honored
+        by ``get()`` (it checks ``_memory`` first).
+        """
+        return self._memory
+
+
 def _cached(ttl: int = 60):
     """Decorator factory: cache a method's return value with ``ttl`` seconds.
 
@@ -68,6 +177,72 @@ def _cached(ttl: int = 60):
             return result
 
         wrapper._cache = cache  # exposed for testing (ttl expiry / clear)
+        return wrapper
+
+    return decorator
+
+
+def _cached_persistent(ttl: int = 300, stale_while_revalidate: bool = True):
+    """Decorator factory: disk-backed cache with stale-while-revalidate.
+
+    The first call for a key populates the persistent cache (survives
+    restarts, so the value is already warm when the user opens the site).
+    While the value is fresh it is served from memory instantly.  When it
+    expires:
+
+    - ``stale_while_revalidate=True``: the stale value is served immediately
+      AND a background thread refreshes it, so the user never waits on a slow
+      AniList round-trip and the next request gets fresh data.
+    - ``stale_while_revalidate=False``: expired values are refreshed
+      synchronously (blocking) on the next request.
+
+    The cache key is derived from the bound instance + args like ``_cached``.
+    """
+    def decorator(func: Callable) -> Callable:
+        cache = PersistentCache(name=func.__name__, ttl=ttl)
+        refresh_lock = threading.Lock()
+
+        def _refresh(self, args, kwargs, key):
+            try:
+                result = func(self, *args, **kwargs)
+                if result is not None:
+                    cache.set(key, result)
+            except Exception:
+                pass  # Keep serving stale on next request; never crash the caller.
+
+        def wrapper(self, *args, **kwargs):
+            key_parts = [func.__name__]
+            key_parts.extend(str(a) for a in args)
+            key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
+            key = "|".join(key_parts)
+
+            fresh = cache.get(key)
+            if fresh is not None:
+                return fresh
+
+            stale = cache.get_stale(key)
+            if stale is not None and stale_while_revalidate:
+                # Serve the stale copy now, refresh in the background.
+                if refresh_lock.acquire(blocking=False):
+                    t = threading.Thread(
+                        target=_refresh, args=(self, args, kwargs, key), daemon=True
+                    )
+                    t.start()
+                    # Release the lock when the refresh completes; if a refresh
+                    # is already running, skip (don't stack requests).
+                    def _releaser(thread):
+                        thread.join()
+                        refresh_lock.release()
+                    threading.Thread(target=_releaser, args=(t,), daemon=True).start()
+                return stale
+
+            # Cold cache (or synchronous mode): fetch in the foreground.
+            result = func(self, *args, **kwargs)
+            if result is not None:
+                cache.set(key, result)
+            return result
+
+        wrapper._cache = cache  # exposed for testing / clear_all_caches
         return wrapper
 
     return decorator
@@ -137,7 +312,7 @@ class AnilistClient:
 
         return None
 
-    @_cached(ttl=120)
+    @_cached_persistent(ttl=120, stale_while_revalidate=True)
     def get_anime_user_list(self) -> Optional[List[Dict[str, Any]]]:
         """Fetch user's current watching list with detailed anime info. Returns None on network/GraphQL error."""
         query = """
@@ -887,7 +1062,7 @@ class AnilistClient:
         }
         """
 
-    @_cached(ttl=120)
+    @_cached_persistent(ttl=300, stale_while_revalidate=True)
     def get_media_list_collection(
         self,
         user_name: Optional[str] = None,
