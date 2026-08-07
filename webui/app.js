@@ -550,6 +550,7 @@
     const title = formatTitle(media.title);
     const score = media.averageScore ? `${media.averageScore}%` : 'N/A';
     const isDownloaded = state.animeList.some(a => a.mediaId === media.id);
+    const coverUrl = (media.coverImage && (media.coverImage.extraLarge || media.coverImage.large)) || '';
 
     // Sparkline SVG path generator
     let sparklineSvg = '';
@@ -568,7 +569,7 @@
     return `
       <div onclick="openMediaDetail(${media.id})" class="group relative flex-none w-40 sm:w-44 rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 shadow-md hover:scale-[1.03] transition-transform duration-300 cursor-pointer">
         <div class="aspect-[2/3] w-full relative overflow-hidden">
-          <img src="${media.coverImage.extraLarge || media.coverImage.large}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <img src="${coverUrl}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
           <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent"></div>
 
           <!-- Badges -->
