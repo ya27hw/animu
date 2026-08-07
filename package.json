@@ -3,6 +3,7 @@
   "version": "4.3.0",
   "description": "DOWNLOAD ANIMU",
   "scripts": {
+    "dev": "node serve.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc && tsc-alias",
     "start": "pm2 start ecosystem.config.json",

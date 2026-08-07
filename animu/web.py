@@ -21,11 +21,11 @@ def get_config_dict(cfg) -> dict:
     from dataclasses import asdict
     cfg_dict = asdict(cfg)
     cfg_dict.pop('_extra_fields', None)
-    
+
     json_data = {}
     if hasattr(cfg, '_extra_fields') and cfg._extra_fields:
         json_data.update(cfg._extra_fields)
-        
+
     for k, v in cfg_dict.items():
         json_data[MAP_ATTR_TO_JSON.get(k, k)] = v
     return json_data
@@ -38,12 +38,12 @@ def read_log_tail(file_path: str, max_lines: int = 50) -> str:
         with open(file_path, 'rb') as f:
             f.seek(0, os.SEEK_END)
             file_size = f.tell()
-            
+
             chunk_size = 1024 * 64
             buffer = b""
             position = file_size
             newline_count = 0
-            
+
             while position > 0 and newline_count <= max_lines + 1:
                 read_size = min(chunk_size, position)
                 position -= read_size
@@ -51,7 +51,7 @@ def read_log_tail(file_path: str, max_lines: int = 50) -> str:
                 chunk = f.read(read_size)
                 buffer = chunk + buffer
                 newline_count = buffer.count(b"\n")
-                
+
             lines = buffer.decode("utf-8", errors="ignore").splitlines()
             return "\n".join(lines[-max_lines:])
     except Exception as e:
@@ -86,20 +86,20 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         anime_list = anilist.get_anime_user_list()
         pb_records = db.get_all()
         pb_map = {r.media_id: r for r in pb_records}
-        
+
         merged = []
         for anime in anime_list:
             media_id = anime["mediaId"]
             record = pb_map.get(media_id)
-            
+
             alt_title = record.alternative_title if record else ""
             start_ep = record.starting_episode if record else 0
             downloaded = record.downloaded_episodes if record else []
-            
+
             media = dict(anime["media"])
             media["alternativeTitle"] = alt_title or None
             media["startingEpisode"] = start_ep
-            
+
             merged.append({
                 "mediaId": media_id,
                 "progress": anime["progress"],
@@ -113,7 +113,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             trimmed = title.strip()
             bucket = 0 if re.match(r'^[A-Za-z]', trimmed) else 1
             return (bucket, trimmed.lower(), item["mediaId"])
-            
+
         merged.sort(key=get_sort_key)
         return merged
 
@@ -131,10 +131,10 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
-                
+
         elif path == "/api/config":
             self.send_json(200, get_config_dict(get_config()))
-            
+
         elif path == "/api/logs":
             self.handle_get_logs(url)
 
@@ -151,10 +151,10 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, list(failed_traces.values()))
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
-            
+
         elif path == "/api/health":
             self.send_json(200, {"ok": True})
-            
+
         elif path == "/api/history":
             try:
                 items = history_manager.get_all()
@@ -164,7 +164,38 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
-            
+
+        elif path == "/api/anilist/notifications":
+            try:
+                watching = self.get_anime_list()
+                notifs = []
+                import time
+                now = time.time()
+                for item in watching:
+                    media = item.get("media", {})
+                    next_ep = media.get("nextAiringEpisode")
+                    title = media.get("title", {}).get("romaji") or media.get("title", {}).get("english") or "Anime"
+                    if next_ep and isinstance(next_ep, dict):
+                        airing_at = next_ep.get("airingAt", 0)
+                        ep = next_ep.get("episode", 1)
+                        if airing_at < now + 86400: # Airing today or recently aired
+                            notifs.append({
+                                "id": f"airing-{media.get('id')}-{ep}",
+                                "type": "AIRING",
+                                "mediaId": media.get("id"),
+                                "title": title,
+                                "message": f"Episode {ep} of {title} airs soon / recently aired!",
+                                "timestamp": airing_at,
+                                "unread": True,
+                                "coverImage": media.get("coverImage", {}).get("medium")
+                            })
+                self.send_json(200, {
+                    "count": len(notifs),
+                    "notifications": notifs
+                })
+            except Exception as e:
+                self.send_json(200, {"count": 0, "notifications": []})
+
         else:
             self.serve_static(path)
 
@@ -233,7 +264,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             body = self.read_json_body()
             query = body.get("query", "").strip()
             use_alt_url = bool(body.get("useAltUrl"))
-            
+
             if not query:
                 self.send_json(400, {"error": "Query is required"})
                 return
@@ -247,7 +278,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 "pubDate": c["pubDate"],
                 "score": None
             } for c in candidates[:25]]
-            
+
             self.send_json(200, {
                 "title": query,
                 "episode": None,
@@ -255,13 +286,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 "count": len(candidates),
                 "results": results
             })
-            
+
         elif path == "/api/nyaa-download":
             body = self.read_json_body()
             link = body.get("link", "").strip()
             title = body.get("title", "").strip()
             use_alt_url = bool(body.get("useAltUrl"))
-            
+
             if not link or not title:
                 self.send_json(400, {"error": "Link and title are required"})
                 return
@@ -270,7 +301,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             if not success:
                 self.send_json(500, {"error": "qBittorrent rejected the torrent"})
                 return
-                
+
             history_manager.add_entry(
                 title=title,
                 link=link,
@@ -283,18 +314,18 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             media_id = int(re.match(r'^/api/anime/(\d+)/nyaa-search$', path).group(1))
             body = self.read_json_body()
             episode = body.get("episode")
-            
+
             # Fetch anime details
             watching = self.get_anime_list()
             anime = next((x for x in watching if x["mediaId"] == media_id), None)
             if not anime:
                 self.send_json(404, {"error": "Anime not found"})
                 return
-                
+
             record = db.get(media_id)
             starting_episode = record.starting_episode if record else 0
             alt_title = record.alternative_title if record else None
-            
+
             if episode is not None:
                 try:
                     episode_val = int(episode)
@@ -304,7 +335,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     return
             else:
                 candidates = nyaa.search_title_candidates(anime, starting_episode, alt_title)
-                
+
             results = [{
                 "title": c["title"],
                 "link": c["link"],
@@ -313,7 +344,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 "pubDate": c["pubDate"],
                 "score": round(c["score"], 3) if c["score"] is not None else None
             } for c in candidates[:25]]
-            
+
             self.send_json(200, {
                 "mediaId": media_id,
                 "episode": episode,
@@ -327,25 +358,25 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             body = self.read_json_body()
             link = body.get("link", "").strip()
             episode = body.get("episode")
-            
+
             watching = self.get_anime_list()
             anime = next((x for x in watching if x["mediaId"] == media_id), None)
             if not anime:
                 self.send_json(404, {"error": "Anime not found"})
                 return
-                
+
             if not link:
                 self.send_json(400, {"error": "Link is required"})
                 return
-                
+
             save_title = anime["media"]["alternativeTitle"] or anime["media"]["title"]["romaji"]
             use_proxy_download = nyaa.should_use_proxy_download(anime)
-            
+
             success = qbit.add_check_torrent(link, save_title, episode, use_proxy_download)
             if not success:
                 self.send_json(500, {"error": "qBittorrent rejected the download request"})
                 return
-                
+
             cover_img = anime["media"].get("coverImage", {}).get("extraLarge") or anime["media"].get("coverImage", {}).get("medium")
             history_manager.add_entry(
                 title=save_title,
@@ -364,7 +395,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     record.downloaded_episodes.sort()
                 record.reset_timeout()
                 db.upsert(media_id, record)
-                
+
             self.send_json(200, {
                 "ok": True,
                 "mediaId": media_id,
@@ -387,7 +418,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 record.downloaded_episodes = []
                 db.upsert(media_id, record)
             self.send_json(200, {"ok": True})
-            
+
         else:
             self.send_json(404, {"error": "Not found"})
 
@@ -405,13 +436,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             save_config(current)
             reload_config()
             self.send_json(200, {"ok": True, "config": get_config_dict(get_config())})
-            
+
         elif re.match(r'^/api/anime/(\d+)$', path):
             media_id = int(re.match(r'^/api/anime/(\d+)$', path).group(1))
             body = self.read_json_body()
-            
+
             record = db.get(media_id) or OfflineAnime(media_id=media_id)
-            
+
             if "alternativeTitle" in body:
                 record.alternative_title = str(body["alternativeTitle"] or "").strip()
             if "startingEpisode" in body:
@@ -421,13 +452,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     pass
             if body.get("resetDownloadedEpisodes"):
                 record.downloaded_episodes = []
-                
+
             db.upsert(media_id, record)
             cached = db.local_cache.get(str(media_id), {})
             synced = not cached.get("_unsynced", False)
             self.send_json(200, {"ok": True, "synced": synced,
                 "warning": "Saved locally but PocketBase sync failed." if not synced else None})
-            
+
         else:
             self.send_json(404, {"error": "Not found"})
 
@@ -458,20 +489,20 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         logs_dir = os.path.join(root_dir, 'logs')
-        
+
         log_files = {
             "combined": {"label": "Combined", "path": os.path.join(logs_dir, "animu.log")},
             "out": {"label": "Stdout", "path": os.path.join(logs_dir, "animu-out.log")},
             "error": {"label": "Stderr", "path": os.path.join(logs_dir, "animu-error.log")}
         }
-        
+
         selected = requested_key if requested_key in log_files else "combined"
         file_info = log_files[selected]
-        
+
         content = read_log_tail(file_info["path"], max_lines)
-        
+
         available = [{"key": k, "label": v["label"]} for k, v in log_files.items()]
-        
+
         self.send_json(200, {
             "selected": selected,
             "available": available,
@@ -483,21 +514,21 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
     def serve_static(self, path: str):
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         public_dir = os.path.join(root_dir, 'webui')
-        
+
         # Clean pathname
         filename = path.lstrip('/')
         if not filename or filename in ('index.html', 'settings') or re.match(r'^anime/\d+$', filename):
             filename = 'index.html'
-            
+
         full_path = os.path.abspath(os.path.join(public_dir, filename))
-        
+
         # Verify subdirectory traversal prevention
         if not full_path.startswith(os.path.abspath(public_dir)):
             self.send_response(403)
             self.end_headers()
             self.wfile.write(b"Forbidden")
             return
-            
+
         if os.path.exists(full_path) and os.path.isfile(full_path):
             ext = os.path.splitext(full_path)[1].lower()
             mime_types = {
@@ -531,13 +562,23 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
 def start_server():
     """Starts the http server synchronously."""
+    import sys
     port = 3210
     host = "0.0.0.0"
-    
+
+    for i, arg in enumerate(sys.argv):
+        if arg == "--port" and i + 1 < len(sys.argv):
+            try:
+                port = int(sys.argv[i + 1])
+            except ValueError:
+                pass
+        elif arg == "--host" and i + 1 < len(sys.argv):
+            host = sys.argv[i + 1]
+
     # Ensure logs folder exists
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     os.makedirs(os.path.join(root_dir, 'logs'), exist_ok=True)
-    
+
     server = http.server.HTTPServer((host, port), AnimuHTTPHandler)
     print(f"Animu Web UI running at http://localhost:{port} (bind {host})")
     server.serve_forever()
@@ -546,3 +587,6 @@ def start():
     """Starts the Web UI server in a background daemon thread."""
     t = threading.Thread(target=start_server, daemon=True)
     t.start()
+
+if __name__ == "__main__":
+    start_server()

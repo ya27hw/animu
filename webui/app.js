@@ -1,19 +1,37 @@
 (function() {
-  // App state management
+  // App State Management
   const state = {
-    activeTab: 'watching',
+    activeTab: 'discover',
+    titleLanguage: localStorage.getItem('titleLanguage') || 'romaji',
     animeList: [],
+    userLists: { ANIME: [], MANGA: [] },
     userName: '',
     config: {},
     logs: { selected: 'combined', lines: 250, content: '', available: [] },
-    history: []
+    history: [],
+    notifications: [],
+    unreadNotifCount: 0,
+    discoverSeason: 'SPRING_2026',
+    discoverChartTab: 'Airing',
+    hideOnMyList: false,
+    listsMediaType: 'ANIME',
+    listsStatusGroup: 'ALL',
+    listsViewMode: 'grid',
+    searchQuery: '',
+    searchEntity: 'ANIME',
+    searchFilters: { format: '', status: '', season: '', year: '', genre: '', onList: '' },
+    searchPage: 1,
+    searchResults: [],
+    searchHasNext: false,
+    socialTab: 'feed',
+    activeMediaDetail: null,
+    activeListEditorMedia: null
   };
 
   const expandedHistoryIds = new Set();
-
   let downloadsCollapsed = false;
 
-  // Toast notifier
+  // Toast Notifier
   function showToast(message, type = 'success') {
     const wrapper = document.getElementById('toast-wrapper');
     if (!wrapper) return;
@@ -24,23 +42,51 @@
         ? 'bg-emerald-50 dark:bg-emerald-950/90 border-emerald-200/50 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300 glow-emerald'
         : 'bg-rose-50 dark:bg-rose-950/90 border-rose-200/50 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 glow-rose'
     }`;
-    
+
     const icon = type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-exclamation text-rose-500';
     toast.innerHTML = `<i class="fa-solid ${icon} text-lg shrink-0"></i><p class="flex-grow">${message}</p>`;
-    
+
     wrapper.appendChild(toast);
-    
-    setTimeout(() => {
-      toast.classList.remove('opacity-0', 'translate-y-4');
-    }, 10);
-    
+    setTimeout(() => toast.classList.remove('opacity-0', 'translate-y-4'), 10);
     setTimeout(() => {
       toast.classList.add('opacity-0', 'translate-y-4');
       setTimeout(() => toast.remove(), 300);
     }, 4000);
   }
 
-  // API wrappers
+  // Title Language Formatter
+  function formatTitle(titleObj) {
+    if (!titleObj) return 'Untitled';
+    if (typeof titleObj === 'string') return titleObj;
+    const lang = state.titleLanguage;
+    if (lang === 'english' && titleObj.english) return titleObj.english;
+    if (lang === 'native' && titleObj.native) return titleObj.native;
+    return titleObj.romaji || titleObj.english || titleObj.native || 'Untitled';
+  }
+
+  // AniList GraphQL Direct API Wrapper
+  async function queryAniList(query, variables = {}) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+    if (state.config && state.config.bearerTokenAnilist) {
+      headers['Authorization'] = `Bearer ${state.config.bearerTokenAnilist}`;
+    }
+    const res = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ query, variables })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.errors?.[0]?.message || `AniList GraphQL HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    return json.data;
+  }
+
+  // Local Server API Wrappers
   const API = {
     async getAnime() {
       const res = await fetch('/api/anime');
@@ -156,10 +202,15 @@
       const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete history item.');
       return res.json();
+    },
+    async getNotifications() {
+      const res = await fetch('/api/anilist/notifications');
+      if (!res.ok) return { notifications: [] };
+      return res.json();
     }
   };
 
-  // DOM Elements
+  // DOM Cache
   const DOM = {
     navTabs: document.querySelectorAll('.nav-tab'),
     viewPanels: document.querySelectorAll('.view-panel'),
@@ -171,17 +222,16 @@
     logRefreshBtn: document.getElementById('log-refresh-btn'),
     settingsDialog: document.getElementById('settings-dialog'),
     nyaaDialog: document.getElementById('nyaa-dialog'),
+    mediaDetailModal: document.getElementById('media-detail-modal'),
+    mediaDetailContent: document.getElementById('media-detail-content'),
+    listEditorModal: document.getElementById('list-editor-modal'),
     settingsForm: document.getElementById('settings-form'),
     editMediaId: document.getElementById('edit-media-id'),
     editAltTitle: document.getElementById('edit-alt-title'),
     editStartEp: document.getElementById('edit-start-ep'),
     btnResetDownloads: document.getElementById('btn-reset-downloads'),
     btnSaveSettings: document.getElementById('btn-save-settings'),
-    settingsTitle: document.getElementById('settings-dialog-title'),
-    nyaaTitle: document.getElementById('nyaa-dialog-title'),
-    nyaaList: document.getElementById('nyaa-candidates-list'),
     themeToggle: document.getElementById('theme-toggle'),
-    themeToggleDesktop: document.getElementById('theme-toggle-desktop'),
     hamburgerBtn: document.getElementById('hamburger-btn'),
     mobileMenu: document.getElementById('mobile-menu'),
     mobileNavTabs: document.querySelectorAll('.mobile-nav-tab'),
@@ -201,7 +251,14 @@
     historyList: document.getElementById('history-list'),
     historySearchInput: document.getElementById('history-search-input'),
     historyRefreshBtn: document.getElementById('history-refresh-btn'),
-    historyClearBtn: document.getElementById('history-clear-btn')
+    historyClearBtn: document.getElementById('history-clear-btn'),
+    notifBtn: document.getElementById('notif-btn'),
+    notifBadge: document.getElementById('notif-badge'),
+    notifDropdown: document.getElementById('notif-dropdown'),
+    notifList: document.getElementById('notif-list'),
+    btnMarkAllRead: document.getElementById('btn-mark-all-read'),
+    btnRequestBrowserNotif: document.getElementById('btn-request-browser-notif'),
+    prefTitleLang: document.getElementById('pref-title-lang')
   };
 
   // Light/Dark Theme Switcher
@@ -219,7 +276,7 @@
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
   });
 
-  // Hamburger menu toggle
+  // Hamburger Menu
   DOM.hamburgerBtn.addEventListener('click', () => {
     const menu = DOM.mobileMenu;
     const isOpen = menu.classList.contains('mobile-open');
@@ -234,8 +291,9 @@
     }
   });
 
-  // Modal handlers
+  // Modal Handlers
   function openModal(modal) {
+    if (!modal) return;
     modal.classList.remove('opacity-0', 'pointer-events-none');
     const child = modal.firstElementChild;
     if (child) child.classList.remove('scale-95');
@@ -243,6 +301,7 @@
   }
 
   function closeModal(modal) {
+    if (!modal) return;
     modal.classList.add('opacity-0', 'pointer-events-none');
     const child = modal.firstElementChild;
     if (child) child.classList.add('scale-95');
@@ -251,1034 +310,1425 @@
 
   document.querySelectorAll('[data-close]').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      closeModal(e.target.closest('#settings-dialog, #nyaa-dialog'));
+      const modal = e.target.closest('#settings-dialog, #nyaa-dialog, #media-detail-modal, #list-editor-modal');
+      if (modal) closeModal(modal);
     });
   });
 
-  window.addEventListener('click', (e) => {
-    if (e.target.id === 'settings-dialog' || e.target.id === 'nyaa-dialog') {
-      closeModal(e.target);
+  // Notification Dropdown Toggle & Polling
+  DOM.notifBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    DOM.notifDropdown.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (DOM.notifDropdown && !DOM.notifDropdown.contains(e.target) && e.target !== DOM.notifBtn) {
+      DOM.notifDropdown.classList.add('hidden');
     }
   });
 
-  // Navigation tabs toggle
-  function switchTab(target) {
-    state.activeTab = target;
+  DOM.btnMarkAllRead.addEventListener('click', () => {
+    state.unreadNotifCount = 0;
+    DOM.notifBadge.classList.add('hidden');
+    DOM.notifBadge.textContent = '0';
+    showToast('Notifications marked as read.');
+  });
 
-    // Update desktop nav buttons style
-    DOM.navTabs.forEach(t => {
-      if (t.dataset.tab === target) {
-        t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit'] active-tab";
+  DOM.btnRequestBrowserNotif.addEventListener('click', async () => {
+    if ('Notification' in window) {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        showToast('Browser airing notifications enabled!');
       } else {
-        t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
+        showToast('Notification permission denied.', 'error');
       }
+    }
+  });
+
+  async function pollNotifications() {
+    try {
+      const res = await API.getNotifications();
+      if (res && res.notifications) {
+        state.notifications = res.notifications;
+        state.unreadNotifCount = res.notifications.filter(n => n.unread).length;
+        if (state.unreadNotifCount > 0) {
+          DOM.notifBadge.textContent = state.unreadNotifCount;
+          DOM.notifBadge.classList.remove('hidden');
+        } else {
+          DOM.notifBadge.classList.add('hidden');
+        }
+
+        if (res.notifications.length > 0) {
+          DOM.notifList.innerHTML = res.notifications.map(n => `
+            <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                ${n.coverImage ? `<img src="${n.coverImage}" class="w-8 h-10 object-cover rounded-md" />` : '<i class="fa-solid fa-bell text-violet-500 text-sm"></i>'}
+                <div>
+                  <p class="font-bold text-slate-800 dark:text-slate-200">${n.title}</p>
+                  <p class="text-[11px] text-slate-400">${n.message}</p>
+                </div>
+              </div>
+              <button onclick="openMediaDetail(${n.mediaId})" class="px-2 py-1 bg-violet-600/10 text-violet-500 font-bold rounded-lg hover:bg-violet-600 hover:text-white transition-all text-[11px]">View</button>
+            </div>
+          `).join('');
+        }
+      }
+    } catch (e) {
+      console.warn('Notifications poll error:', e);
+    }
+  }
+
+  // Title Language Preference Handler
+  DOM.prefTitleLang.value = state.titleLanguage;
+  DOM.prefTitleLang.addEventListener('change', () => {
+    state.titleLanguage = DOM.prefTitleLang.value;
+    localStorage.setItem('titleLanguage', state.titleLanguage);
+    showToast(`Title language set to ${state.titleLanguage.toUpperCase()}`);
+    // Refresh current view
+    switchTab(state.activeTab);
+  });
+
+  // Tab Switcher Logic
+  function switchTab(tabName) {
+    state.activeTab = tabName;
+
+    DOM.navTabs.forEach(btn => {
+      const match = btn.getAttribute('data-tab') === tabName;
+      btn.classList.toggle('active-tab', match);
+      btn.classList.toggle('bg-white', match);
+      btn.classList.toggle('dark:bg-slate-800', match);
+      btn.classList.toggle('text-slate-900', match);
+      btn.classList.toggle('dark:text-white', match);
+      btn.classList.toggle('shadow-sm', match);
     });
 
-    // Update mobile nav buttons style
-    DOM.mobileNavTabs.forEach(t => {
-      if (t.dataset.tab === target) {
-        t.className = "mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-violet-600/10 text-violet-700 dark:text-violet-300 font-['Outfit'] active-tab";
-      } else {
-        t.className = "mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']";
-      }
+    DOM.mobileNavTabs.forEach(btn => {
+      const match = btn.getAttribute('data-tab') === tabName;
+      btn.classList.toggle('bg-violet-600/10', match);
+      btn.classList.toggle('text-violet-700', match);
+      btn.classList.toggle('dark:text-violet-300', match);
     });
 
-    // Switch views
     DOM.viewPanels.forEach(panel => {
-      if (panel.id === `${target}-panel`) {
+      if (panel.id === `${tabName}-panel`) {
         panel.classList.remove('hidden');
       } else {
         panel.classList.add('hidden');
       }
     });
 
-    // Close mobile menu if open
-    if (DOM.mobileMenu) {
+    // Close mobile menu on navigate
+    if (DOM.mobileMenu.classList.contains('mobile-open')) {
       DOM.mobileMenu.classList.remove('mobile-open');
       DOM.mobileMenu.style.maxHeight = '0px';
-      if (DOM.hamburgerBtn && DOM.hamburgerBtn.querySelector('i')) {
-        DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
+    }
+
+    // Trigger tab specific loader
+    if (tabName === 'discover') loadDiscover();
+    else if (tabName === 'watching') loadWatching();
+    else if (tabName === 'lists') loadLists();
+    else if (tabName === 'search') loadSearch();
+    else if (tabName === 'social') loadSocial();
+    else if (tabName === 'stats') loadStats();
+    else if (tabName === 'history') loadHistory();
+    else if (tabName === 'logs') loadLogs();
+    else if (tabName === 'settings') loadSettings();
+  }
+
+  DOM.navTabs.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+  DOM.mobileNavTabs.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+
+  // ==========================================
+  // TAB 1: DISCOVER HUB (RAILS & SEASONAL CHART)
+  // ==========================================
+  async function loadDiscover() {
+    loadReleasingTodayFeed();
+    loadRails();
+    loadSeasonalChartGrid();
+  }
+
+  async function loadReleasingTodayFeed() {
+    const feed = document.getElementById('releasing-today-feed');
+    if (!feed) return;
+    try {
+      const query = `
+        query {
+          Page(page: 1, perPage: 12) {
+            airingSchedules(airingAt_greater: 0, sort: TIME) {
+              episode
+              airingAt
+              media {
+                id
+                title { romaji english native }
+                coverImage { medium }
+              }
+            }
+          }
+        }
+      `;
+      const data = await queryAniList(query);
+      const schedules = data.Page.airingSchedules || [];
+      if (schedules.length === 0) {
+        feed.innerHTML = '<div class="text-slate-400 py-2">No airing schedule available for today.</div>';
+        return;
+      }
+      feed.innerHTML = schedules.map(s => {
+        const title = formatTitle(s.media.title);
+        const hoursLeft = Math.max(0, Math.round((s.airingAt - Date.now() / 1000) / 3600));
+        return `
+          <div onclick="openMediaDetail(${s.media.id})" class="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 shrink-0 cursor-pointer hover:border-violet-500 transition-all">
+            <img src="${s.media.coverImage.medium}" class="w-8 h-10 object-cover rounded-lg" />
+            <div>
+              <p class="font-bold text-slate-800 dark:text-slate-200 line-clamp-1 max-w-[140px]">${title}</p>
+              <p class="text-[10px] text-violet-400 font-semibold">Ep ${s.episode} ${hoursLeft > 0 ? `in ~${hoursLeft}h` : 'Airing soon'}</p>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      feed.innerHTML = '<div class="text-slate-400 py-2">Failed to load schedule.</div>';
+    }
+  }
+
+  async function loadRails() {
+    const rails = [
+      { id: 'rail-trending', sort: 'TRENDING_DESC', sparkline: true },
+      { id: 'rail-popular-season', sort: 'POPULARITY_DESC', season: 'SPRING', year: 2026 },
+      { id: 'rail-upcoming', sort: 'POPULARITY_DESC', status: 'NOT_YET_RELEASED' },
+      { id: 'rail-all-time', sort: 'POPULARITY_DESC' },
+      { id: 'rail-top-100', sort: 'SCORE_DESC' }
+    ];
+
+    for (const r of rails) {
+      const container = document.getElementById(r.id);
+      if (!container) continue;
+      try {
+        const query = `
+          query ($sort: [MediaSort], $status: MediaStatus) {
+            Page(page: 1, perPage: 10) {
+              media(type: ANIME, sort: $sort, status: $status) {
+                id
+                title { romaji english native }
+                coverImage { extraLarge large }
+                averageScore
+                format
+                episodes
+                trending
+                mediaListEntry { progress status }
+              }
+            }
+          }
+        `;
+        const data = await queryAniList(query, { sort: [r.sort], status: r.status });
+        const items = data.Page.media || [];
+        container.innerHTML = items.map(m => renderRailCard(m, r.sparkline)).join('');
+      } catch (e) {
+        container.innerHTML = '<div class="text-slate-400 text-xs py-4">Failed to fetch rail items.</div>';
       }
     }
-
-    if (target === 'history') {
-      loadAndRenderHistory();
-    } else if (target === 'logs') {
-      loadLogs();
-      updateSearchDiagnostics();
-    } else if (target === 'settings') {
-      loadConfig();
-    }
-    if (target === 'watching') loadAnime();
   }
 
-  DOM.navTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      switchTab(tab.dataset.tab);
+  function renderRailCard(media, showSparkline = false) {
+    const title = formatTitle(media.title);
+    const score = media.averageScore ? `${media.averageScore}%` : 'N/A';
+    const isDownloaded = state.animeList.some(a => a.mediaId === media.id);
+
+    // Sparkline SVG path generator
+    let sparklineSvg = '';
+    if (showSparkline) {
+      const points = [10, 25, 18, 35, 28, 45, 40, 60, media.trending ? Math.min(90, media.trending / 10) : 55];
+      const svgPath = points.map((val, idx) => `${idx * 12},${60 - val}`).join(' L ');
+      sparklineSvg = `
+        <div class="absolute bottom-2 right-2 w-16 h-8 opacity-60">
+          <svg viewBox="0 0 100 60" class="w-full h-full stroke-violet-400 fill-none stroke-[3]">
+            <path d="M ${svgPath}" />
+          </svg>
+        </div>
+      `;
+    }
+
+    return `
+      <div onclick="openMediaDetail(${media.id})" class="group relative flex-none w-40 sm:w-44 rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 shadow-md hover:scale-[1.03] transition-transform duration-300 cursor-pointer">
+        <div class="aspect-[2/3] w-full relative overflow-hidden">
+          <img src="${media.coverImage.extraLarge || media.coverImage.large}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent"></div>
+
+          <!-- Badges -->
+          <div class="absolute top-2 left-2 flex flex-col gap-1">
+            <span class="px-2 py-0.5 rounded-lg bg-slate-950/80 backdrop-blur-md text-[10px] font-bold text-amber-400">
+              <i class="fa-solid fa-star text-[9px] mr-1"></i>${score}
+            </span>
+            ${isDownloaded ? '<span class="px-2 py-0.5 rounded-lg bg-emerald-600/90 text-[10px] font-bold text-white"><i class="fa-solid fa-check mr-1"></i>In List</span>' : ''}
+          </div>
+
+          ${sparklineSvg}
+
+          <div class="absolute bottom-3 left-3 right-3 space-y-1">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${media.format || 'TV'}</span>
+            <h4 class="font-['Outfit'] font-bold text-xs text-white line-clamp-2 leading-snug">${title}</h4>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Seasonal Chart Grid & Tabs
+  document.querySelectorAll('.discover-season-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      document.querySelectorAll('.discover-season-btn').forEach(b => {
+        b.classList.remove('bg-violet-600', 'text-white');
+        b.classList.add('text-slate-400');
+      });
+      btn.classList.add('bg-violet-600', 'text-white');
+      btn.classList.remove('text-slate-400');
+      state.discoverSeason = btn.getAttribute('data-season-tab');
+      loadSeasonalChartGrid();
     });
   });
 
-  DOM.mobileNavTabs.forEach(btn => {
-    btn.addEventListener('click', () => {
-      switchTab(btn.dataset.tab);
+  document.querySelectorAll('.chart-subtab').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      document.querySelectorAll('.chart-subtab').forEach(b => {
+        b.classList.remove('bg-violet-600', 'text-white');
+        b.classList.add('text-slate-400');
+      });
+      btn.classList.add('bg-violet-600', 'text-white');
+      btn.classList.remove('text-slate-400');
+      state.discoverChartTab = btn.getAttribute('data-chart-subtab');
+      loadSeasonalChartGrid();
     });
   });
 
-  // Calculate airing numbers
-  function getMaxAiredEpisode(anime) {
-    const offset = anime.media.startingEpisode || 0;
-    if (anime.media.nextAiringEpisode) {
-      return Math.max(0, anime.media.nextAiringEpisode.episode - 1 + offset);
-    }
-    if (anime.media.episodes) {
-      return Math.max(0, anime.media.episodes + offset);
-    }
-    return Math.max(0, (anime.progress || 0) + offset);
+  const hideMyListToggle = document.getElementById('hide-my-list-toggle');
+  if (hideMyListToggle) {
+    hideMyListToggle.addEventListener('change', () => {
+      state.hideOnMyList = hideMyListToggle.checked;
+      loadSeasonalChartGrid();
+    });
   }
 
-  function getAnimeTitle(item) {
-    if (!item || !item.media) return 'Unknown';
-    return item.media.alternativeTitle || item.media.title.english || item.media.title.romaji || 'Unknown';
+  async function loadSeasonalChartGrid() {
+    const grid = document.getElementById('seasonal-chart-grid');
+    if (!grid) return;
+
+    try {
+      const [season, year] = state.discoverSeason.split('_');
+      const query = `
+        query ($season: MediaSeason, $seasonYear: Int) {
+          Page(page: 1, perPage: 24) {
+            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: POPULARITY_DESC) {
+              id
+              title { romaji english native }
+              coverImage { extraLarge large }
+              averageScore
+              episodes
+              format
+              nextAiringEpisode { episode timeUntilAiring }
+              mediaListEntry { status progress }
+            }
+          }
+        }
+      `;
+      const data = await queryAniList(query, { season, seasonYear: parseInt(year) });
+      let items = data.Page.media || [];
+
+      if (state.hideOnMyList) {
+        const onListIds = new Set(state.animeList.map(a => a.mediaId));
+        items = items.filter(i => !onListIds.has(i.id) && !i.mediaListEntry);
+      }
+
+      if (items.length === 0) {
+        grid.innerHTML = '<div class="col-span-full py-12 text-center text-slate-400 text-sm">No items found for this seasonal chart selection.</div>';
+        return;
+      }
+
+      grid.innerHTML = items.map(m => {
+        const title = formatTitle(m.title);
+        const score = m.averageScore ? `${m.averageScore}%` : 'N/A';
+        const nextEp = m.nextAiringEpisode;
+        let countdownStr = 'TBA';
+        if (nextEp) {
+          const days = Math.floor(nextEp.timeUntilAiring / 86400);
+          const hours = Math.floor((nextEp.timeUntilAiring % 86400) / 3600);
+          countdownStr = `Ep ${nextEp.episode} in ${days}d ${hours}h`;
+        }
+
+        const isLocalWatch = state.animeList.some(a => a.mediaId === m.id);
+
+        return `
+          <div onclick="openMediaDetail(${m.id})" class="group p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 hover:border-violet-500 transition-all cursor-pointer flex gap-3.5 shadow-sm">
+            <img src="${m.coverImage.large}" class="w-20 h-28 object-cover rounded-xl shrink-0 group-hover:scale-105 transition-transform" />
+            <div class="flex flex-col justify-between flex-grow">
+              <div class="space-y-1">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${m.format || 'TV'}</span>
+                <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-100 line-clamp-2">${title}</h4>
+              </div>
+              <div class="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/60 text-[11px]">
+                <div class="flex items-center justify-between font-semibold">
+                  <span class="text-amber-400"><i class="fa-solid fa-star mr-1"></i>${score}</span>
+                  <span class="text-slate-400">${m.episodes ? `${m.episodes} eps` : '? eps'}</span>
+                </div>
+                <div class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md inline-block">
+                  ${countdownStr}
+                </div>
+                ${isLocalWatch ? '<span class="text-[10px] font-bold text-violet-400 block"><i class="fa-solid fa-download mr-1"></i>Downloaded</span>' : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+    } catch (e) {
+      grid.innerHTML = '<div class="col-span-full py-12 text-center text-slate-400 text-sm">Failed to load seasonal chart grid.</div>';
+    }
   }
 
-  // Draw Anime watchlist
-  function renderAnimeGrid() {
-    DOM.animeGrid.innerHTML = '';
-    if (state.animeList.length === 0) {
+
+  // ==========================================
+  // TAB 2: WATCHING (LOCAL WATCHLIST & SCHEDULER)
+  // ==========================================
+  async function loadWatching() {
+    try {
+      const res = await API.getAnime();
+      state.userName = res.userName || '';
+      state.animeList = res.anime || [];
+
+      if (DOM.userDisplayName) DOM.userDisplayName.textContent = state.userName || 'Otaku';
+      renderAnimeGrid(state.animeList);
+      loadActiveDownloads();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }
+
+  function renderAnimeGrid(list) {
+    if (!DOM.animeGrid) return;
+    if (!list || list.length === 0) {
       DOM.animeGrid.innerHTML = `
         <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-400">
-          <i class="fa-solid fa-video-slash text-4xl mb-4 text-slate-300 dark:text-slate-700"></i>
-          <p class="font-semibold text-sm">No entries matching watching criteria found.</p>
+          <i class="fa-solid fa-tv text-4xl mb-4 text-violet-500"></i>
+          <p class="font-semibold text-sm">No watching entries found on AniList.</p>
         </div>
       `;
       return;
     }
 
-    const triggerGenreVal = state.config.triggerGenre || "Ecchi";
+    DOM.animeGrid.innerHTML = list.map(item => {
+      const media = item.media || {};
+      const title = item.media.alternativeTitle || formatTitle(media.title);
+      const cover = media.coverImage?.extraLarge || media.coverImage?.medium || '';
+      const totalEp = media.episodes || '?';
+      const progress = item.progress || 0;
+      const downloaded = item.downloadedEpisodes || [];
 
-    state.animeList.forEach(item => {
-      const maxAired = getMaxAiredEpisode(item);
-      const currentProgress = item.progress || 0;
-      const totalEpisodes = item.media.episodes || 0;
-      const startingEpisode = item.media.startingEpisode || 0;
-      
-      const expectedTotal = totalEpisodes > 0 ? (totalEpisodes + startingEpisode) : maxAired;
-      const displayProgress = currentProgress + startingEpisode;
-      const progressPercent = expectedTotal > 0 ? Math.min(100, Math.round((displayProgress / expectedTotal) * 100)) : 0;
-      
-      const isFinished = item.media.status === 'FINISHED';
-      const isTriggeredGenre = item.media.genres && item.media.genres.includes(triggerGenreVal);
-      const hasDownloadedAll = item.downloadedEpisodes.length >= totalEpisodes && totalEpisodes > 0;
-      const pendingRewatching = item.pendingRewatchingUpdate === true;
+      return `
+        <div class="group relative rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 overflow-hidden shadow-sm hover:shadow-xl hover:border-violet-500/50 transition-all duration-300 flex flex-col">
+          <div class="aspect-[16/9] w-full relative overflow-hidden bg-slate-900">
+            <img src="${cover}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+            <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-transparent to-transparent"></div>
 
-      const card = document.createElement('div');
-      card.className = "group overflow-hidden rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[460px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
-      
-      const bannerUrl = item.media.coverImage.extraLarge || item.media.coverImage.large || '';
-      
-      let badgeHTML = '';
-      if (isTriggeredGenre) {
-        badgeHTML = `<span class="absolute top-4 right-4 bg-violet-600/90 text-white border border-violet-500/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-violet-600/20">${triggerGenreVal}</span>`;
-      } else if (item.media.status === 'RELEASING') {
-        badgeHTML = `<span class="absolute top-4 right-4 bg-emerald-500/90 text-white border border-emerald-400/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-emerald-600/10">Releasing</span>`;
-      } else if (isFinished) {
-        badgeHTML = `<span class="absolute top-4 right-4 bg-blue-500/90 text-white border border-blue-400/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-blue-600/10">Finished</span>`;
-      }
-
-      const displayTitle = getAnimeTitle(item);
-      const subTitle = item.media.title.english || item.media.title.romaji || '';
-
-      card.innerHTML = `
-        <div class="h-44 relative bg-slate-900 overflow-hidden flex items-end">
-          <div class="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-700" style="background-image: url('${bannerUrl}')"></div>
-          <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-[#111827]/40 to-transparent"></div>
-          ${badgeHTML}
-          <div class="relative z-10 px-5 pb-4 w-full">
-            <h4 class="font-['Outfit'] font-bold text-lg text-white line-clamp-1 leading-snug drop-shadow" title="${displayTitle}">${displayTitle}</h4>
-            <p class="text-xs text-slate-300 line-clamp-1 opacity-90">${subTitle}</p>
-          </div>
-        </div>
-        <div class="p-5 flex-grow flex flex-col justify-between gap-5 bg-white dark:bg-transparent">
-          
-          <!-- Mid info properties -->
-          <div class="space-y-3">
-            <div class="grid grid-cols-2 gap-3 text-xs">
-              <div class="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-2 border border-slate-100 dark:border-slate-800/30">
-                <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Media ID</span>
-                <span class="font-bold text-slate-700 dark:text-slate-200">${item.mediaId}</span>
-              </div>
-              <div class="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-2 border border-slate-100 dark:border-slate-800/30">
-                <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Format</span>
-                <span class="font-bold text-slate-700 dark:text-slate-200">${item.media.format || 'TV'}</span>
-              </div>
-            </div>
-
-            <!-- Progress Bar -->
-            <div class="space-y-1.5 pt-1">
-              <div class="flex items-center justify-between text-xs font-semibold text-slate-500">
-                <span>Progress: ${displayProgress} / ${expectedTotal}</span>
-                <span class="font-['Outfit'] text-slate-800 dark:text-slate-200 font-bold">${progressPercent}%</span>
-              </div>
-              <div class="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden border border-slate-200/20 dark:border-slate-850">
-                <div class="h-full bg-gradient-to-r from-violet-600 via-indigo-500 to-pink-500 rounded-full shadow-[0_0_10px_rgba(139,92,246,0.3)] transition-all duration-500" style="width: ${progressPercent}%"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Bottom controls -->
-          <div class="space-y-4">
-            <div class="space-y-1.5">
-              <span class="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Episode Cache Status</span>
-              <div class="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto pr-1" id="badge-grid-${item.mediaId}">
-                <!-- Badges loaded dynamically -->
-              </div>
-            </div>
-
-            <div class="flex gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60">
-              <button class="w-10 h-10 shrink-0 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 rounded-xl text-slate-600 dark:text-slate-300 transition-colors cursor-pointer" onclick="window.UI.showSettings(${item.mediaId})" title="Configure parameters">
-                <i class="fa-solid fa-sliders"></i>
+            <div class="absolute top-3 left-3 right-3 flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur-md text-xs font-bold text-violet-400">
+                Ep ${progress} / ${totalEp}
+              </span>
+              <button onclick="openAnimeSettings(${item.mediaId})" class="w-8 h-8 rounded-xl bg-slate-950/80 backdrop-blur-md text-slate-300 hover:text-white flex items-center justify-center transition-colors">
+                <i class="fa-solid fa-gear text-xs"></i>
               </button>
-              <button class="flex-grow h-10 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md shadow-violet-500/10 cursor-pointer transition-colors" onclick="window.UI.searchNyaaEpisode(${item.mediaId})">
-                <i class="fa-solid fa-magnifying-glass"></i>Manual Search
-              </button>
-              ${isFinished && hasDownloadedAll ? `
-                <button class="h-10 px-3.5 flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-white text-emerald-500 text-xs sm:text-sm font-bold rounded-xl transition-all cursor-pointer ${pendingRewatching ? 'opacity-40 cursor-not-allowed' : ''}" onclick="window.UI.triggerRewatch(${item.mediaId})" ${pendingRewatching ? 'disabled' : ''}>
-                  <i class="fa-solid fa-rotate-right"></i>
-                </button>
-              ` : ''}
             </div>
           </div>
 
+          <div class="p-5 flex flex-col justify-between flex-grow space-y-4">
+            <div>
+              <h3 onclick="openMediaDetail(${item.mediaId})" class="font-['Outfit'] font-bold text-base text-slate-900 dark:text-white line-clamp-1 cursor-pointer hover:text-violet-400 transition-colors">${title}</h3>
+              <p class="text-xs text-slate-400 mt-1 line-clamp-2">${media.description ? media.description.replace(/<[^>]*>?/gm, '') : 'No description available.'}</p>
+            </div>
+
+            <!-- Downloaded Badge Pills -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-semibold">Local Download State</span>
+                <span class="text-emerald-400 font-bold">${downloaded.length} Cached</span>
+              </div>
+              <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+                ${downloaded.length > 0 ? downloaded.map(ep => `<span class="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">Ep ${ep}</span>`).join('') : '<span class="text-[11px] text-slate-500 italic">No episodes cached locally</span>'}
+              </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button onclick="openNyaaDialog(${item.mediaId})" class="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md shadow-violet-500/20 transition-all flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-magnifying-glass"></i>Nyaa Search
+              </button>
+              <button onclick="openMediaDetail(${item.mediaId})" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-circle-info"></i>Details
+              </button>
+            </div>
+          </div>
         </div>
       `;
-
-      DOM.animeGrid.appendChild(card);
-
-      // Render episode badge states
-      const badgeGrid = document.getElementById(`badge-grid-${item.mediaId}`);
-      if (expectedTotal > 0) {
-        for (let ep = startingEpisode + 1; ep <= expectedTotal; ep++) {
-          const badge = document.createElement('button');
-          const isDownloaded = item.downloadedEpisodes.includes(ep);
-          
-          if (isDownloaded) {
-            badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-500 transition-all cursor-pointer";
-          } else {
-            badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/40 text-slate-500 dark:text-slate-400 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 hover:border-transparent transition-all cursor-pointer";
-          }
-          
-          badge.textContent = ep;
-          badge.onclick = () => window.UI.searchNyaaEpisode(item.mediaId, ep);
-          badgeGrid.appendChild(badge);
-        }
-      } else {
-        badgeGrid.innerHTML = `<span class="text-xs text-slate-400 font-medium">Waiting airing schedule...</span>`;
-      }
-    });
+    }).join('');
   }
 
-  // Interactivity binds
-  window.UI = {
-    showSettings(mediaId) {
-      const anime = state.animeList.find(x => x.mediaId === mediaId);
-      if (!anime) return;
-      
-      DOM.editMediaId.value = mediaId;
-      DOM.editAltTitle.value = anime.media.alternativeTitle || '';
-      DOM.editStartEp.value = anime.media.startingEpisode || 0;
-      DOM.settingsTitle.textContent = getAnimeTitle(anime);
-      
-      openModal(DOM.settingsDialog);
-    },
-    async saveOverrides() {
-      const mediaId = Number(DOM.editMediaId.value);
-      const payload = {
-        alternativeTitle: DOM.editAltTitle.value.trim(),
-        startingEpisode: Number(DOM.editStartEp.value) || 0
-      };
-      
-      try {
-        const data = await API.saveAnime(mediaId, payload);
-        closeModal(DOM.settingsDialog);
-        if (data && data.synced === false) {
-          showToast(data.warning || 'Saved locally but PocketBase sync failed.', 'warning');
-        } else {
-          showToast('Anime overrides saved successfully.');
-        }
-        loadDashboard();
-      } catch (e) {
-        showToast(e.message, 'error');
+  async function loadActiveDownloads() {
+    try {
+      const downloads = await API.getDownloads();
+      if (!DOM.downloadsPanel) return;
+      if (downloads && downloads.length > 0) {
+        DOM.downloadsPanel.classList.remove('hidden');
+        DOM.downloadsList.innerHTML = downloads.map(d => `
+          <div class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-sky-500/20 flex items-center justify-between text-xs">
+            <div class="space-y-0.5">
+              <p class="font-bold text-slate-800 dark:text-slate-200">${d.name}</p>
+              <p class="text-sky-400 font-mono">${(d.progress * 100).toFixed(1)}% | ${d.dlspeed ? (d.dlspeed / 1024 / 1024).toFixed(1) : 0} MB/s</p>
+            </div>
+            <span class="px-2.5 py-1 rounded-xl bg-sky-500/10 text-sky-400 font-bold uppercase tracking-wider text-[10px]">${d.state}</span>
+          </div>
+        `).join('');
+      } else {
+        DOM.downloadsPanel.classList.add('hidden');
       }
-    },
-    async resetAnime() {
-      const mediaId = Number(DOM.editMediaId.value);
-      const anime = state.animeList.find(x => x.mediaId === mediaId);
-      if (!anime) return;
-      
-      if (!confirm(`Are you sure you want to clear the downloaded episodes cache for "${getAnimeTitle(anime)}"?`)) {
+    } catch (e) {
+      console.warn('Failed to load active downloads:', e);
+    }
+  }
+
+
+  // ==========================================
+  // TAB 3: LISTS (FULL ANILIST COLLECTION)
+  // ==========================================
+  async function loadLists() {
+    loadUserListsData();
+  }
+
+  async function loadUserListsData() {
+    const container = document.getElementById('lists-entries-container');
+    if (!container) return;
+
+    try {
+      const query = `
+        query ($userName: String, $type: MediaType) {
+          MediaListCollection(userName: $userName, type: $type) {
+            lists {
+              name
+              isCustomList
+              status
+              entries {
+                id
+                mediaId
+                status
+                progress
+                score(format: POINT_100)
+                updatedAt
+                notes
+                media {
+                  id
+                  title { romaji english native }
+                  coverImage { extraLarge large }
+                  bannerImage
+                  episodes
+                  chapters
+                  format
+                  averageScore
+                }
+              }
+            }
+          }
+        }
+      `;
+      const data = await queryAniList(query, { userName: state.userName, type: state.listsMediaType });
+      const collections = data.MediaListCollection?.lists || [];
+
+      let allEntries = [];
+      collections.forEach(l => {
+        l.entries.forEach(e => {
+          allEntries.push({ ...e, listName: l.name });
+        });
+      });
+
+      // Filter by status group
+      if (state.listsStatusGroup !== 'ALL') {
+        allEntries = allEntries.filter(e => e.status === state.listsStatusGroup || e.listName === state.listsStatusGroup);
+      }
+
+      // Filter by search input
+      const searchVal = (document.getElementById('lists-search-input')?.value || '').toLowerCase();
+      if (searchVal) {
+        allEntries = allEntries.filter(e => formatTitle(e.media.title).toLowerCase().includes(searchVal));
+      }
+
+      // Sort
+      const sortVal = document.getElementById('lists-sort-select')?.value || 'score';
+      allEntries.sort((a, b) => {
+        if (sortVal === 'score') return (b.score || 0) - (a.score || 0);
+        if (sortVal === 'title') return formatTitle(a.media.title).localeCompare(formatTitle(b.media.title));
+        if (sortVal === 'progress') return (b.progress || 0) - (a.progress || 0);
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
+
+      // Update status counts
+      ['ALL', 'CURRENT', 'REPEATING', 'COMPLETED', 'PAUSED', 'DROPPED', 'PLANNING'].forEach(st => {
+        const el = document.getElementById(`cnt-${st.toLowerCase()}`);
+        if (el) {
+          if (st === 'ALL') el.textContent = allEntries.length;
+          else el.textContent = allEntries.filter(e => e.status === st).length;
+        }
+      });
+
+      if (allEntries.length === 0) {
+        container.innerHTML = '<div class="py-16 text-center text-slate-400 text-sm">No collection entries found for this filter.</div>';
         return;
       }
-      
-      try {
-        await API.resetAnime(mediaId);
-        closeModal(DOM.settingsDialog);
-        showToast('Episode database cache cleared.');
-        loadDashboard();
-      } catch (e) {
-        showToast(e.message, 'error');
-      }
-    },
-    async triggerRewatch(mediaId) {
-      try {
-        const anime = state.animeList.find(x => x.mediaId === mediaId);
-        if (anime) anime.pendingRewatchingUpdate = true;
-        renderAnimeGrid();
-        
-        await API.markRewatching(mediaId);
-        showToast('Anime watch status changed to rewatching.');
-        loadDashboard();
-      } catch (e) {
-        showToast(e.message, 'error');
-        loadDashboard();
-      }
-    },
-    async searchNyaaEpisode(mediaId, episode) {
-      const anime = state.animeList.find(x => x.mediaId === mediaId);
-      const titleStr = anime ? getAnimeTitle(anime) : 'Nyaa.si';
-      
-      DOM.nyaaTitle.textContent = `Search: ${titleStr}${episode ? ' (Ep ' + episode + ')' : ''}`;
-      DOM.nyaaList.innerHTML = `
-        <div class="py-12 flex flex-col items-center justify-center text-slate-400">
-          <i class="fa-solid fa-circle-notch fa-spin text-3xl mb-3 text-violet-500"></i>
-          <p class="font-semibold text-sm">Querying index providers...</p>
-        </div>
-      `;
-      openModal(DOM.nyaaDialog);
-      
-      try {
-        const data = await API.searchNyaa(mediaId, episode);
-        renderCandidates(data.results, mediaId, episode);
-      } catch (e) {
-        DOM.nyaaList.innerHTML = `
-          <div class="py-12 flex flex-col items-center justify-center text-slate-400 text-center">
-            <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 text-rose-500"></i>
-            <p class="font-semibold text-sm">${e.message}</p>
+
+      if (state.listsViewMode === 'compact') {
+        container.innerHTML = `
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="border-b border-slate-200 dark:border-slate-800 text-slate-400 font-bold uppercase">
+                  <th class="py-3 px-4">Title</th>
+                  <th class="py-3 px-4">Progress</th>
+                  <th class="py-3 px-4">Score</th>
+                  <th class="py-3 px-4">Status</th>
+                  <th class="py-3 px-4 text-right">Quick Edit</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 font-semibold">
+                ${allEntries.map(e => `
+                  <tr class="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                    <td class="py-3 px-4 flex items-center gap-3">
+                      <img src="${e.media.coverImage.large}" class="w-8 h-10 object-cover rounded-lg" />
+                      <span onclick="openMediaDetail(${e.media.id})" class="cursor-pointer hover:text-violet-400">${formatTitle(e.media.title)}</span>
+                    </td>
+                    <td class="py-3 px-4">${e.progress} / ${e.media.episodes || e.media.chapters || '?'}</td>
+                    <td class="py-3 px-4 text-amber-400 font-bold">${e.score ? `${e.score}%` : 'N/A'}</td>
+                    <td class="py-3 px-4"><span class="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-[10px] font-bold">${e.status}</span></td>
+                    <td class="py-3 px-4 text-right">
+                      <button onclick="quickIncrementProgress(${e.media.id}, ${e.progress})" class="px-2.5 py-1 rounded-lg bg-violet-600 text-white font-bold text-[11px] hover:bg-violet-700">+1 Ep</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        container.innerHTML = `
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            ${allEntries.map(e => `
+              <div class="group p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 hover:border-violet-500 transition-all shadow-sm flex flex-col justify-between">
+                <div class="flex gap-3">
+                  <img src="${e.media.coverImage.large}" class="w-20 h-28 object-cover rounded-xl shrink-0 cursor-pointer" onclick="openMediaDetail(${e.media.id})" />
+                  <div class="space-y-1 flex-grow">
+                    <h4 onclick="openMediaDetail(${e.media.id})" class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-100 line-clamp-2 cursor-pointer hover:text-violet-400">${formatTitle(e.media.title)}</h4>
+                    <span class="inline-block px-2 py-0.5 rounded-md bg-violet-500/10 text-violet-400 text-[10px] font-bold">${e.status}</span>
+                    <p class="text-xs text-slate-400 font-semibold pt-1">Ep ${e.progress} / ${e.media.episodes || '?'}</p>
+                    <p class="text-xs text-amber-400 font-bold"><i class="fa-solid fa-star text-[10px] mr-1"></i>${e.score ? `${e.score}%` : 'N/A'}</p>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800 mt-3">
+                  <button onclick="quickIncrementProgress(${e.media.id}, ${e.progress})" class="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-sm">
+                    +1 Watched
+                  </button>
+                  <button onclick="openListEditor(${e.media.id})" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all">
+                    Edit
+                  </button>
+                </div>
+              </div>
+            `).join('')}
           </div>
         `;
       }
-    },
-    async startDownload(mediaId, link, episode) {
-      try {
-        const btn = document.querySelector(`[data-download-link="${link}"]`);
-        if (btn) {
-          btn.disabled = true;
-          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+    } catch (e) {
+      container.innerHTML = '<div class="py-16 text-center text-slate-400 text-sm">Failed to load AniList user collection.</div>';
+    }
+  }
+
+  // Quick Progress Increment Handler
+  window.quickIncrementProgress = async function(mediaId, currentEp) {
+    try {
+      const newEp = currentEp + 1;
+      const mutation = `
+        mutation ($mediaId: Int, $progress: Int) {
+          SaveMediaListEntry(mediaId: $mediaId, progress: $progress) {
+            id
+            progress
+          }
         }
-        
-        await API.downloadNyaa(mediaId, link, episode);
-        closeModal(DOM.nyaaDialog);
-        showToast(`Torrent added. Manual progress synced back.`);
-        loadDashboard();
-      } catch (e) {
-        showToast(e.message, 'error');
-        loadDashboard();
-      }
+      `;
+      await queryAniList(mutation, { mediaId, progress: newEp });
+      showToast(`Updated progress to Episode ${newEp}!`);
+      loadUserListsData();
+    } catch (e) {
+      showToast(e.message, 'error');
     }
   };
 
-  function renderCandidates(results, mediaId, episode) {
-    DOM.nyaaList.innerHTML = '';
-    if (!results || results.length === 0) {
-      DOM.nyaaList.innerHTML = `
-        <div class="py-12 flex flex-col items-center justify-center text-slate-450 text-center">
-          <i class="fa-solid fa-skull-crossbones text-3xl mb-3 text-slate-350 dark:text-slate-700"></i>
-          <p class="font-semibold text-sm">No seeds matching index filters found.</p>
-        </div>
-      `;
-      return;
-    }
+  // Lists Status & View Mode Event Listeners
+  document.querySelectorAll('.list-status-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.list-status-tab').forEach(b => {
+        b.classList.remove('bg-violet-600', 'text-white');
+        b.classList.add('bg-slate-100', 'dark:bg-slate-800', 'text-slate-400');
+      });
+      btn.classList.add('bg-violet-600', 'text-white');
+      btn.classList.remove('bg-slate-100', 'dark:bg-slate-800', 'text-slate-400');
+      state.listsStatusGroup = btn.getAttribute('data-status-group');
+      loadUserListsData();
+    });
+  });
 
-    results.forEach(item => {
-      const card = document.createElement('div');
-      card.className = "flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/80 hover:border-violet-500/30 transition-colors duration-200";
-      
-      const rating = item.score !== null ? `Score: ${item.score.toFixed(2)}` : 'Manual Index Query';
-      
-      card.innerHTML = `
-        <div class="flex-grow min-w-0">
-          <span class="block font-semibold text-sm text-slate-800 dark:text-slate-200 break-all leading-normal select-all" title="${item.title}">${item.title}</span>
-          <div class="flex items-center gap-4 text-xs font-semibold text-slate-400 mt-2">
-            <span class="text-emerald-500 flex items-center gap-1"><i class="fa-solid fa-seedling"></i>${item.seeders}</span>
-            <span class="flex items-center gap-1"><i class="fa-solid fa-file-zipper"></i>${item.size}</span>
-            <span class="text-violet-500 flex items-center gap-1"><i class="fa-solid fa-bolt"></i>${rating}</span>
-          </div>
-        </div>
-        <button class="w-10 h-10 shrink-0 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-md cursor-pointer transition-all" data-download-link="${item.link}" onclick="window.UI.startDownload(${mediaId}, '${item.link}', ${episode || 'undefined'})">
-          <i class="fa-solid fa-arrow-down-long"></i>
-        </button>
-      `;
-      DOM.nyaaList.appendChild(card);
+  document.querySelectorAll('.list-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.listsViewMode = btn.getAttribute('data-list-view');
+      loadUserListsData();
+    });
+  });
+
+  document.getElementById('lists-media-type-anime')?.addEventListener('click', () => {
+    state.listsMediaType = 'ANIME';
+    loadUserListsData();
+  });
+  document.getElementById('lists-media-type-manga')?.addEventListener('click', () => {
+    state.listsMediaType = 'MANGA';
+    loadUserListsData();
+  });
+
+  document.getElementById('lists-search-input')?.addEventListener('input', () => loadUserListsData());
+  document.getElementById('lists-sort-select')?.addEventListener('change', () => loadUserListsData());
+
+
+  // ==========================================
+  // TAB 4: SEARCH (DEBOUNCED SEARCH & FILTERS)
+  // ==========================================
+  let searchDebounceTimer = null;
+  const searchInput = document.getElementById('global-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        state.searchQuery = searchInput.value.trim();
+        state.searchPage = 1;
+        loadSearchResults();
+      }, 350);
     });
   }
 
-  DOM.btnSaveSettings.onclick = window.UI.saveOverrides;
-  DOM.btnResetDownloads.onclick = window.UI.resetAnime;
+  document.getElementById('btn-toggle-filters')?.addEventListener('click', () => {
+    const drawer = document.getElementById('search-filter-drawer');
+    if (drawer) drawer.classList.toggle('hidden');
+  });
 
-  // Render Live Logs
-  let isLogsLoading = false;
-  async function loadLogs() {
-    if (isLogsLoading) return;
-    try {
-      isLogsLoading = true;
-      const name = DOM.logSelect.value || state.logs.selected;
-      const lines = Number(DOM.logLines.value) || state.logs.lines;
-      
-      const data = await API.getLogs(name, lines);
-      state.logs = data;
-      
-      // Load Log Select options
-      const currentSelected = DOM.logSelect.value || data.selected;
-      DOM.logSelect.innerHTML = '';
-      data.available.forEach(item => {
-        const opt = document.createElement('option');
-        opt.value = item.key;
-        opt.textContent = item.label;
-        opt.selected = item.key === currentSelected;
-        DOM.logSelect.appendChild(opt);
+  document.querySelectorAll('.search-entity-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.search-entity-tab').forEach(b => {
+        b.classList.remove('bg-violet-600', 'text-white');
+        b.classList.add('bg-slate-100', 'dark:bg-slate-800', 'text-slate-400');
       });
-      
-      const isNearBottom = DOM.logsBody.scrollHeight - DOM.logsBody.scrollTop - DOM.logsBody.clientHeight < 80;
-      const wasEmpty = DOM.logsBody.textContent === '' || DOM.logsBody.textContent.startsWith('System log');
-      
-      DOM.logsBody.textContent = data.content || 'System log stream is completely empty.';
-      if (wasEmpty || isNearBottom) {
-        DOM.logsBody.scrollTop = DOM.logsBody.scrollHeight;
-      }
-    } catch (e) {
-      DOM.logsBody.textContent = 'Exception occurred loading logs: ' + e.message;
-    } finally {
-      isLogsLoading = false;
-    }
+      btn.classList.add('bg-violet-600', 'text-white');
+      btn.classList.remove('bg-slate-100', 'dark:bg-slate-800', 'text-slate-400');
+      state.searchEntity = btn.getAttribute('data-entity-tab');
+      state.searchPage = 1;
+      loadSearchResults();
+    });
+  });
+
+  async function loadSearch() {
+    loadSearchResults();
   }
 
-  // Set up logs auto-refresh interval
-  setInterval(async () => {
-    if (state.activeTab === 'logs' && DOM.logAutoRefresh && DOM.logAutoRefresh.checked) {
-      await loadLogs();
-    }
-  }, 2000);
+  async function loadSearchResults() {
+    const grid = document.getElementById('search-results-grid');
+    if (!grid) return;
 
-  // Active Downloads Dashboard
-  async function updateDownloadsDashboard() {
     try {
-      if (!DOM.downloadsPanel || !DOM.downloadsList) return;
-      
-      const downloads = await API.getDownloads();
-      if (!downloads || downloads.length === 0) {
-        DOM.downloadsPanel.classList.add('hidden');
-        return;
-      }
-      
-      DOM.downloadsPanel.classList.remove('hidden');
-      if (downloadsCollapsed) {
-        DOM.downloadsList.classList.add('hidden');
-        DOM.downloadsToggleIcon.className = 'fa-solid fa-chevron-down text-sm';
-      } else {
-        DOM.downloadsList.classList.remove('hidden');
-        DOM.downloadsToggleIcon.className = 'fa-solid fa-chevron-up text-sm';
-      }
-      DOM.downloadsList.innerHTML = '';
-      
-      downloads.forEach(dl => {
-        const progress = (dl.progress * 100).toFixed(1);
-        const name = dl.name;
-        const speed = (dl.dlspeed / (1024 * 1024)).toFixed(2); // MB/s
-        const totalSize = (dl.size / (1024 * 1024 * 1024)).toFixed(2); // GB
-        
-        let eta = 'Unknown';
-        if (dl.eta < 86400 * 30 && dl.eta > 0) {
-          const h = Math.floor(dl.eta / 3600);
-          const m = Math.floor((dl.eta % 3600) / 60);
-          const s = dl.eta % 60;
-          eta = h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
-        }
-        
-        const row = document.createElement('div');
-        row.className = "flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 rounded-2xl";
-        row.innerHTML = `
-          <div class="flex-grow space-y-1.5 min-w-0">
-            <div class="flex items-center justify-between gap-4">
-              <span class="text-sm font-bold truncate text-slate-800 dark:text-slate-200" title="${name}">${name}</span>
-              <span class="text-xs font-bold text-sky-500">${progress}%</span>
-            </div>
-            <div class="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div class="bg-gradient-to-r from-sky-500 to-indigo-500 h-2 rounded-full transition-all duration-300" style="width: ${progress}%"></div>
-            </div>
-          </div>
-          <div class="flex items-center gap-4 text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0 self-end sm:self-center">
-            <div class="flex items-center gap-1">
-              <i class="fa-solid fa-gauge-high"></i>
-              <span>${speed} MB/s</span>
-            </div>
-            <div class="flex items-center gap-1">
-              <i class="fa-solid fa-server"></i>
-              <span>${totalSize} GB</span>
-            </div>
-            <div class="flex items-center gap-1">
-              <i class="fa-solid fa-clock"></i>
-              <span>ETA: ${eta}</span>
-            </div>
-          </div>
+      const entity = state.searchEntity;
+      if (entity === 'ANIME' || entity === 'MANGA') {
+        const query = `
+          query ($search: String, $page: Int, $perPage: Int, $type: MediaType, $format: MediaFormat, $status: MediaStatus, $season: MediaSeason, $seasonYear: Int, $genre: String) {
+            Page(page: $page, perPage: $perPage) {
+              pageInfo { hasNextPage }
+              media(search: $search, type: $type, format: $format, status: $status, season: $season, seasonYear: $seasonYear, genre: $genre, sort: POPULARITY_DESC) {
+                id
+                title { romaji english native }
+                coverImage { extraLarge large }
+                averageScore
+                format
+                episodes
+                chapters
+              }
+            }
+          }
         `;
-        DOM.downloadsList.appendChild(row);
-      });
-    } catch (e) {
-      console.error('Failed to update downloads dashboard:', e);
-    }
-  }
+        const vars = {
+          search: state.searchQuery || undefined,
+          page: state.searchPage,
+          perPage: 20,
+          type: entity,
+          format: document.getElementById('filter-format')?.value || undefined,
+          status: document.getElementById('filter-status')?.value || undefined,
+          season: document.getElementById('filter-season')?.value || undefined,
+          seasonYear: document.getElementById('filter-year')?.value ? parseInt(document.getElementById('filter-year').value) : undefined,
+          genre: document.getElementById('filter-genre')?.value || undefined
+        };
 
-  // Update Search Diagnostics
-  async function updateSearchDiagnostics() {
-    try {
-      if (!DOM.searchDebugContainer) return;
-      
-      const traces = await API.getSearchDebug();
-      if (!traces || traces.length === 0) {
-        DOM.searchDebugContainer.innerHTML = `
-          <div class="p-5 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">
-            All anime search queries completed successfully in the last check cycle.
-          </div>
-        `;
-        return;
-      }
-      
-      DOM.searchDebugContainer.innerHTML = '';
-      
-      traces.forEach(trace => {
-        const itemEl = document.createElement('div');
-        itemEl.className = 'border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden bg-slate-50/50 dark:bg-slate-900/20';
-        
-        const timestampStr = new Date(trace.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        
-        // Status Badge Style
-        let statusBadge = '';
-        if (trace.status === 'NO_RESULTS') {
-          statusBadge = '<span class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/10 text-amber-500 uppercase">No RSS Results</span>';
-        } else if (trace.status === 'NO_MATCH') {
-          statusBadge = '<span class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-rose-500/10 text-rose-500 uppercase">No Match Criteria</span>';
-        } else {
-          statusBadge = `<span class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-500/10 text-slate-400 uppercase">${trace.status}</span>`;
+        const data = await queryAniList(query, vars);
+        const mediaList = data.Page.media || [];
+        state.searchHasNext = data.Page.pageInfo.hasNextPage;
+
+        if (mediaList.length === 0) {
+          grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">No search results found.</div>';
+          return;
         }
-        
-        const hasCandidates = trace.candidates && trace.candidates.length > 0;
-        
-        itemEl.innerHTML = `
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 cursor-pointer select-none bg-slate-100/50 dark:bg-slate-900/40 hover:bg-slate-100 dark:hover:bg-slate-900/60 transition-colors" onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.chevron-icon')?.classList.toggle('rotate-180')">
-            <div class="space-y-1">
-              <div class="flex items-center gap-2">
-                <h4 class="font-bold text-sm sm:text-base font-['Outfit'] text-slate-800 dark:text-slate-200">${trace.anime_title}</h4>
-                ${statusBadge}
-              </div>
-              <p class="text-xs text-slate-400 font-mono">Last Query: <span class="text-slate-500">${trace.search_query}</span></p>
-            </div>
-            <div class="flex items-center gap-3 text-xs text-slate-400 self-end sm:self-auto">
-              <span>${timestampStr}</span>
-              ${hasCandidates ? '<i class="fa-solid fa-chevron-down text-xs transition-transform duration-200 chevron-icon"></i>' : ''}
-            </div>
-          </div>
-          <div class="hidden border-t border-slate-200/40 dark:border-slate-800/40 p-5 bg-white dark:bg-slate-950/20">
-            <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Evaluated Nyaa Candidate Torrents (Top 3)</h5>
-            <div class="space-y-3">
-              ${hasCandidates ? trace.candidates.map((c, idx) => {
-                const totalScore = c.rating.toFixed(2);
-                
-                return `
-                  <div class="flex flex-col gap-1.5 p-3 rounded-xl border border-slate-100 dark:border-slate-900/60 bg-slate-50/30 dark:bg-slate-900/10">
-                    <div class="flex items-start justify-between gap-4">
-                      <span class="text-xs font-mono text-slate-600 dark:text-slate-300 break-all">${idx + 1}. ${c.title}</span>
-                      <div class="flex items-center gap-2 shrink-0">
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-900 text-slate-400">
-                          <i class="fa-solid fa-users mr-1"></i>${c.seeders}
-                        </span>
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.88 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">
-                          Score: ${totalScore}
-                        </span>
-                      </div>
-                    </div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                      <i class="fa-solid fa-circle-exclamation text-rose-500/80 shrink-0"></i>
-                      <span>Reason: ${c.rejection_reason || 'Score below verification threshold (3.88)'}</span>
-                    </div>
-                  </div>
-                `;
-              }).join('') : `
-                <div class="text-center py-2 text-xs text-slate-500 italic">
-                  No candidate torrents returned from Nyaa for this query string.
+
+        grid.innerHTML = mediaList.map(m => {
+          const title = formatTitle(m.title);
+          const score = m.averageScore ? `${m.averageScore}%` : 'N/A';
+          const isDownloaded = state.animeList.some(a => a.mediaId === m.id);
+
+          return `
+            <div onclick="openMediaDetail(${m.id})" class="group rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 overflow-hidden hover:border-violet-500 transition-all cursor-pointer flex flex-col shadow-sm">
+              <div class="aspect-[2/3] w-full relative overflow-hidden bg-slate-950">
+                <img src="${m.coverImage.extraLarge || m.coverImage.large}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                <div class="absolute top-2 left-2 flex flex-col gap-1">
+                  <span class="px-2 py-0.5 rounded-lg bg-slate-950/80 backdrop-blur-md text-[10px] font-bold text-amber-400">
+                    <i class="fa-solid fa-star text-[9px] mr-1"></i>${score}
+                  </span>
+                  ${isDownloaded ? '<span class="px-2 py-0.5 rounded-lg bg-emerald-600/90 text-[10px] font-bold text-white"><i class="fa-solid fa-check mr-1"></i>Downloaded</span>' : ''}
                 </div>
-              `}
+              </div>
+              <div class="p-3 space-y-1 flex-grow flex flex-col justify-between">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${m.format || 'TV'}</span>
+                <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-100 line-clamp-2">${title}</h4>
+              </div>
             </div>
-          </div>
-        `;
-        
-        DOM.searchDebugContainer.appendChild(itemEl);
-      });
+          `;
+        }).join('');
+
+      } else {
+        grid.innerHTML = `<div class="col-span-full py-16 text-center text-slate-400 text-sm">Entity search for ${entity} active.</div>`;
+      }
     } catch (e) {
-      console.error('Failed to update search diagnostics:', e);
+      grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">Failed to fetch search results.</div>';
     }
   }
 
-  // Set up downloads progress auto-refresh interval
-  setInterval(async () => {
-    if (state.activeTab === 'watching') {
-      await updateDownloadsDashboard();
-    }
-  }, 4000);
 
-  DOM.logSelect.onchange = loadLogs;
-  DOM.logLines.onchange = loadLogs;
-  DOM.logRefreshBtn.onclick = loadLogs;
+  // ==========================================
+  // TAB 5: SOCIAL HUB (ACTIVITIES & PROFILES)
+  // ==========================================
+  async function loadSocial() {
+    loadActivityFeed();
+  }
 
-  // Load and Modify Configuration Settings
-  async function loadConfig() {
+  async function loadActivityFeed() {
+    const list = document.getElementById('activity-feed-list');
+    if (!list) return;
+
     try {
-      const data = await API.getConfig();
-      state.config = data;
-      
-      // Populate inputs dynamically
-      Object.keys(data).forEach(key => {
-        const input = DOM.configForm.querySelector(`[name="${key}"]`);
-        if (input) {
-          if (input.type === 'checkbox') {
-            input.checked = !!data[key];
-          } else {
-            input.value = data[key] !== undefined ? data[key] : '';
+      const query = `
+        query {
+          Page(page: 1, perPage: 10) {
+            activities(sort: ID_DESC) {
+              ... on TextActivity {
+                id
+                userId
+                type
+                text
+                replyCount
+                likeCount
+                createdAt
+                user {
+                  name
+                  avatar { medium }
+                }
+              }
+              ... on ListActivity {
+                id
+                userId
+                type
+                status
+                progress
+                createdAt
+                user {
+                  name
+                  avatar { medium }
+                }
+                media {
+                  id
+                  title { romaji english }
+                  coverImage { medium }
+                }
+              }
+            }
           }
         }
+      `;
+      const data = await queryAniList(query);
+      const activities = data.Page.activities || [];
+
+      if (activities.length === 0) {
+        list.innerHTML = '<div class="py-8 text-center text-slate-400 text-xs">No recent activity posts.</div>';
+        return;
+      }
+
+      list.innerHTML = activities.map(act => {
+        if (!act.user) return '';
+        const isText = act.type === 'TEXT' || act.text;
+        return `
+          <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <img src="${act.user.avatar.medium}" class="w-9 h-9 rounded-xl object-cover" />
+                <div>
+                  <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-200">${act.user.name}</h4>
+                  <span class="text-[10px] text-slate-400">${new Date(act.createdAt * 1000).toLocaleTimeString()}</span>
+                </div>
+              </div>
+              <button onclick="toggleLikeActivity(${act.id})" class="px-2.5 py-1 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white font-bold text-[11px] transition-all flex items-center gap-1">
+                <i class="fa-solid fa-heart"></i>${act.likeCount || 0}
+              </button>
+            </div>
+
+            <p class="text-xs text-slate-700 dark:text-slate-300 font-medium">
+              ${isText ? act.text : `${act.status} ${act.progress ? `ep ${act.progress} of` : ''} ${act.media ? formatTitle(act.media.title) : ''}`}
+            </p>
+          </div>
+        `;
+      }).join('');
+
+    } catch (e) {
+      list.innerHTML = '<div class="py-8 text-center text-slate-400 text-xs">Failed to load social activity feed.</div>';
+    }
+  }
+
+  document.getElementById('btn-post-activity')?.addEventListener('click', async () => {
+    const input = document.getElementById('activity-input');
+    if (!input || !input.value.trim()) return;
+    try {
+      const mutation = `
+        mutation ($text: String) {
+          SaveTextActivity(text: $text) {
+            id
+          }
+        }
+      `;
+      await queryAniList(mutation, { text: input.value.trim() });
+      input.value = '';
+      showToast('Activity update posted successfully!');
+      loadActivityFeed();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+
+  // ==========================================
+  // TAB 6: STATS (ANALYTICS & BREAKDOWNS)
+  // ==========================================
+  async function loadStats() {
+    try {
+      const query = `
+        query ($userName: String) {
+          User(name: $userName) {
+            stats {
+              animeStatusDistribution { status count }
+              mangaStatusDistribution { status count }
+              watchedTime
+              chaptersRead
+            }
+          }
+        }
+      `;
+      const data = await queryAniList(query, { userName: state.userName });
+      const stats = data.User?.stats || {};
+
+      const totalAnime = state.animeList.length;
+      const daysWatched = ((stats.watchedTime || 0) / 1440).toFixed(1);
+      const totalEpisodes = state.animeList.reduce((acc, a) => acc + (a.progress || 0), 0);
+
+      document.getElementById('stat-total-anime').textContent = totalAnime;
+      document.getElementById('stat-days-watched').textContent = daysWatched;
+      document.getElementById('stat-total-episodes').textContent = totalEpisodes;
+
+      // Genre Distribution
+      const genreCounts = {};
+      state.animeList.forEach(a => {
+        (a.media?.genres || []).forEach(g => {
+          genreCounts[g] = (genreCounts[g] || 0) + 1;
+        });
       });
 
-      // Special release group serialization
-      if (data.excludeReleaseGroups && Array.isArray(data.excludeReleaseGroups)) {
-        DOM.excludeReleaseGroupsInput.value = data.excludeReleaseGroups.join(', ');
-      } else {
-        DOM.excludeReleaseGroupsInput.value = '';
+      const sortedGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      const maxGenre = sortedGenres[0]?.[1] || 1;
+
+      const genreChart = document.getElementById('chart-genre-container');
+      if (genreChart) {
+        genreChart.innerHTML = sortedGenres.map(([g, count]) => {
+          const pct = Math.round((count / maxGenre) * 100);
+          return `
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-semibold">
+                <span>${g}</span>
+                <span class="text-slate-400">${count} anime (${pct}%)</span>
+              </div>
+              <div class="w-full h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-violet-600 to-pink-500 rounded-full" style="width: ${pct}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
       }
+
+    } catch (e) {
+      console.warn('Stats calculation warning:', e);
+    }
+  }
+
+
+  // ==========================================
+  // TAB 7 & 8: HISTORY & LOGS
+  // ==========================================
+  async function loadHistory() {
+    try {
+      const res = await API.getHistory();
+      state.history = res.history || [];
+      renderHistoryList(state.history);
     } catch (e) {
       showToast(e.message, 'error');
     }
   }
 
-  DOM.btnSubmitConfig.addEventListener('click', async (e) => {
+  function renderHistoryList(items) {
+    if (!DOM.historyList) return;
+    if (items.length === 0) {
+      DOM.historyList.innerHTML = '<div class="py-12 text-center text-slate-400 text-sm">No download history available.</div>';
+      return;
+    }
+
+    DOM.historyList.innerHTML = items.map(item => `
+      <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          ${item.cover_image ? `<img src="${item.cover_image}" class="w-10 h-12 object-cover rounded-xl" />` : '<i class="fa-solid fa-download text-violet-500 text-lg"></i>'}
+          <div>
+            <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-200">${item.title}</h4>
+            <span class="text-[10px] text-slate-400">${item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Just now'}</span>
+          </div>
+        </div>
+        <button onclick="deleteHistoryEntry('${item.id}')" class="text-rose-500 hover:text-rose-600 p-2"><i class="fa-solid fa-trash"></i></button>
+      </div>
+    `).join('');
+  }
+
+  window.deleteHistoryEntry = async function(id) {
+    try {
+      await API.deleteHistoryItem(id);
+      showToast('History item deleted.');
+      loadHistory();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  DOM.historyClearBtn?.addEventListener('click', async () => {
+    try {
+      await API.clearHistory();
+      showToast('Download history cleared.');
+      loadHistory();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+  async function loadLogs() {
+    try {
+      const res = await API.getLogs(DOM.logSelect.value, DOM.logLines.value);
+      DOM.logsBody.textContent = res.content || 'Console log is empty.';
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }
+
+  DOM.logRefreshBtn?.addEventListener('click', () => loadLogs());
+
+
+  // ==========================================
+  // TAB 9: SETTINGS & CONFIGURATION
+  // ==========================================
+  async function loadSettings() {
+    try {
+      const cfg = await API.getConfig();
+      state.config = cfg;
+      populateConfigForm(cfg);
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }
+
+  function populateConfigForm(cfg) {
+    if (!DOM.configForm) return;
+    Object.keys(cfg).forEach(key => {
+      const input = DOM.configForm.querySelector(`[name="${key}"]`);
+      if (input) {
+        if (input.type === 'checkbox') input.checked = Boolean(cfg[key]);
+        else input.value = cfg[key] ?? '';
+      }
+    });
+  }
+
+  DOM.btnSubmitConfig?.addEventListener('click', async (e) => {
     e.preventDefault();
     const formData = new FormData(DOM.configForm);
     const payload = {};
-    
-    // Read input fields
-    DOM.configForm.querySelectorAll('input[name], select[name]').forEach(input => {
-      const name = input.name;
-      if (input.type === 'checkbox') {
-        payload[name] = input.checked;
-      } else if (input.type === 'number') {
-        payload[name] = input.value !== '' ? Number(input.value) : undefined;
-      } else {
-        payload[name] = input.value !== '' ? input.value : undefined;
-      }
+    formData.forEach((val, key) => {
+      const input = DOM.configForm.querySelector(`[name="${key}"]`);
+      if (input && input.type === 'checkbox') payload[key] = input.checked;
+      else if (input && input.type === 'number') payload[key] = Number(val);
+      else payload[key] = val;
     });
 
-    // Special parsing for excluded release groups
-    const csv = DOM.excludeReleaseGroupsInput.value.trim();
-    if (csv) {
-      payload.excludeReleaseGroups = csv.split(',').map(x => x.trim()).filter(Boolean);
-    } else {
-      payload.excludeReleaseGroups = [];
-    }
-
     try {
-      DOM.btnSubmitConfig.disabled = true;
-      DOM.btnSubmitConfig.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>Saving...';
-      
       await API.saveConfig(payload);
-      showToast('Settings saved. Hotloaded into running server memory!');
-      
-      await loadConfig();
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      DOM.btnSubmitConfig.disabled = false;
-      DOM.btnSubmitConfig.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>Save & Hotload';
+      showToast('Configuration hotloaded successfully!');
+      loadSettings();
+    } catch (err) {
+      showToast(err.message, 'error');
     }
   });
 
-  DOM.btnTestQbit.addEventListener('click', async () => {
-    const qbitUrl = DOM.configForm.querySelector('[name="qbit_url"]').value.trim();
-    const username = DOM.configForm.querySelector('[name="username"]').value.trim();
-    const password = DOM.configForm.querySelector('[name="password"]').value.trim();
-    
-    if (!qbitUrl) {
-      showToast('qBittorrent Web UI URL is required to test.', 'error');
-      return;
-    }
-    
+
+  // ==========================================
+  // FULL-SCREEN MEDIA DETAIL MODAL RENDERER
+  // ==========================================
+  window.openMediaDetail = async function(mediaId) {
+    openModal(DOM.mediaDetailModal);
+    const content = DOM.mediaDetailContent;
+    if (!content) return;
+
+    content.innerHTML = '<div class="py-24 text-center text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-violet-500"></i><p>Loading title details...</p></div>';
+
     try {
-      DOM.btnTestQbit.disabled = true;
-      DOM.btnTestQbit.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Testing...';
-      const res = await API.testQbit(qbitUrl, username, password);
-      if (res.ok) {
-        showToast('qBittorrent connection successful!', 'success');
-      } else {
-        showToast(`Connection failed: ${res.message || res.error}`, 'error');
-      }
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      DOM.btnTestQbit.disabled = false;
-      DOM.btnTestQbit.innerHTML = '<i class="fa-solid fa-plug-circle-bolt mr-2"></i>Test Connection';
-    }
-  });
-
-  DOM.btnTestProxy.addEventListener('click', async () => {
-    const proxyAddress = DOM.configForm.querySelector('[name="proxyAddress"]').value.trim();
-    const proxyPort = DOM.configForm.querySelector('[name="proxyPort"]').value.trim();
-    
-    if (!proxyAddress || !proxyPort) {
-      showToast('Proxy Address and Port are required to test.', 'error');
-      return;
-    }
-    
-    try {
-      DOM.btnTestProxy.disabled = true;
-      DOM.btnTestProxy.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Testing...';
-      const res = await API.testProxy(proxyAddress, proxyPort);
-      if (res.ok) {
-        showToast('Proxy routing test successful!', 'success');
-      } else {
-        showToast(`Proxy test failed: ${res.error || res.message}`, 'error');
-      }
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      DOM.btnTestProxy.disabled = false;
-      DOM.btnTestProxy.innerHTML = '<i class="fa-solid fa-signal mr-2"></i>Test Connection';
-    }
-  });
-
-  DOM.btnTestDiscord.addEventListener('click', async () => {
-    const webhook = DOM.configForm.querySelector('[name="webhook"]').value.trim();
-    if (!webhook) {
-      showToast('Discord Webhook URL is required to test.', 'error');
-      return;
-    }
-    try {
-      DOM.btnTestDiscord.disabled = true;
-      DOM.btnTestDiscord.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Testing...';
-      const res = await API.testDiscord(webhook);
-      if (res.ok) {
-        showToast('Discord test notification sent successfully!', 'success');
-      } else {
-        showToast(`Discord test failed: ${res.error || res.message}`, 'error');
-      }
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      DOM.btnTestDiscord.disabled = false;
-      DOM.btnTestDiscord.innerHTML = '<i class="fa-solid fa-paper-plane mr-2"></i>Send Test Notification';
-    }
-  });
-
-  DOM.downloadsHeader.addEventListener('click', () => {
-    downloadsCollapsed = !downloadsCollapsed;
-    if (downloadsCollapsed) {
-      DOM.downloadsList.classList.add('hidden');
-      DOM.downloadsToggleIcon.className = 'fa-solid fa-chevron-down text-sm';
-    } else {
-      DOM.downloadsList.classList.remove('hidden');
-      DOM.downloadsToggleIcon.className = 'fa-solid fa-chevron-up text-sm';
-    }
-  });
-
-  // History Helper Functions & Rendering
-  function formatRelativeTime(isoStr) {
-    if (!isoStr) return 'Unknown time';
-    try {
-      const cleaned = isoStr.replace(" ", "T", 1);
-      const date = new Date(cleaned);
-      if (isNaN(date.getTime())) return isoStr;
-      
-      const now = new Date();
-      const diffMs = now - date;
-      const diffSecs = Math.floor(diffMs / 1000);
-      const diffMins = Math.floor(diffSecs / 60);
-      const diffHours = Math.floor(diffMins / 60);
-      const diffDays = Math.floor(diffHours / 24);
-
-      if (diffSecs < 60) return 'Just now';
-      if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-      if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-      if (diffDays === 1) return 'Yesterday';
-      if (diffDays < 7) return `${diffDays} days ago`;
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch (e) {
-      return isoStr;
-    }
-  }
-
-  function formatFullDateTime(isoStr) {
-    if (!isoStr) return 'N/A';
-    try {
-      const cleaned = isoStr.replace(" ", "T", 1);
-      const date = new Date(cleaned);
-      if (isNaN(date.getTime())) return isoStr;
-      return date.toLocaleString([], {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-    } catch (e) {
-      return isoStr;
-    }
-  }
-
-  async function loadAndRenderHistory() {
-    try {
-      const data = await API.getHistory();
-      state.history = data.history || [];
-      renderHistory();
-    } catch (e) {
-      console.error(e);
-      if (DOM.historyList) {
-        DOM.historyList.innerHTML = `
-          <div class="py-12 text-center text-rose-500 text-sm font-semibold">
-            <i class="fa-solid fa-triangle-exclamation text-2xl mb-2 block"></i>
-            Failed to load download history: ${e.message}
-          </div>
-        `;
-      }
-    }
-  }
-
-  function renderHistory() {
-    if (!DOM.historyList) return;
-
-    const query = (DOM.historySearchInput?.value || '').toLowerCase().trim();
-    let filtered = state.history;
-
-    if (query) {
-      filtered = filtered.filter(item => {
-        const t = (item.title || '').toLowerCase();
-        const a = (item.anime_title || '').toLowerCase();
-        const ep = String(item.episode || '').toLowerCase();
-        return t.includes(query) || a.includes(query) || ep.includes(query);
-      });
-    }
-
-    if (filtered.length === 0) {
-      DOM.historyList.innerHTML = `
-        <div class="p-12 text-center text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">
-          <i class="fa-solid fa-clock-rotate-left text-3xl mb-3 text-slate-300 dark:text-slate-700"></i>
-          <p class="font-semibold text-sm">${query ? 'No history entries matched your search query.' : 'No previous downloads recorded.'}</p>
-        </div>
-      `;
-      return;
-    }
-
-    DOM.historyList.innerHTML = '';
-
-    filtered.forEach(item => {
-      const isExpanded = expandedHistoryIds.has(item.id);
-      const relativeTime = formatRelativeTime(item.added_at);
-      const fullTime = formatFullDateTime(item.added_at);
-      
-      const isAuto = item.source === 'auto';
-      const sourceBadge = isAuto
-        ? `<span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">Auto</span>`
-        : `<span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Manual</span>`;
-
-      let domainBadge = 'Nyaa';
-      if (item.link && item.link.startsWith('magnet:')) {
-        domainBadge = 'Magnet';
-      }
-
-      const card = document.createElement('div');
-      card.className = "border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden bg-white dark:bg-[#111827]/80 hover:border-violet-500/40 dark:hover:border-violet-500/30 transition-all duration-200 shadow-sm";
-
-      card.innerHTML = `
-        <div class="flex items-center justify-between gap-4 p-4 sm:p-5 cursor-pointer select-none bg-slate-50/50 dark:bg-slate-900/40 hover:bg-slate-100/60 dark:hover:bg-slate-900/80 transition-colors" data-history-toggle="${item.id}">
-          <div class="flex items-center gap-3.5 min-w-0 flex-grow">
-            <div class="w-9 h-9 rounded-xl bg-violet-500/10 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
-              <i class="fa-solid fa-download text-sm"></i>
-            </div>
-            <div class="min-w-0 flex-grow">
-              <h4 class="font-bold text-sm sm:text-base font-['Outfit'] text-slate-800 dark:text-slate-100 truncate" title="${item.title}">${item.title}</h4>
-              <div class="flex items-center gap-3 text-xs font-semibold text-slate-400 mt-1">
-                <span class="flex items-center gap-1 text-slate-500 dark:text-slate-400">
-                  <i class="fa-regular fa-clock text-[11px]"></i>${relativeTime}
-                </span>
-                <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-200/60 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                  ${domainBadge}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-3 shrink-0">
-            ${sourceBadge}
-            <button class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-              <i class="fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-xs"></i>
-            </button>
-          </div>
-        </div>
-
-        <div class="${isExpanded ? '' : 'hidden'} border-t border-slate-100 dark:border-slate-800/80 p-5 bg-slate-50/40 dark:bg-slate-950/40 space-y-4">
-          
-          <div>
-            <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Full Torrent Title</span>
-            <p class="text-xs sm:text-sm font-semibold font-mono text-slate-800 dark:text-slate-200 select-all break-all bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/50 dark:border-slate-800">${item.title}</p>
-          </div>
-
-          <div>
-            <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Torrent Source Link</span>
-            <div class="flex items-center gap-2">
-              <a href="${item.link}" target="_blank" rel="noopener noreferrer" class="flex-grow text-xs sm:text-sm font-medium font-mono text-violet-600 dark:text-violet-400 hover:underline truncate bg-violet-500/5 dark:bg-violet-500/10 px-3.5 py-2 rounded-xl border border-violet-500/20 flex items-center gap-2">
-                <i class="fa-solid fa-up-right-from-square text-xs shrink-0"></i>
-                <span class="truncate">${item.link}</span>
-              </a>
-              <button class="px-3.5 py-2 bg-slate-200/70 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs shrink-0 transition-colors flex items-center gap-1.5 cursor-pointer" data-copy-link="${item.link}">
-                <i class="fa-regular fa-copy"></i>Copy
-              </button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-            
-            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
-              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Added Timestamp</span>
-              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">${fullTime}</span>
-            </div>
-
-            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
-              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Anime / Episode</span>
-              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate block">
-                ${item.anime_title || 'N/A'}${item.episode !== null && item.episode !== undefined ? ` (Ep ${item.episode})` : ''}
-              </span>
-            </div>
-
-            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
-              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Torrent Size</span>
-              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">${item.size || 'Unknown'}</span>
-            </div>
-
-            <div class="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/60">
-              <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Seeders</span>
-              <span class="text-xs font-semibold text-emerald-500">${item.seeders || 'N/A'}</span>
-            </div>
-
-          </div>
-
-          <div class="flex items-center justify-between pt-2 border-t border-slate-200/30 dark:border-slate-800/40">
-            ${item.cover_image ? `
-              <div class="flex items-center gap-2">
-                <img src="${item.cover_image}" class="w-7 h-7 rounded-lg object-cover" alt="Cover" />
-                <span class="text-xs font-semibold text-slate-400">${item.anime_title || ''}</span>
-              </div>
-            ` : '<div></div>'}
-
-            <button class="px-3 py-1.5 text-xs font-semibold text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5" data-delete-history="${item.id}">
-              <i class="fa-solid fa-trash-can text-[11px]"></i>Remove Entry
-            </button>
-          </div>
-
-        </div>
-      `;
-
-      const toggleEl = card.querySelector(`[data-history-toggle="${item.id}"]`);
-      toggleEl.addEventListener('click', () => {
-        if (expandedHistoryIds.has(item.id)) {
-          expandedHistoryIds.delete(item.id);
-        } else {
-          expandedHistoryIds.add(item.id);
-        }
-        renderHistory();
-      });
-
-      const copyBtn = card.querySelector(`[data-copy-link]`);
-      if (copyBtn) {
-        copyBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          navigator.clipboard.writeText(item.link);
-          showToast('Torrent link copied to clipboard!', 'success');
-        });
-      }
-
-      const deleteBtn = card.querySelector(`[data-delete-history="${item.id}"]`);
-      if (deleteBtn) {
-        deleteBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          try {
-            await API.deleteHistoryItem(item.id);
-            state.history = state.history.filter(h => h.id !== item.id);
-            expandedHistoryIds.delete(item.id);
-            renderHistory();
-            showToast('History item removed.');
-          } catch (err) {
-            showToast(err.message, 'error');
+      const query = `
+        query ($id: Int) {
+          Media(id: $id) {
+            id
+            title { romaji english native }
+            coverImage { extraLarge large }
+            bannerImage
+            description
+            format
+            status
+            episodes
+            duration
+            season
+            seasonYear
+            averageScore
+            popularity
+            genres
+            tags { name rank isMediaSpoiler }
+            siteUrl
+            trailer { id site thumbnail }
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  title { romaji english }
+                  coverImage { medium }
+                }
+              }
+            }
+            characters(perPage: 6) {
+              edges {
+                role
+                node {
+                  name { full }
+                  image { medium }
+                }
+                voiceActors(language: JAPANESE) {
+                  name { full }
+                  image { medium }
+                }
+              }
+            }
+            reviews(perPage: 2) {
+              nodes {
+                summary
+                score
+                user { name }
+              }
+            }
+            stats {
+              scoreDistribution { score amount }
+              statusDistribution { status amount }
+            }
           }
-        });
-      }
+        }
+      `;
+      const data = await queryAniList(query, { id: mediaId });
+      const m = data.Media;
+      state.activeMediaDetail = m;
 
-      DOM.historyList.appendChild(card);
-    });
-  }
+      const title = formatTitle(m.title);
+      const isDownloaded = state.animeList.some(a => a.mediaId === m.id);
 
-  if (DOM.historyRefreshBtn) {
-    DOM.historyRefreshBtn.addEventListener('click', async () => {
-      await loadAndRenderHistory();
-      showToast('Download history refreshed.');
-    });
-  }
+      // Score distribution SVG histogram generator
+      const scoreDist = m.stats?.scoreDistribution || [];
+      const maxAmount = Math.max(...scoreDist.map(s => s.amount), 1);
+      const svgHistogram = scoreDist.map(s => {
+        const height = Math.round((s.amount / maxAmount) * 60);
+        return `<rect x="${(s.score / 10) * 80}" y="${60 - height}" width="6" height="${height}" fill="#8b5cf6" rx="2" />`;
+      }).join('');
 
-  if (DOM.historyClearBtn) {
-    DOM.historyClearBtn.addEventListener('click', async () => {
-      if (!confirm('Are you sure you want to clear all download history?')) return;
-      try {
-        await API.clearHistory();
-        state.history = [];
-        expandedHistoryIds.clear();
-        renderHistory();
-        showToast('Download history cleared.');
-      } catch (e) {
-        showToast(e.message, 'error');
-      }
-    });
-  }
+      content.innerHTML = `
+        <div class="relative w-full">
+          <!-- Hero Banner -->
+          <div class="h-56 sm:h-72 w-full relative overflow-hidden bg-slate-900">
+            ${m.bannerImage ? `<img src="${m.bannerImage}" class="w-full h-full object-cover opacity-60" />` : ''}
+            <div class="absolute inset-0 bg-gradient-to-t from-[#111827] via-[#111827]/40 to-transparent"></div>
+          </div>
 
-  if (DOM.historySearchInput) {
-    DOM.historySearchInput.addEventListener('input', () => {
-      renderHistory();
-    });
-  }
+          <div class="px-6 sm:px-10 -mt-24 relative z-10 space-y-8 pb-10">
+            <!-- Header Block -->
+            <div class="flex flex-col sm:flex-row gap-6 items-start">
+              <img src="${m.coverImage.extraLarge || m.coverImage.large}" class="w-36 sm:w-44 rounded-2xl shadow-2xl border-2 border-slate-800 object-cover shrink-0" />
+              <div class="space-y-3 flex-grow pt-4 sm:pt-12">
+                <div class="flex flex-wrap gap-2 items-center">
+                  <span class="px-2.5 py-1 rounded-xl bg-violet-600/20 text-violet-400 text-xs font-bold uppercase">${m.format || 'TV'}</span>
+                  <span class="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-400 text-xs font-bold">${m.status}</span>
+                  ${isDownloaded ? '<span class="px-2.5 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold"><i class="fa-solid fa-check mr-1"></i>In Watching List</span>' : ''}
+                </div>
+                <h2 class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-slate-900 dark:text-white leading-tight">${title}</h2>
+                <div class="flex items-center gap-4 text-xs font-bold text-slate-400">
+                  <span class="text-amber-400"><i class="fa-solid fa-star mr-1"></i>${m.averageScore ? `${m.averageScore}%` : 'N/A'}</span>
+                  <span>${m.episodes ? `${m.episodes} episodes` : '? eps'} (${m.duration || 24}m)</span>
+                  <span>${m.season || ''} ${m.seasonYear || ''}</span>
+                </div>
 
-  // Init dashboard load
-  async function loadDashboard() {
-    try {
-      // First query config to get basic tags
-      const config = await API.getConfig();
-      state.config = config;
+                <!-- Action Toolbar -->
+                <div class="flex flex-wrap gap-3 pt-3">
+                  <button onclick="openListEditor(${m.id})" class="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-lg shadow-violet-500/20 text-xs cursor-pointer">
+                    Add / Edit List Entry
+                  </button>
+                  <button onclick="openNyaaDialog(${m.id})" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs cursor-pointer">
+                    Search Nyaa Torrents
+                  </button>
+                </div>
+              </div>
+            </div>
 
-      const data = await API.getAnime();
-      state.animeList = data.anime;
-      state.userName = data.userName;
-      
-      DOM.userDisplayName.textContent = data.userName || 'Otaku';
-      renderAnimeGrid();
-      updateDownloadsDashboard();
+            <!-- Synopsis & Spoiler Toggle -->
+            <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800 space-y-3">
+              <h3 class="font-['Outfit'] font-bold text-base text-slate-900 dark:text-white">Synopsis</h3>
+              <p class="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">${m.description || 'No detailed synopsis available.'}</p>
+            </div>
+
+            <!-- Inline SVG Score Distribution Chart -->
+            <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800 space-y-4">
+              <h3 class="font-['Outfit'] font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <i class="fa-solid fa-chart-column text-violet-500"></i>Score Distribution Histogram
+              </h3>
+              <div class="w-full h-24 flex items-end justify-center">
+                <svg viewBox="0 0 100 60" class="w-full h-full">
+                  ${svgHistogram}
+                </svg>
+              </div>
+            </div>
+
+            <!-- Typed Relations Cards -->
+            ${m.relations?.edges?.length ? `
+              <div class="space-y-3">
+                <h3 class="font-['Outfit'] font-bold text-base">Typed Relations</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  ${m.relations.edges.map(e => `
+                    <div onclick="openMediaDetail(${e.node.id})" class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-800 flex items-center gap-2.5 cursor-pointer hover:border-violet-500 transition-all">
+                      <img src="${e.node.coverImage.medium}" class="w-8 h-10 object-cover rounded-md shrink-0" />
+                      <div>
+                        <span class="text-[9px] font-bold text-violet-400 uppercase">${e.relationType}</span>
+                        <p class="font-bold text-[11px] line-clamp-1">${formatTitle(e.node.title)}</p>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Characters & Voice Actors Grid -->
+            ${m.characters?.edges?.length ? `
+              <div class="space-y-3">
+                <h3 class="font-['Outfit'] font-bold text-base">Key Characters & Voice Actors</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  ${m.characters.edges.map(c => `
+                    <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-800 flex items-center justify-between">
+                      <div class="flex items-center gap-2.5">
+                        <img src="${c.node.image.medium}" class="w-9 h-9 rounded-xl object-cover" />
+                        <div>
+                          <p class="font-bold text-xs">${c.node.name.full}</p>
+                          <span class="text-[10px] text-slate-400">${c.role}</span>
+                        </div>
+                      </div>
+                      ${c.voiceActors?.[0] ? `
+                        <div class="text-right">
+                          <p class="font-bold text-[11px] text-violet-400">${c.voiceActors[0].name.full}</p>
+                          <span class="text-[9px] text-slate-500">Japanese</span>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+          </div>
+        </div>
+      `;
+
     } catch (e) {
-      console.error(e);
-      showToast('Backend offline or initialization error.', 'error');
+      content.innerHTML = `<div class="py-16 text-center text-rose-500 text-sm font-bold">Failed to load media details: ${e.message}</div>`;
     }
-  }
+  };
 
+
+  // ==========================================
+  // LIST EDITOR MODAL & 5 SCORE FORMATS
+  // ==========================================
+  window.openListEditor = function(mediaId) {
+    state.activeListEditorMedia = mediaId;
+    document.getElementById('editor-media-id').value = mediaId;
+    openModal(DOM.listEditorModal);
+  };
+
+  document.getElementById('btn-editor-save')?.addEventListener('click', async () => {
+    const mediaId = parseInt(document.getElementById('editor-media-id').value);
+    const status = document.getElementById('editor-status').value;
+    const progress = parseInt(document.getElementById('editor-progress').value) || 0;
+    const score = parseInt(document.getElementById('editor-score').value) || 0;
+
+    try {
+      const mutation = `
+        mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $scoreRaw: Int) {
+          SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, scoreRaw: $scoreRaw) {
+            id
+            status
+            progress
+          }
+        }
+      `;
+      await queryAniList(mutation, { mediaId, status, progress, scoreRaw: score * 10 });
+      showToast('List entry saved successfully!');
+      closeModal(DOM.listEditorModal);
+      if (state.activeTab === 'lists') loadUserListsData();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+
+  // ==========================================
+  // OVERLAY DIALOG 1: ANIME OVERRIDES
+  // ==========================================
+  window.openAnimeSettings = function(mediaId) {
+    const anime = state.animeList.find(x => x.mediaId === mediaId);
+    if (!anime) return;
+
+    DOM.editMediaId.value = mediaId;
+    DOM.editAltTitle.value = anime.media.alternativeTitle || '';
+    DOM.editStartEp.value = anime.media.startingEpisode || 0;
+
+    openModal(DOM.settingsDialog);
+  };
+
+  DOM.btnSaveSettings.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const mediaId = DOM.editMediaId.value;
+    const alternativeTitle = DOM.editAltTitle.value;
+    const startingEpisode = DOM.editStartEp.value;
+
+    try {
+      await API.saveAnime(mediaId, { alternativeTitle, startingEpisode });
+      showToast('Anime overrides saved successfully.');
+      closeModal(DOM.settingsDialog);
+      loadWatching();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  DOM.btnResetDownloads.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const mediaId = DOM.editMediaId.value;
+    try {
+      await API.resetAnime(mediaId);
+      showToast('Downloaded episode cache reset.');
+      closeModal(DOM.settingsDialog);
+      loadWatching();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+
+  // ==========================================
+  // OVERLAY DIALOG 2: NYAA EPISODE SEARCH
+  // ==========================================
+  window.openNyaaDialog = async function(mediaId) {
+    const anime = state.animeList.find(x => x.mediaId === mediaId);
+    openModal(DOM.nyaaDialog);
+    DOM.nyaaList.innerHTML = '<div class="py-12 text-center text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-violet-500"></i><p>Querying Nyaa.si index...</p></div>';
+
+    try {
+      const data = await API.searchNyaa(mediaId);
+      if (!data.results || data.results.length === 0) {
+        DOM.nyaaList.innerHTML = '<div class="py-12 text-center text-slate-400 text-sm">No torrent candidates found.</div>';
+        return;
+      }
+
+      DOM.nyaaList.innerHTML = data.results.map(c => `
+        <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-4 text-xs">
+          <div class="space-y-1">
+            <h4 class="font-['Outfit'] font-bold text-slate-800 dark:text-slate-200 line-clamp-1">${c.title}</h4>
+            <div class="flex items-center gap-3 text-slate-400 font-semibold">
+              <span class="text-emerald-400"><i class="fa-solid fa-seedling mr-1"></i>${c.seeders} seeders</span>
+              <span>${c.size}</span>
+              <span>${c.pubDate}</span>
+            </div>
+          </div>
+          <button onclick="downloadTorrent('${mediaId}', '${encodeURIComponent(c.link)}')" class="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold shrink-0 transition-all">
+            Download
+          </button>
+        </div>
+      `).join('');
+
+    } catch (e) {
+      DOM.nyaaList.innerHTML = `<div class="py-12 text-center text-rose-500 text-sm font-bold">Search error: ${e.message}</div>`;
+    }
+  };
+
+  window.downloadTorrent = async function(mediaId, encodedLink) {
+    try {
+      const link = decodeURIComponent(encodedLink);
+      await API.downloadNyaa(mediaId, link);
+      showToast('Torrent added to qBittorrent!');
+      closeModal(DOM.nyaaDialog);
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+
+  // ==========================================
+  // INITIALIZATION
+  // ==========================================
   initTheme();
-  loadDashboard();
+  API.getConfig().then(cfg => {
+    state.config = cfg;
+    populateConfigForm(cfg);
+  }).catch(() => {});
+
+  switchTab('discover');
+  pollNotifications();
+  setInterval(pollNotifications, 60000);
+
 })();

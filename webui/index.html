@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Animu Control Panel</title>
+  <title>Animu Control Panel — AniList Client</title>
+  <meta name="description" content="Ultimate AniList Client and Automated Torrent Downloader" />
   <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,7 +21,7 @@
         --font-jakarta: 'Plus Jakarta Sans', sans-serif;
       }
     }
-    
+
     /* Custom Scrollbar */
     ::-webkit-scrollbar {
       width: 6px;
@@ -45,100 +46,293 @@
     }
 
     /* Soft glowing effects */
-    .glow-purple {
-      box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
-    }
-    .glow-pink {
-      box-shadow: 0 0 20px rgba(236, 72, 153, 0.15);
-    }
-    .glow-indigo {
-      box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
-    }
+    .glow-purple { box-shadow: 0 0 20px rgba(139, 92, 246, 0.15); }
+    .glow-pink { box-shadow: 0 0 20px rgba(236, 72, 153, 0.15); }
+    .glow-indigo { box-shadow: 0 0 20px rgba(99, 102, 241, 0.15); }
+    .glow-sky { box-shadow: 0 0 20px rgba(14, 165, 233, 0.15); }
+    .glow-emerald { box-shadow: 0 0 20px rgba(16, 185, 129, 0.15); }
+    .glow-rose { box-shadow: 0 0 20px rgba(244, 63, 94, 0.15); }
+
+    /* Hide scrollbar for horizontal rails */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
-><body class="bg-slate-50 dark:bg-[#0b0f19] text-slate-800 dark:text-slate-200 min-h-screen font-['Plus_Jakarta_Sans'] transition-colors duration-300 antialiased pb-12 overflow-x-hidden">
+<body class="bg-slate-50 dark:bg-[#0b0f19] text-slate-800 dark:text-slate-200 min-h-screen font-['Plus_Jakarta_Sans'] transition-colors duration-300 antialiased pb-12 overflow-x-hidden">
 
   <!-- Glow Background Accents -->
   <div class="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-400/10 dark:bg-indigo-600/5 blur-[120px] pointer-events-none z-0"></div>
   <div class="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-fuchsia-400/10 dark:bg-purple-600/5 blur-[120px] pointer-events-none z-0"></div>
 
   <!-- Header Navigation -->
-  <header class="sticky top-0 z-50 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/75 dark:bg-[#0f1524]/75 backdrop-blur-xl transition-all duration-300">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
-      
+  <header class="sticky top-0 z-50 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-[#0f1524]/80 backdrop-blur-xl transition-all duration-300">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2">
+
       <!-- Logo & Brand -->
-      <a href="/" class="flex items-center gap-3 group">
+      <a href="#" class="flex items-center gap-3 group shrink-0">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform duration-300">
           <i class="fa-solid fa-play text-white ml-0.5 text-lg"></i>
         </div>
-        <div class="flex flex-col">
+        <div class="hidden sm:flex flex-col">
           <span class="font-['Outfit'] font-extrabold text-xl tracking-tight bg-gradient-to-r from-violet-600 to-pink-500 bg-clip-text text-transparent">Animu</span>
-          <span class="text-[10px] text-slate-400 font-semibold tracking-wider uppercase -mt-1">Manager</span>
+          <span class="text-[10px] text-slate-400 font-semibold tracking-wider uppercase -mt-1">AniList Client</span>
         </div>
       </a>
 
-      <!-- Navigation Tabs (Dynamic Switch) - Desktop -->
-      <nav class="hidden md:flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 sm:p-1.5 rounded-2xl shadow-inner max-w-sm sm:max-w-none">
-        <button data-tab="watching" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 active-tab bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
-          <i class="fa-solid fa-tv text-[11px] sm:text-xs"></i>Watching
+      <!-- Navigation Tabs (Desktop) -->
+      <nav class="hidden lg:flex items-center gap-1 bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 rounded-2xl shadow-inner overflow-x-auto max-w-3xl">
+        <button data-tab="discover" class="nav-tab active-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
+          <i class="fa-solid fa-compass text-xs"></i>Discover
         </button>
-        <button data-tab="history" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-clock-rotate-left text-[11px] sm:text-xs"></i>History
+        <button data-tab="watching" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-tv text-xs"></i>Watching
         </button>
-        <button data-tab="logs" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-list-check text-[11px] sm:text-xs"></i>Logs
+        <button data-tab="lists" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-list-check text-xs"></i>Lists
         </button>
-        <button data-tab="settings" class="nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']">
-          <i class="fa-solid fa-sliders text-[11px] sm:text-xs"></i>Settings
+        <button data-tab="search" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-magnifying-glass text-xs"></i>Search
+        </button>
+        <button data-tab="social" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-users text-xs"></i>Social
+        </button>
+        <button data-tab="stats" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-chart-pie text-xs"></i>Stats
+        </button>
+        <button data-tab="history" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-clock-rotate-left text-xs"></i>History
+        </button>
+        <button data-tab="logs" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-terminal text-xs"></i>Logs
+        </button>
+        <button data-tab="settings" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
+          <i class="fa-solid fa-sliders text-xs"></i>Settings
         </button>
       </nav>
 
-      <!-- Mobile: Hamburger + Theme Switch -->
-      <div class="flex items-center gap-2 md:hidden">
-        <!-- Hamburger Button -->
-        <button id="hamburger-btn" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm" aria-label="Open menu">
-          <i class="fa-solid fa-bars text-lg"></i>
-        </button>
-        <!-- Theme Switch -->
+      <!-- Header Controls (Notifications & Theme) -->
+      <div class="flex items-center gap-2">
+        <!-- Notifications Bell & Dropdown -->
+        <div class="relative">
+          <button id="notif-btn" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm relative">
+            <i class="fa-solid fa-bell text-base"></i>
+            <span id="notif-badge" class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold w-4.5 h-4.5 rounded-full flex items-center justify-center animate-pulse">0</span>
+          </button>
+          <!-- Notification Dropdown Panel -->
+          <div id="notif-dropdown" class="hidden absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800/90 rounded-2xl shadow-2xl z-50 p-4 space-y-3">
+            <div class="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+              <h4 class="font-['Outfit'] font-bold text-sm flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                <i class="fa-solid fa-bell text-violet-500"></i>Notifications
+              </h4>
+              <button id="btn-mark-all-read" class="text-xs font-semibold text-violet-500 hover:underline cursor-pointer">Mark all read</button>
+            </div>
+            <div id="notif-list" class="max-h-72 overflow-y-auto space-y-2 text-xs">
+              <p class="text-slate-400 text-center py-6">No new notifications</p>
+            </div>
+            <div class="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-[11px] text-slate-400">
+              <span>Airing reminders enabled</span>
+              <button id="btn-request-browser-notif" class="text-violet-500 hover:underline">Browser alerts</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Theme Toggle -->
         <button id="theme-toggle" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm">
-          <i class="fa-solid fa-moon dark:hidden text-lg"></i>
-          <i class="fa-solid fa-sun hidden dark:block text-lg"></i>
+          <i class="fa-solid fa-moon dark:hidden text-base"></i>
+          <i class="fa-solid fa-sun hidden dark:block text-base"></i>
+        </button>
+
+        <!-- Mobile Hamburger Button -->
+        <button id="hamburger-btn" class="lg:hidden w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm" aria-label="Open menu">
+          <i class="fa-solid fa-bars text-lg"></i>
         </button>
       </div>
 
-      <!-- Theme Switch - Desktop -->
-      <button id="theme-toggle-desktop" class="hidden md:flex w-10 h-10 sm:w-11 sm:h-11 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm">
-        <i class="fa-solid fa-moon dark:hidden text-lg"></i>
-        <i class="fa-solid fa-sun hidden dark:block text-lg"></i>
-      </button>
-
     </div>
 
-    <!-- Mobile Menu Panel -->
-    <div id="mobile-menu" class="md:hidden overflow-hidden max-h-0 transition-all duration-300 ease-in-out border-t border-slate-200/50 dark:border-slate-800/50 bg-white/95 dark:bg-[#0f1524]/95 backdrop-blur-xl">
-      <div class="px-4 py-3 space-y-1">
-        <button data-tab="watching" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer bg-violet-600/10 text-violet-700 dark:text-violet-300 font-['Outfit']">
-          <i class="fa-solid fa-tv text-xs w-5 text-center"></i>Watching
+    <!-- Mobile Navigation Panel -->
+    <div id="mobile-menu" class="lg:hidden overflow-hidden max-h-0 transition-all duration-300 ease-in-out border-t border-slate-200/50 dark:border-slate-800/50 bg-white/95 dark:bg-[#0f1524]/95 backdrop-blur-xl">
+      <div class="px-4 py-3 grid grid-cols-2 gap-1.5">
+        <button data-tab="discover" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-compass text-violet-500 w-4"></i>Discover
         </button>
-        <button data-tab="history" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
-          <i class="fa-solid fa-clock-rotate-left text-xs w-5 text-center"></i>History
+        <button data-tab="watching" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-tv text-violet-500 w-4"></i>Watching
         </button>
-        <button data-tab="logs" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
-          <i class="fa-solid fa-list-check text-xs w-5 text-center"></i>Logs
+        <button data-tab="lists" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-list-check text-violet-500 w-4"></i>Lists
         </button>
-        <button data-tab="settings" class="mobile-nav-tab w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40 font-['Outfit']">
-          <i class="fa-solid fa-sliders text-xs w-5 text-center"></i>Settings
+        <button data-tab="search" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-magnifying-glass text-violet-500 w-4"></i>Search
+        </button>
+        <button data-tab="social" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-users text-violet-500 w-4"></i>Social
+        </button>
+        <button data-tab="stats" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-chart-pie text-violet-500 w-4"></i>Stats
+        </button>
+        <button data-tab="history" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-clock-rotate-left text-violet-500 w-4"></i>History
+        </button>
+        <button data-tab="logs" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
+          <i class="fa-solid fa-terminal text-violet-500 w-4"></i>Logs
+        </button>
+        <button data-tab="settings" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit'] col-span-2">
+          <i class="fa-solid fa-sliders text-violet-500 w-4"></i>Settings
         </button>
       </div>
     </div>
   </header>
 
   <!-- Main Container -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 relative z-10">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10 relative z-10">
 
-    <!-- VIEW PANEL: WATCHING -->
-    <section id="watching-panel" class="view-panel transition-all duration-300">
-      
+    <!-- VIEW PANEL 1: DISCOVER (HOME RAILS & SEASONAL CHART) -->
+    <section id="discover-panel" class="view-panel transition-all duration-300 space-y-10">
+
+      <!-- Discover Banner -->
+      <div class="relative overflow-hidden rounded-3xl border border-slate-200/60 dark:border-violet-900/30 bg-gradient-to-r from-violet-900/20 via-indigo-900/20 to-slate-900/40 p-6 sm:p-8 shadow-sm glow-purple">
+        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div class="space-y-2">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-bold uppercase tracking-wider">
+              <i class="fa-solid fa-fire text-violet-400"></i>AniList Discover Hub
+            </div>
+            <h1 class="text-3xl sm:text-4xl font-extrabold font-['Outfit'] tracking-tight">
+              Explore Trending <span class="bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent">& Seasonal</span> Anime
+            </h1>
+            <p class="text-xs sm:text-sm text-slate-400 max-w-xl">
+              Live seasonal charts, trending rails, releasing today schedules, score rankings, and instant download automation.
+            </p>
+          </div>
+          <!-- Season Quick Selector -->
+          <div class="flex flex-wrap items-center gap-2 bg-slate-900/60 backdrop-blur-md p-1.5 rounded-2xl border border-slate-800 shrink-0">
+            <button data-season-tab="SPRING_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl bg-violet-600 text-white shadow-sm font-['Outfit']">Spring 2026</button>
+            <button data-season-tab="SUMMER_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white font-['Outfit']">Summer 2026</button>
+            <button data-season-tab="FALL_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white font-['Outfit']">Fall 2026</button>
+            <button data-season-tab="WINTER_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white font-['Outfit']">Winter 2026</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Releasing Today Feed Ticker -->
+      <div class="rounded-2xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-4 shadow-sm">
+        <div class="flex items-center gap-3 mb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <h3 class="font-['Outfit'] font-bold text-sm uppercase tracking-wider text-slate-700 dark:text-slate-300">Releasing Today Schedule</h3>
+        </div>
+        <div id="releasing-today-feed" class="flex gap-4 overflow-x-auto no-scrollbar pb-1 text-xs">
+          <!-- Dynamically populated -->
+          <div class="text-slate-400 py-2">Loading today's airing schedule...</div>
+        </div>
+      </div>
+
+      <!-- Rails Section -->
+      <div class="space-y-8">
+
+        <!-- Rail 1: Trending Now (With Sparkline Cards) -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold font-['Outfit'] flex items-center gap-2 text-slate-900 dark:text-white">
+              <i class="fa-solid fa-chart-line text-violet-500"></i>Trending Now
+            </h2>
+            <button data-tab="search" data-search-sort="TRENDING_DESC" class="text-xs font-semibold text-violet-400 hover:underline flex items-center gap-1">View All <i class="fa-solid fa-chevron-right text-[10px]"></i></button>
+          </div>
+          <div id="rail-trending" class="flex gap-5 overflow-x-auto no-scrollbar pb-3">
+            <div class="text-slate-400 text-xs py-8">Fetching trending titles...</div>
+          </div>
+        </div>
+
+        <!-- Rail 2: Popular This Season -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold font-['Outfit'] flex items-center gap-2 text-slate-900 dark:text-white">
+              <i class="fa-solid fa-fire text-pink-500"></i>Popular This Season
+            </h2>
+            <button data-tab="search" data-search-sort="POPULARITY_DESC" class="text-xs font-semibold text-pink-400 hover:underline flex items-center gap-1">View All <i class="fa-solid fa-chevron-right text-[10px]"></i></button>
+          </div>
+          <div id="rail-popular-season" class="flex gap-5 overflow-x-auto no-scrollbar pb-3">
+            <div class="text-slate-400 text-xs py-8">Fetching popular titles...</div>
+          </div>
+        </div>
+
+        <!-- Rail 3: Upcoming Next Season -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold font-['Outfit'] flex items-center gap-2 text-slate-900 dark:text-white">
+              <i class="fa-solid fa-calendar-days text-indigo-500"></i>Upcoming Next Season
+            </h2>
+          </div>
+          <div id="rail-upcoming" class="flex gap-5 overflow-x-auto no-scrollbar pb-3">
+            <div class="text-slate-400 text-xs py-8">Fetching upcoming titles...</div>
+          </div>
+        </div>
+
+        <!-- Rail 4: All-Time Popular -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold font-['Outfit'] flex items-center gap-2 text-slate-900 dark:text-white">
+              <i class="fa-solid fa-crown text-amber-500"></i>All-Time Popular
+            </h2>
+          </div>
+          <div id="rail-all-time" class="flex gap-5 overflow-x-auto no-scrollbar pb-3">
+            <div class="text-slate-400 text-xs py-8">Fetching all-time popular titles...</div>
+          </div>
+        </div>
+
+        <!-- Rail 5: Top 100 -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold font-['Outfit'] flex items-center gap-2 text-slate-900 dark:text-white">
+              <i class="fa-solid fa-trophy text-emerald-500"></i>Top 100 Highest Rated
+            </h2>
+          </div>
+          <div id="rail-top-100" class="flex gap-5 overflow-x-auto no-scrollbar pb-3">
+            <div class="text-slate-400 text-xs py-8">Fetching top rated anime...</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- AniChart-Style Seasonal Grid -->
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-6 shadow-sm space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
+              <i class="fa-solid fa-layer-group text-violet-500"></i>Seasonal Anime Chart
+            </h2>
+            <p class="text-xs text-slate-400">Interactive AniChart-style overview with airing countdowns and score ranks.</p>
+          </div>
+
+          <!-- Controls -->
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Filter Tabs -->
+            <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
+              <button data-chart-subtab="Airing" class="chart-subtab active-subtab px-3 py-1.5 rounded-lg bg-violet-600 text-white">Airing</button>
+              <button data-chart-subtab="Upcoming" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Upcoming</button>
+              <button data-chart-subtab="TBA" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">TBA</button>
+              <button data-chart-subtab="Archive" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Archive</button>
+            </div>
+
+            <!-- Hide Items on My List Toggle -->
+            <label class="flex items-center gap-2 text-xs font-semibold text-slate-400 cursor-pointer select-none">
+              <input type="checkbox" id="hide-my-list-toggle" class="w-4 h-4 accent-violet-600 rounded cursor-pointer" />
+              Hide on my list
+            </label>
+          </div>
+        </div>
+
+        <!-- Grid Cards -->
+        <div id="seasonal-chart-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          <div class="col-span-full py-12 text-center text-slate-400 text-sm">Loading seasonal chart grid...</div>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL 2: WATCHING (LOCAL WATCHLIST & SCHEDULER ENGINE) -->
+    <section id="watching-panel" class="view-panel hidden transition-all duration-300">
+
       <!-- Welcome Banner Card -->
       <div class="relative overflow-hidden rounded-3xl border border-slate-200/60 dark:border-violet-900/20 bg-white dark:bg-[#111827]/75 p-6 sm:p-8 md:p-10 mb-8 sm:mb-12 shadow-sm glow-purple">
         <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -188,11 +382,330 @@
     </section>
 
 
-    <!-- VIEW PANEL: HISTORY -->
+    <!-- VIEW PANEL 3: LISTS (FULL ANILIST LISTS WITH STATUS & CUSTOM GROUPS) -->
+    <section id="lists-panel" class="view-panel hidden transition-all duration-300 space-y-6">
+
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-6 shadow-sm space-y-6">
+
+        <!-- Header & Media Switcher -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
+          <div class="space-y-1">
+            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
+              <i class="fa-solid fa-table-list text-violet-500"></i>My AniList Collection
+            </h2>
+            <p class="text-xs text-slate-400">Manage status groups, custom lists, score formats, and quick episode progress edits.</p>
+          </div>
+
+          <!-- View Modes & Media Switcher -->
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Media Type Switcher -->
+            <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold font-['Outfit']">
+              <button id="lists-media-type-anime" class="px-3.5 py-1.5 rounded-lg bg-violet-600 text-white shadow-sm">Anime</button>
+              <button id="lists-media-type-manga" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white">Manga</button>
+            </div>
+
+            <!-- View Modes -->
+            <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+              <button data-list-view="grid" class="list-view-btn px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"><i class="fa-solid fa-grip"></i></button>
+              <button data-list-view="compact" class="list-view-btn px-2.5 py-1 rounded-lg text-slate-400 hover:text-white"><i class="fa-solid fa-list"></i></button>
+              <button data-list-view="detailed" class="list-view-btn px-2.5 py-1 rounded-lg text-slate-400 hover:text-white"><i class="fa-solid fa-bars-staggered"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Status Filter Tabs (Watching, Completed, Paused, Dropped, Planning, Rewatching, Custom) -->
+        <div id="lists-status-tabs" class="flex gap-2 overflow-x-auto no-scrollbar pb-1 text-xs font-semibold font-['Outfit'] border-b border-slate-100 dark:border-slate-800">
+          <button data-status-group="ALL" class="list-status-tab px-4 py-2 rounded-xl bg-violet-600 text-white shadow-sm shrink-0">All (<span id="cnt-all">0</span>)</button>
+          <button data-status-group="CURRENT" class="list-status-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Watching (<span id="cnt-current">0</span>)</button>
+          <button data-status-group="REPEATING" class="list-status-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Rewatching (<span id="cnt-repeating">0</span>)</button>
+          <button data-status-group="COMPLETED" class="list-status-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Completed (<span id="cnt-completed">0</span>)</button>
+          <button data-status-group="PAUSED" class="list-status-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Paused (<span id="cnt-paused">0</span>)</button>
+          <button data-status-group="DROPPED" class="list-status-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Dropped (<span id="cnt-dropped">0</span>)</button>
+          <button data-status-group="PLANNING" class="list-status-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Planning (<span id="cnt-planning">0</span>)</button>
+        </div>
+
+        <!-- Filter & Search Controls Bar -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="relative flex-grow max-w-md">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+            <input type="text" id="lists-search-input" placeholder="Filter list entries..." class="w-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl pl-9 pr-3.5 py-2 text-xs font-semibold outline-none focus:border-violet-500" />
+          </div>
+
+          <div class="flex items-center gap-3 shrink-0 text-xs">
+            <select id="lists-sort-select" class="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 font-semibold outline-none focus:border-violet-500">
+              <option value="score">Sort by Score</option>
+              <option value="title">Sort by Title</option>
+              <option value="progress">Sort by Progress</option>
+              <option value="updatedAt">Sort by Last Updated</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- List Entries Container -->
+        <div id="lists-entries-container" class="min-h-[400px]">
+          <div class="py-16 text-center text-slate-400 text-sm">Fetching user AniList collection...</div>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL 4: SEARCH (GLOBAL ENTITY SEARCH & FILTER DRAWER) -->
+    <section id="search-panel" class="view-panel hidden transition-all duration-300 space-y-6">
+
+      <!-- Big Search Hero Input -->
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-6 shadow-sm space-y-4 glow-indigo">
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 text-lg"></i>
+          <input type="text" id="global-search-input" placeholder="Search anime, manga, characters, staff, studios, or users..." class="w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl pl-14 pr-28 py-4 text-sm sm:text-base font-semibold outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 transition-all" />
+          <button id="search-clear-btn" class="hidden absolute right-16 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-2">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+          <button id="btn-toggle-filters" class="absolute right-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-violet-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-violet-700 transition-colors">
+            <i class="fa-solid fa-sliders"></i>Filters
+          </button>
+        </div>
+
+        <!-- Entity Type Tabs -->
+        <div class="flex gap-2 overflow-x-auto no-scrollbar border-b border-slate-100 dark:border-slate-800 pb-2 text-xs font-bold font-['Outfit']">
+          <button data-entity-tab="ANIME" class="search-entity-tab px-4 py-2 rounded-xl bg-violet-600 text-white shadow-sm shrink-0">Anime</button>
+          <button data-entity-tab="MANGA" class="search-entity-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Manga</button>
+          <button data-entity-tab="CHARACTER" class="search-entity-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Characters</button>
+          <button data-entity-tab="STAFF" class="search-entity-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Staff</button>
+          <button data-entity-tab="STUDIO" class="search-entity-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Studios</button>
+          <button data-entity-tab="USER" class="search-entity-tab px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white shrink-0">Users</button>
+        </div>
+
+        <!-- Collapsible Filter Drawer -->
+        <div id="search-filter-drawer" class="hidden pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4 text-xs">
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <div>
+              <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Format</label>
+              <select id="filter-format" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 font-medium outline-none focus:border-violet-500">
+                <option value="">Any Format</option>
+                <option value="TV">TV</option>
+                <option value="TV_SHORT">TV Short</option>
+                <option value="MOVIE">Movie</option>
+                <option value="SPECIAL">Special</option>
+                <option value="OVA">OVA</option>
+                <option value="ONA">ONA</option>
+                <option value="MUSIC">Music</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Status</label>
+              <select id="filter-status" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 font-medium outline-none focus:border-violet-500">
+                <option value="">Any Status</option>
+                <option value="FINISHED">Finished</option>
+                <option value="RELEASING">Releasing</option>
+                <option value="NOT_YET_RELEASED">Not Yet Released</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Season</label>
+              <select id="filter-season" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 font-medium outline-none focus:border-violet-500">
+                <option value="">Any Season</option>
+                <option value="WINTER">Winter</option>
+                <option value="SPRING">Spring</option>
+                <option value="SUMMER">Summer</option>
+                <option value="FALL">Fall</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Year</label>
+              <input type="number" id="filter-year" placeholder="e.g. 2026" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 font-medium outline-none focus:border-violet-500" />
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Genre</label>
+              <select id="filter-genre" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 font-medium outline-none focus:border-violet-500">
+                <option value="">Any Genre</option>
+                <option value="Action">Action</option>
+                <option value="Adventure">Adventure</option>
+                <option value="Comedy">Comedy</option>
+                <option value="Drama">Drama</option>
+                <option value="Fantasy">Fantasy</option>
+                <option value="Mahou Shoujo">Mahou Shoujo</option>
+                <option value="Mecha">Mecha</option>
+                <option value="Music">Music</option>
+                <option value="Mystery">Mystery</option>
+                <option value="Psychological">Psychological</option>
+                <option value="Romance">Romance</option>
+                <option value="Sci-Fi">Sci-Fi</option>
+                <option value="Slice of Life">Slice of Life</option>
+                <option value="Sports">Sports</option>
+                <option value="Supernatural font-semibold">Supernatural</option>
+                <option value="Thriller">Thriller</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">On List</label>
+              <select id="filter-on-list" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 font-medium outline-none focus:border-violet-500">
+                <option value="">Any</option>
+                <option value="true">On My List</option>
+                <option value="false">Not On List</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Search Results Container -->
+      <div id="search-results-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 min-h-[300px]">
+        <div class="col-span-full py-16 text-center text-slate-400 text-sm">
+          Enter a search query or select filters above to find anime, manga, characters, staff, and users.
+        </div>
+      </div>
+
+      <!-- Pagination / Load More -->
+      <div id="search-pagination" class="hidden text-center pt-4">
+        <button id="btn-search-load-more" class="px-6 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-violet-500/20 transition-all cursor-pointer">
+          Load More Results
+        </button>
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL 5: SOCIAL (COMMUNITY ACTIVITIES, USER PROFILES, FOLLOWS & PMS) -->
+    <section id="social-panel" class="view-panel hidden transition-all duration-300 space-y-6">
+
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-6 shadow-sm space-y-6">
+
+        <!-- Header & Sub-Tabs -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
+              <i class="fa-solid fa-users text-violet-500"></i>AniList Social Hub
+            </h2>
+            <p class="text-xs text-slate-400">Activity stream, user profile lookup, followers, and direct messaging.</p>
+          </div>
+
+          <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold font-['Outfit']">
+            <button data-social-tab="feed" class="social-tab-btn active-social-tab px-3 py-1.5 rounded-lg bg-violet-600 text-white">Activity Feed</button>
+            <button data-social-tab="profile" class="social-tab-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">User Profile</button>
+            <button data-social-tab="messages" class="social-tab-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Messages</button>
+          </div>
+        </div>
+
+        <!-- Social Tab Content 1: Activity Feed -->
+        <div id="social-content-feed" class="space-y-6">
+          <!-- Text Activity Creator -->
+          <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 space-y-3">
+            <textarea id="activity-input" rows="2" placeholder="Write an update to your AniList activity feed..." class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-xs font-medium outline-none focus:border-violet-500"></textarea>
+            <div class="flex justify-end">
+              <button id="btn-post-activity" class="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer">
+                Post Activity
+              </button>
+            </div>
+          </div>
+
+          <!-- Feed Items -->
+          <div id="activity-feed-list" class="space-y-4">
+            <div class="py-12 text-center text-slate-400 text-xs">Loading community activity feed...</div>
+          </div>
+        </div>
+
+        <!-- Social Tab Content 2: Profile Lookup -->
+        <div id="social-content-profile" class="hidden space-y-6">
+          <div class="flex items-center gap-3">
+            <input type="text" id="social-user-search" placeholder="Enter AniList username..." class="flex-grow bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-xs font-semibold outline-none focus:border-violet-500" />
+            <button id="btn-search-user-profile" class="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold">Search</button>
+          </div>
+
+          <div id="user-profile-display" class="hidden p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800 space-y-4">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Social Tab Content 3: Messages -->
+        <div id="social-content-messages" class="hidden space-y-4">
+          <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800 text-center text-xs text-slate-400 space-y-2">
+            <i class="fa-solid fa-comments text-3xl text-violet-500 mb-2"></i>
+            <p class="font-bold text-sm text-slate-700 dark:text-slate-200">Direct Messages</p>
+            <p>Select a user profile or activity reply to initiate direct messaging.</p>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL 6: STATS (ANALYTICS, DAYS WATCHED & GENRE BREAKDOWNS) -->
+    <section id="stats-panel" class="view-panel hidden transition-all duration-300 space-y-6">
+
+      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-6 shadow-sm space-y-8">
+
+        <div class="pb-4 border-b border-slate-100 dark:border-slate-800">
+          <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
+            <i class="fa-solid fa-chart-pie text-violet-500"></i>User Analytics & Visual Breakdown
+          </h2>
+          <p class="text-xs text-slate-400">Total watch statistics, mean score distributions, and genre/format breakdowns.</p>
+        </div>
+
+        <!-- Overview Cards Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div class="p-5 rounded-2xl bg-violet-500/10 border border-violet-500/20 text-center space-y-1">
+            <span class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-violet-400" id="stat-total-anime">0</span>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Anime</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-center space-y-1">
+            <span class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-pink-400" id="stat-days-watched">0.0</span>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Days Watched</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-center space-y-1">
+            <span class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-indigo-400" id="stat-mean-score">0.0</span>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Mean Score</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center space-y-1">
+            <span class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-emerald-400" id="stat-total-episodes">0</span>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Episodes Watched</p>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+          <!-- Genre Distribution Chart -->
+          <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 space-y-4">
+            <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2">
+              <i class="fa-solid fa-shapes text-violet-500"></i>Top Genres Distribution
+            </h3>
+            <div id="chart-genre-container" class="space-y-3">
+              <div class="text-slate-400 text-xs py-4 text-center">Calculating genre breakdown...</div>
+            </div>
+          </div>
+
+          <!-- Format Breakdown & Tag Cloud -->
+          <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 space-y-4">
+            <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2">
+              <i class="fa-solid fa-tags text-pink-500"></i>Format & Tag Breakdown
+            </h3>
+            <div id="chart-format-container" class="space-y-3">
+              <div class="text-slate-400 text-xs py-4 text-center">Calculating format breakdown...</div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- VIEW PANEL 7: HISTORY -->
     <section id="history-panel" class="view-panel hidden transition-all duration-300">
-      
+
       <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm flex flex-col min-h-[500px] glow-indigo">
-        
+
         <!-- History Header -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
           <div class="space-y-1">
@@ -201,30 +714,25 @@
             </h2>
             <p class="text-xs sm:text-sm text-slate-400">View previous torrent downloads, links, and completion timestamps sorted from newest to oldest.</p>
           </div>
-          
+
           <!-- Controls -->
           <div class="flex flex-wrap items-center gap-3">
-            <!-- Search Filter Input -->
             <div class="relative">
               <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
               <input type="text" id="history-search-input" placeholder="Search history..." class="bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 rounded-xl pl-9 pr-3.5 py-2 text-xs sm:text-sm font-semibold outline-none focus:border-violet-500 w-44 sm:w-60 transition-all" />
             </div>
 
-            <!-- Refresh Button -->
             <button id="history-refresh-btn" class="w-10 h-10 flex items-center justify-center bg-violet-600 hover:bg-violet-700 active:scale-95 text-white rounded-xl shadow-lg shadow-violet-500/20 cursor-pointer transition-all duration-200" title="Refresh history">
               <i class="fa-solid fa-arrows-rotate"></i>
             </button>
 
-            <!-- Clear History Button -->
             <button id="history-clear-btn" class="px-4 py-2 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/20 text-rose-500 font-semibold rounded-xl text-xs sm:text-sm transition-all duration-200 cursor-pointer flex items-center gap-2">
               <i class="fa-solid fa-trash-can text-xs"></i>Clear History
             </button>
           </div>
         </div>
 
-        <!-- History Items Container -->
         <div id="history-list" class="space-y-4">
-          <!-- Rendered dynamically -->
           <div class="py-16 flex flex-col items-center justify-center text-slate-400">
             <i class="fa-solid fa-spinner fa-spin text-4xl mb-4 text-violet-500"></i>
             <p class="font-semibold text-sm">Loading download history...</p>
@@ -236,11 +744,11 @@
     </section>
 
 
-    <!-- VIEW PANEL: LOGS -->
+    <!-- VIEW PANEL 8: LOGS -->
     <section id="logs-panel" class="view-panel hidden transition-all duration-300">
-      
+
       <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm flex flex-col min-h-[500px] sm:min-h-[600px] glow-indigo">
-        
+
         <!-- Logs Header -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
           <div class="space-y-1">
@@ -293,7 +801,6 @@
             </button>
           </div>
           <div id="search-debug-container" class="space-y-4">
-            <!-- Loaded dynamically -->
             <div class="p-5 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-900/30 border border-slate-200/40 dark:border-slate-800/40 rounded-2xl">
               No failed runs logged in the current check cycle.
             </div>
@@ -305,15 +812,15 @@
     </section>
 
 
-    <!-- VIEW PANEL: SETTINGS -->
+    <!-- VIEW PANEL 9: SETTINGS (CONFIG, OAUTH & PREFERENCES) -->
     <section id="settings-panel" class="view-panel hidden transition-all duration-300">
-      
+
       <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 p-5 sm:p-8 shadow-sm glow-pink">
-        
+
         <!-- Header -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-5 border-b border-slate-100 dark:border-slate-800">
           <div class="space-y-1">
-            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight">Configuration Settings</h2>
+            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight">Configuration & Preferences</h2>
             <p class="text-xs sm:text-sm text-slate-400">Modify global application config constants. Changes write to <code class="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-xs">profile.json</code> and hotload instantly.</p>
           </div>
           <button id="btn-submit-config" class="px-6 py-2.5 bg-gradient-to-r from-violet-600 to-pink-500 text-white rounded-xl shadow-lg shadow-violet-500/20 hover:shadow-violet-500/35 hover:scale-[1.02] active:scale-95 text-sm font-semibold transition-all duration-200 cursor-pointer flex items-center gap-2">
@@ -323,15 +830,25 @@
 
         <!-- Form fields layout -->
         <form id="profile-config-form" class="grid grid-cols-1 md:grid-cols-2 gap-8">
-          
+
           <!-- Column 1: Accounts & Credentials -->
           <div class="space-y-8">
-            
-            <!-- Anilist Settings -->
+
+            <!-- OAuth & AniList Preferences -->
             <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 space-y-4">
               <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-violet-600 dark:text-violet-400">
-                <i class="fa-solid fa-user-tag text-base"></i>Anilist Profile
+                <i class="fa-solid fa-user-tag text-base"></i>AniList OAuth & Profile
               </h3>
+
+              <!-- OAuth Status Badge -->
+              <div id="oauth-status-box" class="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-emerald-400 flex items-center gap-1.5"><i class="fa-solid fa-shield-halved"></i>OAuth Status: Active Token</span>
+                  <span class="text-[10px] text-slate-400">Expires: Never (Persistent)</span>
+                </div>
+                <p class="text-slate-400">Bearer token connected for AniList GraphQL queries and user list mutations.</p>
+              </div>
+
               <div class="space-y-4">
                 <div>
                   <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Username</label>
@@ -340,6 +857,14 @@
                 <div>
                   <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Anilist User ID</label>
                   <input type="number" name="id" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Title Language Preference</label>
+                  <select id="pref-title-lang" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-violet-500">
+                    <option value="romaji" selected>Romaji (e.g. Shingeki no Kyojin)</option>
+                    <option value="english">English (e.g. Attack on Titan)</option>
+                    <option value="native">Native (e.g. 進撃の巨人)</option>
+                  </select>
                 </div>
                 <div>
                   <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Bearer Token (GraphQL API)</label>
@@ -385,7 +910,7 @@
 
           <!-- Column 2: Client & Index Services -->
           <div class="space-y-8">
-            
+
             <!-- qBittorrent Config -->
             <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 space-y-4">
               <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-sky-600 dark:text-sky-400">
@@ -522,10 +1047,119 @@
 
   </main>
 
+
+  <!-- FULL-SCREEN MEDIA DETAIL MODAL -->
+  <div id="media-detail-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[80] flex items-center justify-center p-2 sm:p-4 opacity-0 pointer-events-none transition-all duration-300 overflow-y-auto">
+    <div class="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-5xl my-auto max-h-[92vh] flex flex-col shadow-2xl scale-95 transition-transform duration-300 overflow-hidden relative">
+
+      <!-- Close Button -->
+      <button class="dialog-close absolute top-4 right-4 z-20 w-10 h-10 rounded-full bg-slate-950/60 backdrop-blur-md text-white flex items-center justify-center hover:bg-violet-600 transition-colors cursor-pointer" data-close>
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <!-- Scrollable Detail Container -->
+      <div id="media-detail-content" class="overflow-y-auto flex-grow space-y-6">
+        <!-- Rendered dynamically -->
+        <div class="py-24 text-center text-slate-400">Loading media details...</div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- FULL ANILIST LIST-EDITOR MODAL -->
+  <div id="list-editor-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
+    <div class="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl scale-95 transition-transform duration-300 overflow-hidden">
+
+      <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <h3 id="list-editor-title" class="text-lg font-bold font-['Outfit']">Edit List Entry</h3>
+        <button class="dialog-close text-slate-400 hover:text-slate-200 text-lg transition-colors cursor-pointer" data-close>
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-6 overflow-y-auto flex-grow space-y-5 text-xs">
+        <input type="hidden" id="editor-media-id" />
+
+        <!-- Status -->
+        <div>
+          <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1.5">Status</label>
+          <select id="editor-status" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 font-semibold outline-none focus:border-violet-500">
+            <option value="CURRENT">Watching / Current</option>
+            <option value="PLANNING">Planning</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="PAUSED">Paused</option>
+            <option value="DROPPED">Dropped</option>
+            <option value="REPEATING">Rewatching</option>
+          </select>
+        </div>
+
+        <!-- Progress Counter -->
+        <div>
+          <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1.5">Episode Progress</label>
+          <div class="flex items-center gap-3">
+            <button type="button" id="btn-progress-dec" class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 font-bold text-lg">-</button>
+            <input type="number" id="editor-progress" value="0" min="0" class="flex-grow bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-center text-sm font-bold outline-none" />
+            <button type="button" id="btn-progress-inc" class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 font-bold text-lg">+</button>
+          </div>
+        </div>
+
+        <!-- Score Input Supporting 5 Score Formats -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="font-bold text-slate-400 uppercase tracking-wider">Score</label>
+            <select id="editor-score-format" class="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-[11px] font-semibold">
+              <option value="POINT_100">100 Point (0-100)</option>
+              <option value="POINT_10_DECIMAL">10 Point Decimal (0.0-10.0)</option>
+              <option value="POINT_10">10 Point (1-10)</option>
+              <option value="POINT_5">5 Star (1-5 ⭐)</option>
+              <option value="POINT_3">3 Smiley (🙁 😐 🙂)</option>
+            </select>
+          </div>
+          <div id="editor-score-container">
+            <input type="number" id="editor-score" min="0" max="100" placeholder="0" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 font-bold outline-none" />
+          </div>
+        </div>
+
+        <!-- Dates -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Start Date</label>
+            <input type="date" id="editor-start-date" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 font-semibold outline-none" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Finish Date</label>
+            <input type="date" id="editor-finish-date" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 font-semibold outline-none" />
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div>
+          <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Personal Notes</label>
+          <textarea id="editor-notes" rows="2" placeholder="Write private notes..." class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 font-medium outline-none"></textarea>
+        </div>
+
+        <!-- Repeats -->
+        <div>
+          <label class="block font-bold text-slate-400 uppercase tracking-wider mb-1">Total Rewatches</label>
+          <input type="number" id="editor-repeat" min="0" value="0" class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 font-semibold outline-none" />
+        </div>
+
+      </div>
+
+      <div class="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
+        <button type="button" id="btn-editor-delete" class="px-4 py-2 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white rounded-xl font-semibold transition-all">Remove Entry</button>
+        <button type="button" id="btn-editor-save" class="px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold shadow-md shadow-violet-500/20 transition-all">Save Entry</button>
+      </div>
+
+    </div>
+  </div>
+
+
   <!-- OVERLAY DIALOG: ANIME SETTINGS & OVERRIDES -->
   <div id="settings-dialog" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
     <div class="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800/80 rounded-3xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl scale-95 transition-transform duration-300">
-      
+
       <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
         <h3 id="settings-dialog-title" class="text-lg font-bold font-['Outfit'] truncate">Anime Overrides</h3>
         <button class="dialog-close text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg transition-colors cursor-pointer" data-close>
@@ -536,7 +1170,7 @@
       <div class="p-6 overflow-y-auto flex-grow space-y-6">
         <form id="settings-form" class="space-y-5">
           <input type="hidden" id="edit-media-id" />
-          
+
           <div>
             <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Alternative Title</label>
             <input type="text" id="edit-alt-title" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:border-violet-500" placeholder="e.g. My Hero Academia Season 6" />
@@ -568,7 +1202,7 @@
   <!-- OVERLAY DIALOG: NYAA EPISODE CANDIDATES -->
   <div id="nyaa-dialog" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
     <div class="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800/80 rounded-3xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl scale-95 transition-transform duration-300">
-      
+
       <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
         <h3 id="nyaa-dialog-title" class="text-lg font-bold font-['Outfit']">Search Nyaa.si</h3>
         <button class="dialog-close text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg transition-colors cursor-pointer" data-close>
@@ -577,7 +1211,6 @@
       </div>
 
       <div class="p-6 overflow-y-auto flex-grow">
-        <!-- Candidates list container -->
         <div id="nyaa-candidates-list" class="space-y-4">
           <!-- Dynamically filled -->
         </div>
@@ -590,7 +1223,7 @@
   <div id="toast-wrapper" class="fixed bottom-5 right-5 z-[100] flex flex-col gap-3 max-w-md w-full pointer-events-none"></div>
 
   <!-- Load JS Client Code -->
-  <script src="/app.js"></script>
+  <script src="/app.js?v=4.3.0"></script>
 
 </body>
 </html>
