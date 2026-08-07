@@ -53,6 +53,45 @@ class TestWebAPI(unittest.TestCase):
         js_body = res_js.read().decode("utf-8")
         self.assertIn("switchTab", js_body)
 
+    def test_ignored_api_endpoints(self):
+        """Verify GET, POST, DELETE for /api/ignored."""
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        
+        # Add ignored title
+        payload = json.dumps({"title": "Test Ignored Show", "mediaId": 12345})
+        conn.request("POST", "/api/ignored", body=payload, headers={"Content-Type": "application/json"})
+        res = conn.getresponse()
+        self.assertEqual(res.status, 200)
+        data = json.loads(res.read().decode("utf-8"))
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data["entry"]["title"], "Test Ignored Show")
+
+        # Get ignored list
+        conn.request("GET", "/api/ignored")
+        res = conn.getresponse()
+        self.assertEqual(res.status, 200)
+        data = json.loads(res.read().decode("utf-8"))
+        self.assertGreaterEqual(data["count"], 1)
+
+        # Delete ignored title
+        conn.request("DELETE", "/api/ignored/12345")
+        res = conn.getresponse()
+        self.assertEqual(res.status, 200)
+
+    def test_history_delete_action_endpoints(self):
+        """Verify DELETE /api/history/<id> with action parameter."""
+        from animu.history import history_manager
+        entry = history_manager.add_entry(title="Sample History Item", link="http://example.com/test", anime_title="Sample Show")
+        entry_id = entry["id"]
+
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        conn.request("DELETE", f"/api/history/{entry_id}?action=rerun")
+        res = conn.getresponse()
+        self.assertEqual(res.status, 200)
+        data = json.loads(res.read().decode("utf-8"))
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("action"), "rerun")
+
 
 if __name__ == "__main__":
     unittest.main()

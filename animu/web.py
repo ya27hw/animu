@@ -15,6 +15,7 @@ from .qbittorrent import qbit
 from .database import db
 from .models import OfflineAnime
 from .history import history_manager
+from .ignored import ignored_manager
 from . import readiness
 
 def get_config_dict(cfg) -> dict:
@@ -89,6 +90,145 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
 def enrich_media_list_with_local_state(media_list: list) -> list:
     """Applies local state enrichment across a list of media dicts."""
     return [enrich_media_with_local_state(m) for m in media_list]
+
+def handle_history_delete_action(entry_id: str, action: str) -> tuple:
+    items = history_manager.get_all()
+    item = next((x for x in items if x.get("id") == entry_id), None)
+    if not item:
+        return 404, {"error": "History entry not found"}
+
+    history_title = item.get("anime_title") or item.get("title") or ""
+    history_ep = item.get("episode")
+
+    deleted = history_manager.delete_entry(entry_id)
+    if not deleted:
+        return 500, {"error": "Failed to delete history entry"}
+
+    if action == "delete" or not action:
+        return 200, {"ok": True, "action": "delete"}
+
+    # Try matching to anime record
+    matched_media_id = None
+    matched_anime = None
+    
+    try:
+        anime_list = anilist.get_anime_user_list()
+    except Exception:
+        anime_list = []
+
+    pb_records = db.get_all()
+    target_clean = re.sub(r'[\(\[\{].*?[\)\]\}]', '', history_title).strip().lower()
+
+    for a in anime_list:
+        mid = a["mediaId"]
+        media_titles = [
+            a["media"]["title"].get("romaji", ""),
+            a["media"]["title"].get("english", ""),
+            a["media"].get("alternativeTitle", "")
+        ] + (a["media"].get("synonyms") or [])
+        
+        rec = next((r for r in pb_records if r.media_id == mid), None)
+        if rec and rec.alternative_title:
+            media_titles.append(rec.alternative_title)
+
+        for t in media_titles:
+            if not t:
+                continue
+            t_clean = t.strip().lower()
+            if t_clean and (t_clean == target_clean or t_clean in target_clean or target_clean in t_clean):
+                matched_media_id = mid
+                matched_anime = a
+                break
+        if matched_media_id:
+            break
+
+    if action == "rerun":
+        if matched_media_id:
+            record = db.get(matched_media_id) or OfflineAnime(media_id=matched_media_id)
+            record.downloaded_episodes = []
+            record.reset_timeout()
+            db.upsert(matched_media_id, record)
+            return 200, {
+                "ok": True,
+                "action": "rerun",
+                "mediaId": matched_media_id,
+                "message": f"History entry deleted and re-run scheduled for '{history_title}'."
+            }
+        else:
+            return 200, {
+                "ok": True,
+                "action": "rerun",
+                "mediaId": None,
+                "message": "History entry deleted, but no matching anime record found to reset."
+            }
+
+    elif action == "ignore-redownload":
+        ignored_manager.add_entry(history_title, matched_media_id)
+        redownloaded = False
+        if matched_anime and matched_media_id:
+            try:
+                rec = db.get(matched_media_id)
+                starting_ep = rec.starting_episode if rec else 0
+                alt_title = rec.alternative_title if rec else None
+                
+                if history_ep is not None:
+                    try:
+                        ep_val = int(history_ep)
+                        cands = nyaa.search_episode_candidates(matched_anime, ep_val, starting_ep, alt_title)
+                    except Exception:
+                        cands = nyaa.search_title_candidates(matched_anime, starting_ep, alt_title)
+                else:
+                    cands = nyaa.search_title_candidates(matched_anime, starting_ep, alt_title)
+                    
+                if cands:
+                    best = cands[0]
+                    use_alt = nyaa.should_use_proxy_download(matched_anime)
+                    save_title = matched_anime["media"].get("alternativeTitle") or matched_anime["media"]["title"]["romaji"]
+                    qbit.add_check_torrent(best["link"], save_title, history_ep, use_alt)
+                    cover_img = matched_anime["media"].get("coverImage", {}).get("extraLarge") or matched_anime["media"].get("coverImage", {}).get("medium")
+                    history_manager.add_entry(
+                        title=best["title"],
+                        link=best["link"],
+                        anime_title=save_title,
+                        episode=history_ep,
+                        size=best.get("nyaa:size") or best.get("size") or "Unknown",
+                        seeders=best.get("nyaa:seeders") or best.get("seeders") or "N/A",
+                        cover_image=cover_img,
+                        source="manual"
+                    )
+                    redownloaded = True
+            except Exception as e:
+                print(f"Error re-downloading via matched anime: {e}")
+
+        if not redownloaded:
+            try:
+                search_query = history_title or item.get("title") or ""
+                cands = nyaa.search_raw_title_candidates(search_query, False)
+                if cands:
+                    best = cands[0]
+                    qbit.add_check_torrent(best["link"], best["title"], history_ep, False)
+                    history_manager.add_entry(
+                        title=best["title"],
+                        link=best["link"],
+                        anime_title=history_title,
+                        episode=history_ep,
+                        size=best.get("nyaa:size") or best.get("size") or "Unknown",
+                        seeders=best.get("nyaa:seeders") or best.get("seeders") or "N/A",
+                        source="manual"
+                    )
+                    redownloaded = True
+            except Exception as e:
+                print(f"Error re-downloading via raw title: {e}")
+
+        return 200, {
+            "ok": True,
+            "action": "ignore-redownload",
+            "ignored": True,
+            "redownloaded": redownloaded,
+            "message": "Deleted history entry, added anime to ignore list, and triggered re-download."
+        }
+
+    return 400, {"error": "Invalid action"}
 
 class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -265,6 +405,16 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, {
                     "count": len(items),
                     "history": items
+                })
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/ignored":
+            try:
+                items = ignored_manager.get_all()
+                self.send_json(200, {
+                    "count": len(items),
+                    "ignored": items
                 })
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
@@ -540,6 +690,24 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 record.downloaded_episodes = []
                 db.upsert(media_id, record)
             self.send_json(200, {"ok": True})
+
+        elif path == "/api/ignored":
+            body = self.read_json_body()
+            title = body.get("title", "").strip()
+            media_id = body.get("mediaId")
+            if not title and media_id is None:
+                self.send_json(400, {"error": "Title or mediaId required"})
+                return
+            entry = ignored_manager.add_entry(title, media_id)
+            self.send_json(200, {"ok": True, "entry": entry})
+            return
+
+        elif re.match(r'^/api/history/([a-zA-Z0-9-]+)/(rerun|ignore-redownload)$', path):
+            m = re.match(r'^/api/history/([a-zA-Z0-9-]+)/(rerun|ignore-redownload)$', path)
+            entry_id, action = m.group(1), m.group(2)
+            status_code, resp = handle_history_delete_action(entry_id, action)
+            self.send_json(status_code, resp)
+            return
             
         else:
             self.send_json(404, {"error": "Not found"})
@@ -593,7 +761,14 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True})
         elif re.match(r'^/api/history/([a-zA-Z0-9-]+)$', path):
             entry_id = re.match(r'^/api/history/([a-zA-Z0-9-]+)$', path).group(1)
-            deleted = history_manager.delete_entry(entry_id)
+            params = urllib.parse.parse_qs(url.query)
+            action = params.get("action", ["delete"])[0]
+            status_code, resp = handle_history_delete_action(entry_id, action)
+            self.send_json(status_code, resp)
+        elif path.startswith("/api/ignored/"):
+            target = path.replace("/api/ignored/", "", 1)
+            target = urllib.parse.unquote(target)
+            deleted = ignored_manager.delete_entry(target)
             self.send_json(200, {"ok": deleted})
         else:
             self.send_json(404, {"error": "Not found"})
