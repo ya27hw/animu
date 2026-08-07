@@ -55,6 +55,23 @@
     }, 4000);
   }
 
+  // Disables a button and swaps in a spinner while an async action runs, then
+  // restores the original label. Prevents duplicate submissions on slow requests.
+  function setBtnLoading(btn, loading, busyHtml = null) {
+    if (!btn) return;
+    if (loading) {
+      if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.classList.add('opacity-70', 'pointer-events-none', 'cursor-wait');
+      btn.innerHTML = busyHtml || '<i class="fa-solid fa-spinner fa-spin"></i> Working...';
+    } else {
+      btn.disabled = false;
+      btn.classList.remove('opacity-70', 'pointer-events-none', 'cursor-wait');
+      if (btn.dataset.origHtml) btn.innerHTML = btn.dataset.origHtml;
+      delete btn.dataset.origHtml;
+    }
+  }
+
   // Title Language Formatter
   function formatTitle(titleObj) {
     if (!titleObj) return 'Untitled';
@@ -1076,7 +1093,14 @@
     loadSearchResults();
   }
 
-  async function loadSearchResults() {
+  // Toggles the Load More pagination row based on whether another page exists.
+  function updateSearchPagination() {
+    const pagination = document.getElementById('search-pagination');
+    if (!pagination) return;
+    pagination.classList.toggle('hidden', !state.searchHasNext || state.searchResults.length === 0);
+  }
+
+  async function loadSearchResults(append = false) {
     const grid = document.getElementById('search-results-grid');
     if (!grid) return;
 
@@ -1116,12 +1140,15 @@
         const mediaList = data.Page.media || [];
         state.searchHasNext = data.Page.pageInfo.hasNextPage;
 
-        if (mediaList.length === 0) {
+        if (!append) state.searchResults = [];
+
+        if (mediaList.length === 0 && state.searchResults.length === 0) {
           grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">No search results found.</div>';
+          updateSearchPagination();
           return;
         }
 
-        grid.innerHTML = mediaList.map(m => {
+        const cards = mediaList.map(m => {
           const title = formatTitle(m.title);
           const score = m.averageScore ? `${m.averageScore}%` : 'N/A';
           const coverUrl = (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large)) || '';
@@ -1144,15 +1171,101 @@
               </div>
             </div>
           `;
-        }).join('');
+        });
+        state.searchResults = state.searchResults.concat(cards);
+        grid.innerHTML = state.searchResults.join('');
+        updateSearchPagination();
 
       } else {
-        grid.innerHTML = `<div class="col-span-full py-16 text-center text-slate-400 text-sm">Entity search for ${entity} active.</div>`;
+        // Entity search for CHARACTER / STAFF / STUDIO / USER — query AniList
+        // for the entity type directly and render name-based result cards.
+        const entityField = {
+          CHARACTER: 'characters',
+          STAFF: 'staff',
+          STUDIO: 'studios',
+          USER: 'users'
+        }[entity];
+        // Field shape differs per entity: Character/Staff expose `image`,
+        // User exposes `avatar`, Studio has no artwork at all.
+        const imgField = entity === 'USER' ? 'avatar { large medium }' : 'image { large medium }';
+        const query = `
+          query ($search: String, $page: Int, $perPage: Int) {
+            Page(page: $page, perPage: $perPage) {
+              pageInfo { hasNextPage }
+              ${entityField}(search: $search) {
+                id
+                name { full native }
+                ${entity === 'STUDIO' ? '' : imgField}
+              }
+            }
+          }
+        `;
+        const data = await queryAniList(query, {
+          search: state.searchQuery || undefined,
+          page: state.searchPage,
+          perPage: 20
+        });
+        const results = data.Page[entityField] || [];
+        state.searchHasNext = data.Page.pageInfo.hasNextPage;
+
+        if (!append) state.searchResults = [];
+
+        if (results.length === 0 && state.searchResults.length === 0) {
+          grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">No search results found.</div>';
+          updateSearchPagination();
+          return;
+        }
+
+        const siteBase = {
+          CHARACTER: 'character',
+          STAFF: 'staff',
+          STUDIO: 'studio',
+          USER: 'user'
+        }[entity];
+
+        const cards = results.map(r => {
+          const name = r.name && (r.name.full || r.name.native) ? (r.name.full || r.name.native) : 'Unknown';
+          const art = r.image || r.avatar;
+          const img = art && (art.large || art.medium) ? (art.large || art.medium) : '';
+          const profileUrl = siteBase === 'user' ? `https://anilist.co/user/${encodeURIComponent(name)}` : `https://anilist.co/${siteBase}/${r.id}`;
+          return `
+            <a href="${profileUrl}" target="_blank" rel="noopener noreferrer" class="group rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 overflow-hidden hover:border-violet-500 transition-all cursor-pointer flex flex-col shadow-sm">
+              <div class="aspect-[2/3] w-full relative overflow-hidden bg-slate-950">
+                ${img ? `<img src="${img}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />` : '<div class="w-full h-full flex items-center justify-center text-slate-600"><i class="fa-solid fa-user text-4xl"></i></div>'}
+                <div class="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent"></div>
+              </div>
+              <div class="p-3 space-y-1 flex-grow flex flex-col justify-between">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${entity}</span>
+                <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-100 line-clamp-2">${name}</h4>
+              </div>
+            </a>
+          `;
+        });
+        state.searchResults = state.searchResults.concat(cards);
+        grid.innerHTML = state.searchResults.join('');
+        updateSearchPagination();
       }
     } catch (e) {
       grid.innerHTML = '<div class="col-span-full py-16 text-center text-slate-400 text-sm">Failed to fetch search results.</div>';
+      state.searchHasNext = false;
+      updateSearchPagination();
     }
   }
+
+  // Load More — fetch the next search page and append it to the results grid.
+  document.getElementById('btn-search-load-more')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-search-load-more');
+    if (!btn || btn.disabled) return;
+    setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Loading...');
+    try {
+      state.searchPage += 1;
+      await loadSearchResults(true);
+    } catch (e) {
+      showToast(e.message || 'Failed to load more results.', 'error');
+    } finally {
+      setBtnLoading(btn, false);
+    }
+  });
 
 
   // ==========================================
