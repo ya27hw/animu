@@ -431,7 +431,9 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
     def get_anime_list(self) -> List[Dict[str, Any]]:
         """Fetch AniList watch list and merge local PocketBase configurations."""
-        anime_list = anilist.get_anime_user_list()
+        # None (network/GraphQL outage) degrades to an empty list so the API
+        # stays up; empty list means "no anime in watching list".
+        anime_list = anilist.get_anime_user_list() or []
         pb_records = db.get_all()
         pb_map = {r.media_id: r for r in pb_records}
         

@@ -24,9 +24,15 @@ class QbitClient:
                 data={"username": config.username, "password": config.password},
                 headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
-            if resp.status_code == 200 and resp.text == "Ok.":
+            if resp.status_code == 200 and resp.text.strip().startswith("Ok"):
                 # httpx manages cookies automatically, but we also save the SID explicitly
                 sid = self.client.cookies.get("SID")
+                if not sid:
+                    set_cookie = resp.headers.get("set-cookie", "")
+                    match = re.search(r'SID=([^;]+)', set_cookie)
+                    if match:
+                        sid = match.group(1)
+                        self.client.cookies.set("SID", sid)
                 if sid:
                     self.sid = sid
                     self.expires = time.time() + 3000
@@ -55,8 +61,16 @@ class QbitClient:
                     data={"username": user, "password": passwd},
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
-                if resp.status_code == 200 and resp.text == "Ok.":
-                    return True, "Connection successful."
+                if resp.status_code == 200 and resp.text.strip().startswith("Ok"):
+                    sid = client.cookies.get("SID")
+                    if not sid:
+                        set_cookie = resp.headers.get("set-cookie", "")
+                        match = re.search(r'SID=([^;]+)', set_cookie)
+                        if match:
+                            sid = match.group(1)
+                    if sid:
+                        return True, "Connection successful."
+                    return True, "Connection successful (no SID cookie parsed)."
                 else:
                     return False, f"HTTP {resp.status_code}: {resp.text}"
         except Exception as e:
@@ -126,7 +140,7 @@ class QbitClient:
                 "sequentialDownload": "true",
                 "category": "animu"
             }
-            
+
             headers = {"Cookie": f"SID={self.sid}"}
             resp = self.client.post(auth_url, data=data, files=files, headers=headers)
             return resp.status_code == 200 and resp.text == "Ok."

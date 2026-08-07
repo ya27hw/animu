@@ -21,16 +21,16 @@
         ? 'bg-emerald-50 dark:bg-emerald-950/90 border-emerald-200/50 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300 glow-emerald'
         : 'bg-rose-50 dark:bg-rose-950/90 border-rose-200/50 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 glow-rose'
     }`;
-    
+
     const icon = type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-exclamation text-rose-500';
     toast.innerHTML = `<i class="fa-solid ${icon} text-lg shrink-0"></i><p class="flex-grow">${message}</p>`;
-    
+
     wrapper.appendChild(toast);
-    
+
     setTimeout(() => {
       toast.classList.remove('opacity-0', 'translate-y-4');
     }, 10);
-    
+
     setTimeout(() => {
       toast.classList.add('opacity-0', 'translate-y-4');
       setTimeout(() => toast.remove(), 300);
@@ -225,7 +225,7 @@
     tab.addEventListener('click', () => {
       const target = tab.dataset.tab;
       state.activeTab = target;
-      
+
       // Update buttons style
       DOM.navTabs.forEach(t => {
         if (t === tab) {
@@ -234,7 +234,7 @@
           t.className = "nav-tab flex items-center gap-2 px-3.5 sm:px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-['Outfit']";
         }
       });
-      
+
       // Switch views
       DOM.viewPanels.forEach(panel => {
         if (panel.id === `${target}-panel`) {
@@ -243,7 +243,7 @@
           panel.classList.add('hidden');
         }
       });
-      
+
       if (target === 'logs') {
         loadLogs();
         updateSearchDiagnostics();
@@ -289,11 +289,11 @@
       const currentProgress = item.progress || 0;
       const totalEpisodes = item.media.episodes || 0;
       const startingEpisode = item.media.startingEpisode || 0;
-      
+
       const expectedTotal = totalEpisodes > 0 ? (totalEpisodes + startingEpisode) : maxAired;
       const displayProgress = currentProgress + startingEpisode;
       const progressPercent = expectedTotal > 0 ? Math.min(100, Math.round((displayProgress / expectedTotal) * 100)) : 0;
-      
+
       const isFinished = item.media.status === 'FINISHED';
       const isTriggeredGenre = item.media.genres && item.media.genres.includes(triggerGenreVal);
       const hasDownloadedAll = item.downloadedEpisodes.length >= totalEpisodes && totalEpisodes > 0;
@@ -301,9 +301,9 @@
 
       const card = document.createElement('div');
       card.className = "group overflow-hidden rounded-3xl border border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-[#111827]/75 flex flex-col min-h-[460px] shadow-sm hover:shadow-md hover:border-violet-500/40 dark:hover:border-violet-500/30 hover:scale-[1.01] transition-all duration-300 glow-purple";
-      
+
       const bannerUrl = item.media.coverImage.extraLarge || item.media.coverImage.large || '';
-      
+
       let badgeHTML = '';
       if (isTriggeredGenre) {
         badgeHTML = `<span class="absolute top-4 right-4 bg-violet-600/90 text-white border border-violet-500/50 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg tracking-wider backdrop-blur-sm shadow-md shadow-violet-600/20">${triggerGenreVal}</span>`;
@@ -327,7 +327,7 @@
           </div>
         </div>
         <div class="p-5 flex-grow flex flex-col justify-between gap-5 bg-white dark:bg-transparent">
-          
+
           <!-- Mid info properties -->
           <div class="space-y-3">
             <div class="grid grid-cols-2 gap-3 text-xs">
@@ -388,13 +388,13 @@
         for (let ep = startingEpisode + 1; ep <= expectedTotal; ep++) {
           const badge = document.createElement('button');
           const isDownloaded = item.downloadedEpisodes.includes(ep);
-          
+
           if (isDownloaded) {
             badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-500 transition-all cursor-pointer";
           } else {
             badge.className = "px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/40 text-slate-500 dark:text-slate-400 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 hover:border-transparent transition-all cursor-pointer";
           }
-          
+
           badge.textContent = ep;
           badge.onclick = () => window.UI.searchNyaaEpisode(item.mediaId, ep);
           badgeGrid.appendChild(badge);
@@ -410,12 +410,12 @@
     showSettings(mediaId) {
       const anime = state.animeList.find(x => x.mediaId === mediaId);
       if (!anime) return;
-      
+
       DOM.editMediaId.value = mediaId;
       DOM.editAltTitle.value = anime.media.alternativeTitle || '';
       DOM.editStartEp.value = anime.media.startingEpisode || 0;
       DOM.settingsTitle.textContent = getAnimeTitle(anime);
-      
+
       openModal(DOM.settingsDialog);
     },
     async saveOverrides() {
@@ -424,7 +424,7 @@
         alternativeTitle: DOM.editAltTitle.value.trim(),
         startingEpisode: Number(DOM.editStartEp.value) || 0
       };
-      
+
       try {
         await API.saveAnime(mediaId, payload);
         closeModal(DOM.settingsDialog);
@@ -438,11 +438,11 @@
       const mediaId = Number(DOM.editMediaId.value);
       const anime = state.animeList.find(x => x.mediaId === mediaId);
       if (!anime) return;
-      
+
       if (!confirm(`Are you sure you want to clear the downloaded episodes cache for "${getAnimeTitle(anime)}"?`)) {
         return;
       }
-      
+
       try {
         await API.resetAnime(mediaId);
         closeModal(DOM.settingsDialog);
@@ -457,7 +457,7 @@
         const anime = state.animeList.find(x => x.mediaId === mediaId);
         if (anime) anime.pendingRewatchingUpdate = true;
         renderAnimeGrid();
-        
+
         await API.markRewatching(mediaId);
         showToast('Anime watch status changed to rewatching.');
         loadDashboard();
@@ -469,7 +469,7 @@
     async searchNyaaEpisode(mediaId, episode) {
       const anime = state.animeList.find(x => x.mediaId === mediaId);
       const titleStr = anime ? getAnimeTitle(anime) : 'Nyaa.si';
-      
+
       DOM.nyaaTitle.textContent = `Search: ${titleStr}${episode ? ' (Ep ' + episode + ')' : ''}`;
       DOM.nyaaList.innerHTML = `
         <div class="py-12 flex flex-col items-center justify-center text-slate-400">
@@ -478,7 +478,7 @@
         </div>
       `;
       openModal(DOM.nyaaDialog);
-      
+
       try {
         const data = await API.searchNyaa(mediaId, episode);
         renderCandidates(data.results, mediaId, episode);
@@ -498,7 +498,7 @@
           btn.disabled = true;
           btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         }
-        
+
         await API.downloadNyaa(mediaId, link, episode);
         closeModal(DOM.nyaaDialog);
         showToast(`Torrent added. Manual progress synced back.`);
@@ -525,9 +525,9 @@
     results.forEach(item => {
       const card = document.createElement('div');
       card.className = "flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/80 hover:border-violet-500/30 transition-colors duration-200";
-      
+
       const rating = item.score !== null ? `Score: ${item.score.toFixed(2)}` : 'Manual Index Query';
-      
+
       card.innerHTML = `
         <div class="flex-grow min-w-0">
           <span class="block font-semibold text-sm text-slate-800 dark:text-slate-200 break-all leading-normal select-all" title="${item.title}">${item.title}</span>
@@ -556,10 +556,10 @@
       isLogsLoading = true;
       const name = DOM.logSelect.value || state.logs.selected;
       const lines = Number(DOM.logLines.value) || state.logs.lines;
-      
+
       const data = await API.getLogs(name, lines);
       state.logs = data;
-      
+
       // Load Log Select options
       const currentSelected = DOM.logSelect.value || data.selected;
       DOM.logSelect.innerHTML = '';
@@ -570,10 +570,10 @@
         opt.selected = item.key === currentSelected;
         DOM.logSelect.appendChild(opt);
       });
-      
+
       const isNearBottom = DOM.logsBody.scrollHeight - DOM.logsBody.scrollTop - DOM.logsBody.clientHeight < 80;
       const wasEmpty = DOM.logsBody.textContent === '' || DOM.logsBody.textContent.startsWith('System log');
-      
+
       DOM.logsBody.textContent = data.content || 'System log stream is completely empty.';
       if (wasEmpty || isNearBottom) {
         DOM.logsBody.scrollTop = DOM.logsBody.scrollHeight;
@@ -596,13 +596,13 @@
   async function updateDownloadsDashboard() {
     try {
       if (!DOM.downloadsPanel || !DOM.downloadsList) return;
-      
+
       const downloads = await API.getDownloads();
       if (!downloads || downloads.length === 0) {
         DOM.downloadsPanel.classList.add('hidden');
         return;
       }
-      
+
       DOM.downloadsPanel.classList.remove('hidden');
       if (downloadsCollapsed) {
         DOM.downloadsList.classList.add('hidden');
@@ -612,13 +612,13 @@
         DOM.downloadsToggleIcon.className = 'fa-solid fa-chevron-up text-sm';
       }
       DOM.downloadsList.innerHTML = '';
-      
+
       downloads.forEach(dl => {
         const progress = (dl.progress * 100).toFixed(1);
         const name = dl.name;
         const speed = (dl.dlspeed / (1024 * 1024)).toFixed(2); // MB/s
         const totalSize = (dl.size / (1024 * 1024 * 1024)).toFixed(2); // GB
-        
+
         let eta = 'Unknown';
         if (dl.eta < 86400 * 30 && dl.eta > 0) {
           const h = Math.floor(dl.eta / 3600);
@@ -626,7 +626,7 @@
           const s = dl.eta % 60;
           eta = h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
         }
-        
+
         const row = document.createElement('div');
         row.className = "flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/80 rounded-2xl";
         row.innerHTML = `
@@ -665,7 +665,7 @@
   async function updateSearchDiagnostics() {
     try {
       if (!DOM.searchDebugContainer) return;
-      
+
       const traces = await API.getSearchDebug();
       if (!traces || traces.length === 0) {
         DOM.searchDebugContainer.innerHTML = `
@@ -675,15 +675,15 @@
         `;
         return;
       }
-      
+
       DOM.searchDebugContainer.innerHTML = '';
-      
+
       traces.forEach(trace => {
         const itemEl = document.createElement('div');
         itemEl.className = 'border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden bg-slate-50/50 dark:bg-slate-900/20';
-        
+
         const timestampStr = new Date(trace.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        
+
         // Status Badge Style
         let statusBadge = '';
         if (trace.status === 'NO_RESULTS') {
@@ -693,9 +693,9 @@
         } else {
           statusBadge = `<span class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-500/10 text-slate-400 uppercase">${trace.status}</span>`;
         }
-        
+
         const hasCandidates = trace.candidates && trace.candidates.length > 0;
-        
+
         itemEl.innerHTML = `
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 cursor-pointer select-none bg-slate-100/50 dark:bg-slate-900/40 hover:bg-slate-100 dark:hover:bg-slate-900/60 transition-colors" onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.chevron-icon')?.classList.toggle('rotate-180')">
             <div class="space-y-1">
@@ -715,7 +715,7 @@
             <div class="space-y-3">
               ${hasCandidates ? trace.candidates.map((c, idx) => {
                 const totalScore = c.rating.toFixed(2);
-                
+
                 return `
                   <div class="flex flex-col gap-1.5 p-3 rounded-xl border border-slate-100 dark:border-slate-900/60 bg-slate-50/30 dark:bg-slate-900/10">
                     <div class="flex items-start justify-between gap-4">
@@ -724,14 +724,14 @@
                         <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-900 text-slate-400">
                           <i class="fa-solid fa-users mr-1"></i>${c.seeders}
                         </span>
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.88 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.70 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">
                           Score: ${totalScore}
                         </span>
                       </div>
                     </div>
                     <div class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                       <i class="fa-solid fa-circle-exclamation text-rose-500/80 shrink-0"></i>
-                      <span>Reason: ${c.rejection_reason || 'Score below verification threshold (3.88)'}</span>
+                      <span>Reason: ${c.rejection_reason || 'Score below verification threshold (3.70)'}</span>
                     </div>
                   </div>
                 `;
@@ -743,7 +743,7 @@
             </div>
           </div>
         `;
-        
+
         DOM.searchDebugContainer.appendChild(itemEl);
       });
     } catch (e) {
@@ -767,7 +767,7 @@
     try {
       const data = await API.getConfig();
       state.config = data;
-      
+
       // Populate inputs dynamically
       Object.keys(data).forEach(key => {
         const input = DOM.configForm.querySelector(`[name="${key}"]`);
@@ -795,7 +795,7 @@
     e.preventDefault();
     const formData = new FormData(DOM.configForm);
     const payload = {};
-    
+
     // Read input fields
     DOM.configForm.querySelectorAll('input[name], select[name]').forEach(input => {
       const name = input.name;
@@ -819,10 +819,10 @@
     try {
       DOM.btnSubmitConfig.disabled = true;
       DOM.btnSubmitConfig.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>Saving...';
-      
+
       await API.saveConfig(payload);
       showToast('Settings saved. Hotloaded into running server memory!');
-      
+
       await loadConfig();
     } catch (e) {
       showToast(e.message, 'error');
@@ -836,12 +836,12 @@
     const qbitUrl = DOM.configForm.querySelector('[name="qbit_url"]').value.trim();
     const username = DOM.configForm.querySelector('[name="username"]').value.trim();
     const password = DOM.configForm.querySelector('[name="password"]').value.trim();
-    
+
     if (!qbitUrl) {
       showToast('qBittorrent Web UI URL is required to test.', 'error');
       return;
     }
-    
+
     try {
       DOM.btnTestQbit.disabled = true;
       DOM.btnTestQbit.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Testing...';
@@ -862,12 +862,12 @@
   DOM.btnTestProxy.addEventListener('click', async () => {
     const proxyAddress = DOM.configForm.querySelector('[name="proxyAddress"]').value.trim();
     const proxyPort = DOM.configForm.querySelector('[name="proxyPort"]').value.trim();
-    
+
     if (!proxyAddress || !proxyPort) {
       showToast('Proxy Address and Port are required to test.', 'error');
       return;
     }
-    
+
     try {
       DOM.btnTestProxy.disabled = true;
       DOM.btnTestProxy.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Testing...';
@@ -933,7 +933,7 @@
       const data = await API.getAnime();
       state.animeList = data.anime;
       state.userName = data.userName;
-      
+
       DOM.userDisplayName.textContent = data.userName || 'Otaku';
       renderAnimeGrid();
       updateDownloadsDashboard();

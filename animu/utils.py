@@ -57,17 +57,17 @@ def get_explicit_season(title: str) -> Optional[int]:
     roman_match = re.search(r'\b(?:season\s*)?(II|III|IV)\b', title, re.IGNORECASE)
     if roman_match:
         return {"II": 2, "III": 3, "IV": 4}.get(roman_match.group(1).upper())
-    
+
     # Match standard season notations: S2, Season 2, S02, C2 (cour 2)
     season_match = re.search(r'\b(?:s|season|c)\s*0?(\d+)\b', title, re.IGNORECASE)
     if season_match:
         return int(season_match.group(1))
-        
+
     # Match ordinals: 2nd Season, 3rd Season, etc.
     ordinal_match = re.search(r'\b(\d+)(?:st|nd|rd|th)\s*season\b', title, re.IGNORECASE)
     if ordinal_match:
         return int(ordinal_match.group(1))
-        
+
     return None
 
 def fix_anime_season(title: str) -> dict:
@@ -107,7 +107,7 @@ def count_past_relations(media_id: int, episode_offset: int = 0, season_count: i
     """Walk prequel chain recursively to compute total episode offset and season count."""
     # Lazily import anilist to prevent circular dependency
     from .anilist import anilist
-    
+
     relations = anilist.get_previous_relations(media_id)
     # Sleep to avoid rate limiting
     time.sleep(0.3)
@@ -121,7 +121,7 @@ def count_past_relations(media_id: int, episode_offset: int = 0, season_count: i
             episodes = node.get("episodes") or 0
             offset_inc = episodes if episodes > 3 else 0
             season_inc = 1 if episodes > 3 else 0
-            
+
             return count_past_relations(
                 node["id"],
                 episode_offset + offset_inc,
@@ -153,7 +153,7 @@ def verify_query(
     verbose: bool = False
 ) -> Any:
     """Verify a torrent filename matches AniList metadata criteria."""
-    
+
     def get_result(score: float, reason: str = "", details: dict = None) -> Any:
         if verbose:
             ret = {"rejection_reason": reason, "rating": score}
@@ -179,7 +179,7 @@ def verify_query(
         return get_result(0.0, "Invalid publication date format")
 
     file_name = _to_clean_string(anime_parsed_data.get("file_name"))
-    
+
     parsed_title_val = anime_parsed_data.get("anime_title")
     if isinstance(parsed_title_val, list):
         parsed_title = parsed_title_val[0] if parsed_title_val else ""
@@ -189,7 +189,7 @@ def verify_query(
     # Perform strict season conflict checks to prevent mismatching multi-season shows
     query_explicit = get_explicit_season(search_query)
     candidate_explicit = get_explicit_season(parsed_title)
-    
+
     if not candidate_explicit:
         season_val = anime_parsed_data.get("season") or anime_parsed_data.get("anime_season")
         if season_val:
@@ -318,9 +318,10 @@ def verify_query(
         )
 
         score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating
-        
+        SCORE_THRESHOLD = 3.70
+
         rejection_reason = ""
-        if score < 3.88:
+        if score < SCORE_THRESHOLD:
             failed_checks = []
             if not episode_match:
                 failed_checks.append("episode mismatch")
@@ -368,9 +369,9 @@ def verify_query(
                 verify_range_ok = False
 
             score = float(verify_range_ok) + float(resolution_match) + float(air_date_match_batch) + best_rating
-            
+
             rejection_reason = ""
-            if score < 3.88:
+            if score < SCORE_THRESHOLD:
                 failed_checks = []
                 if not verify_range_ok:
                     failed_checks.append("batch range mismatch")
@@ -379,7 +380,7 @@ def verify_query(
                 if not air_date_match_batch:
                     failed_checks.append("air date check failed")
                 rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
-                
+
             details = {
                 "batch_range_match": verify_range_ok,
                 "resolution_match": resolution_match,
@@ -390,7 +391,7 @@ def verify_query(
 
         score = float(is_batch) + float(resolution_match) + float(air_date_match_batch) + best_rating
         rejection_reason = ""
-        if score < 3.88:
+        if score < SCORE_THRESHOLD:
             failed_checks = []
             if not is_batch:
                 failed_checks.append("not a batch torrent")
@@ -399,7 +400,7 @@ def verify_query(
             if not air_date_match_batch:
                 failed_checks.append("air date check failed")
             rejection_reason = "Failed threshold - " + " and ".join(failed_checks)
-            
+
         details = {
             "is_batch": is_batch,
             "resolution_match": resolution_match,

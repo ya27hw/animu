@@ -494,13 +494,13 @@ class Nyaa {
       if (rating > bestRating) {
         bestRating = rating;
         bestTorrent = item;
-        // The criteria: If the rating is 3.88/4 or higher, then we've found a good enough torrent
+        // The criteria: If the rating is 3.70/4 or higher, then we've found a good enough torrent
         // A perfect 4 isn't always required. Seeders are more important. Placing 4 as a threshold
-        if (bestRating >= 3.88) break;
+        if (bestRating >= 3.70) break;
       }
     }
 
-    if (bestRating >= 3.88 && bestTorrent) {
+    if (bestRating >= 3.70 && bestTorrent) {
       // If the title and episode are similar, and the resolution is similar, return
       return bestTorrent;
     }

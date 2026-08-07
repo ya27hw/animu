@@ -114,7 +114,7 @@ def get_config() -> ProfileConfig:
 
     config_dict = {}
     extra_fields = {}
-    
+
     if os.path.exists(PROFILE_PATH):
         try:
             with open(PROFILE_PATH, 'r', encoding='utf-8') as f:
@@ -122,14 +122,14 @@ def get_config() -> ProfileConfig:
                 # Remove trailing commas
                 content = re.sub(r',\s*([\]}])', r'\1', content)
                 raw_data = json.loads(content)
-                
+
                 for json_key, val in raw_data.items():
                     if json_key in MAP_JSON_TO_ATTR:
                         attr_key = MAP_JSON_TO_ATTR[json_key]
-                        if attr_key == "id" and val is not None:
+                        if attr_key in ("id", "proxy_port", "interval", "offpeak_interval") and val is not None:
                             try:
                                 val = int(val)
-                            except ValueError:
+                            except (ValueError, TypeError):
                                 pass
                         config_dict[attr_key] = val
                     else:
@@ -139,7 +139,7 @@ def get_config() -> ProfileConfig:
 
     valid_field_names = {f.name for f in fields(ProfileConfig) if f.name != '_extra_fields'}
     init_args = {k: v for k, v in config_dict.items() if k in valid_field_names}
-    
+
     cfg = ProfileConfig(**init_args)
     cfg._extra_fields = extra_fields
     cached_config = cfg
@@ -150,18 +150,18 @@ def save_config(cfg: ProfileConfig) -> None:
     try:
         cfg_dict = asdict(cfg)
         cfg_dict.pop('_extra_fields', None)
-        
+
         json_data = {}
-        
+
         # Merge back any extra fields
         if hasattr(cfg, '_extra_fields') and cfg._extra_fields:
             json_data.update(cfg._extra_fields)
-            
+
         # Map back fields to JSON keys
         for attr_key, val in cfg_dict.items():
             json_key = MAP_ATTR_TO_JSON.get(attr_key, attr_key)
             json_data[json_key] = val
-            
+
         temp_path = PROFILE_PATH + ".tmp"
         with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(json_data, f, indent=2)

@@ -87,12 +87,14 @@ class AnilistClient:
         Delegates to the shared ``execute_graphql`` primitive in
         ``anilist_auth``, which centralises 429/Retry-After handling,
         auth-fallback logic (reads only), and fail-closed behaviour for
-        mutations (``require_auth=True``).
+        mutations (``require_auth=True``). Returns ``None`` on unrecoverable
+        network/API failure so callers can distinguish outages from empty
+        results.
         """
         return execute_graphql(query, variables, require_auth=require_auth)
 
-    def get_watching_list(self) -> List[Dict[str, Any]]:
-        """Fetch user's current watching list with minimal details."""
+    def get_watching_list(self) -> Optional[List[Dict[str, Any]]]:
+        """Fetch user's current watching list with minimal details. Returns None on network/GraphQL error."""
         query = """
         query ($userName :String) {
           MediaListCollection(userName: $userName, type: ANIME, status_in: CURRENT) {
@@ -117,16 +119,26 @@ class AnilistClient:
             return []
 
         resp = self._query(query, {"userName": config.ani_user_name})
-        if resp and "data" in resp:
+        if resp is None:
+            print("[ERROR] AniList query failed due to network outage or API error.")
+            return None
+
+        if "data" in resp:
             data = resp["data"]
             if data and "MediaListCollection" in data and data["MediaListCollection"]:
                 lists = data["MediaListCollection"].get("lists", [])
                 if lists:
                     return lists[0].get("entries", [])
-        return []
+                return []
 
-    def get_anime_user_list(self) -> List[Dict[str, Any]]:
-        """Fetch user's current watching list with detailed anime info."""
+        if "errors" in resp:
+            print(f"[ERROR] AniList GraphQL query returned errors: {resp['errors']}")
+            return None
+
+        return None
+
+    def get_anime_user_list(self) -> Optional[List[Dict[str, Any]]]:
+        """Fetch user's current watching list with detailed anime info. Returns None on network/GraphQL error."""
         query = """
         query ($userName :String) {
           MediaListCollection(userName: $userName, type: ANIME, status_in: CURRENT) {
@@ -175,13 +187,23 @@ class AnilistClient:
             return []
 
         resp = self._query(query, {"userName": config.ani_user_name})
-        if resp and "data" in resp:
+        if resp is None:
+            print("[ERROR] AniList query failed due to network outage or API error.")
+            return None
+
+        if "data" in resp:
             data = resp["data"]
             if data and "MediaListCollection" in data and data["MediaListCollection"]:
                 lists = data["MediaListCollection"].get("lists", [])
                 if lists:
                     return lists[0].get("entries", [])
-        return []
+                return []
+
+        if "errors" in resp:
+            print(f"[ERROR] AniList GraphQL query returned errors: {resp['errors']}")
+            return None
+
+        return None
 
     def get_airing_schedule(self, page: int, media_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve the airing schedule for a specific anime by its ID."""
