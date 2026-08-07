@@ -500,7 +500,7 @@ class AnilistClient:
     def _page_media_query(self) -> str:
         """Shared Page query fragment for rails that return media nodes."""
         return """
-        query($page: Int, $perPage: Int, $sort: [MediaSort], $search: String, $genre_in: [String], $tag_in: [String], $format_in: [MediaFormat], $status_in: [MediaStatus], $onList: Boolean, $season: MediaSeason, $seasonYear: Int, $year_greater: Int, $year_lesser: Int, $source: MediaSource, $countryOfOrigin: CountryCode, $averageScore_greater: Int, $averageScore_lesser: Int, $popularity_greater: Int, $popularity_lesser: Int, $idMal_in: [Int], $id_in: [Int]) {
+        query($page: Int, $perPage: Int, $sort: [MediaSort], $search: String, $genre_in: [String], $tag_in: [String], $format_in: [MediaFormat], $status_in: [MediaStatus], $onList: Boolean, $season: MediaSeason, $seasonYear: Int, $year_greater: FuzzyDateInt, $year_lesser: FuzzyDateInt, $source: MediaSource, $countryOfOrigin: CountryCode, $averageScore_greater: Int, $averageScore_lesser: Int, $popularity_greater: Int, $popularity_lesser: Int, $idMal_in: [Int], $id_in: [Int]) {
           Page(page: $page, perPage: $perPage) {
             pageInfo {
               total
