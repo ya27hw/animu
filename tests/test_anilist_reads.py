@@ -260,6 +260,9 @@ class TestMediaListCollection(unittest.TestCase):
 
     def setUp(self):
         self.client = AC()
+        # Clear the TTL cache so tests are isolated from each other
+        if hasattr(AC.get_media_list_collection, '_cache'):
+            AC.get_media_list_collection._cache.clear()
 
     def _cfg(self, user_name="testuser"):
         return make_config(ani_user_name=user_name)

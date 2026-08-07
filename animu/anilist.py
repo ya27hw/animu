@@ -859,6 +859,7 @@ class AnilistClient:
                 hiddenFromStatusLists
                 customLists
                 startedAt { year month day }
+                updatedAt
                 completedAt { year month day }
                 media {
                   id title { romaji english native }
@@ -885,6 +886,7 @@ class AnilistClient:
         }
         """
 
+    @_cached(ttl=120)
     def get_media_list_collection(
         self,
         user_name: Optional[str] = None,
@@ -941,7 +943,6 @@ class AnilistClient:
                     all_lists[name] = lst
                 else:
                     all_lists[name]["entries"].extend(lst.get("entries", []))
-                    
             has_next_chunk = collection.get("hasNextChunk", False)
             chunk += 1
 
