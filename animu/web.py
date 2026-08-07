@@ -437,30 +437,36 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         
         merged = []
         for anime in anime_list:
-            media_id = anime["mediaId"]
+            media_id = anime.get("mediaId") or anime.get("id")
+            if media_id is None:
+                continue
             record = pb_map.get(media_id)
-            
+
             alt_title = record.alternative_title if record else ""
             start_ep = record.starting_episode if record else 0
             downloaded = record.downloaded_episodes if record else []
-            
-            media = dict(anime["media"])
+
+            # Incomplete AniList records can carry a null ``media`` node
+            # (e.g. an entry whose title was deleted upstream). Null-safe here
+            # so one broken record never 500s the whole /api/anime response.
+            media = dict(anime["media"]) if anime.get("media") else {}
             media["alternativeTitle"] = alt_title or None
             media["startingEpisode"] = start_ep
-            
+
             merged.append({
                 "mediaId": media_id,
-                "progress": anime["progress"],
+                "progress": anime.get("progress", 0),
                 "downloadedEpisodes": downloaded,
                 "media": media
             })
 
         # Sort Romaji titles (A-Z first, then others)
         def get_sort_key(item):
-            title = item.get("media", {}).get("title", {}).get("romaji") or ""
-            trimmed = title.strip()
+            title = (item.get("media") or {}).get("title") or {}
+            romaji = title.get("romaji") or ""
+            trimmed = romaji.strip()
             bucket = 0 if re.match(r'^[A-Za-z]', trimmed) else 1
-            return (bucket, trimmed.lower(), item["mediaId"])
+            return (bucket, trimmed.lower(), item.get("mediaId") or 0)
             
         merged.sort(key=get_sort_key)
         return merged
@@ -1308,6 +1314,15 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, {"ok": False, "error": str(e)})
             return
 
+        elif re.match(r'^/api/downloads/([0-9a-fA-F]{40})/retry$', path):
+            # Retry/resume a stopped, paused, or errored torrent from the queue.
+            torrent_hash = re.match(r'^/api/downloads/([0-9a-fA-F]{40})/retry$', path).group(1)
+            if qbit.resume_torrent(torrent_hash):
+                self.send_json(200, {"ok": True, "message": "Torrent resumed."})
+            else:
+                self.send_json(500, {"ok": False, "error": "Failed to resume torrent."})
+            return
+
         elif path == "/api/test/discord":
             body = self.read_json_body()
             webhook_url = body.get("webhook", "").strip()
@@ -1666,6 +1681,18 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
     def do_DELETE(self):
         url = urllib.parse.urlparse(self.path)
         path = url.path
+
+        if re.match(r'^/api/downloads/([0-9a-fA-F]{40})$', path):
+            # Remove a torrent from the queue (keeps files on disk unless
+            # ?deleteFiles=true is passed explicitly).
+            torrent_hash = re.match(r'^/api/downloads/([0-9a-fA-F]{40})$', path).group(1)
+            params = urllib.parse.parse_qs(url.query)
+            delete_files = params.get("deleteFiles", ["false"])[0].lower() == "true"
+            if qbit.delete_torrent_by_hash(torrent_hash, delete_files=delete_files):
+                self.send_json(200, {"ok": True, "message": "Torrent removed."})
+            else:
+                self.send_json(500, {"ok": False, "error": "Failed to remove torrent."})
+            return
 
         if path == "/api/history":
             history_manager.clear_all()

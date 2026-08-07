@@ -378,7 +378,15 @@ class QbitClient:
             return False
 
     def get_active_downloads(self) -> list:
-        """Fetch list of active downloading torrents from qBittorrent."""
+        """Fetch the torrent queue from qBittorrent (any state), enriched with
+        a normalized ``statusKind``/``statusLabel`` classification.
+
+        qBittorrent's ``state`` strings are verbose and internal-looking
+        (``stoppedDL``, ``forcedUP``, ``metaDL`` …). The UI needs to show the
+        *true* state of each torrent — stopped, errored, complete, seeding,
+        downloading, etc. — so we fetch the full queue (``filter=all``,
+        newest first, capped at 10) and classify each entry.
+        """
         if not self._ensure_auth():
             return []
         config = get_config()
@@ -389,14 +397,96 @@ class QbitClient:
                 "Cookie": f"SID={self.sid}"
             }
             resp = self.client.get(
-                info_url, 
-                params={"filter": "downloading", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 10}, 
+                info_url,
+                params={"filter": "all", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 10},
                 headers=headers
             )
             if resp.status_code == 200:
-                return resp.json()
+                torrents = resp.json() or []
+                enriched = []
+                for t in torrents:
+                    item = dict(t)
+                    kind, label = self.classify_state(item.get("state", ""))
+                    item["statusKind"] = kind
+                    item["statusLabel"] = label
+                    enriched.append(item)
+                return enriched
         except Exception as e:
             print(f"Failed to fetch qBittorrent active downloads: {e}")
         return []
+
+    @staticmethod
+    def classify_state(state: str) -> tuple:
+        """Normalize a qBittorrent ``state`` string into (kind, label).
+
+        Kinds: downloading | seeding | complete | stopped | paused | queued |
+        checking | stalled | error | unknown. ``label`` is a human-friendly
+        display string for badges.
+        """
+        s = (state or "").lower()
+        mapping = [
+            ("downloading", ("downloading", "Downloading")),
+            ("forceddl", ("downloading", "Downloading")),
+            ("metadl", ("downloading", "Fetching metadata")),
+            ("forcedmetadl", ("downloading", "Fetching metadata")),
+            ("stalleddl", ("stalled", "Stalled")),
+            ("checkingdl", ("checking", "Checking")),
+            ("checkingup", ("checking", "Checking")),
+            ("checkingresumedata", ("checking", "Checking")),
+            ("queueddl", ("queued", "Queued")),
+            ("queuedup", ("queued", "Queued")),
+            ("stoppeddl", ("stopped", "Stopped")),
+            ("stoppedup", ("complete", "Complete")),
+            ("pauseddl", ("paused", "Paused")),
+            ("pausedup", ("paused", "Paused")),
+            ("uploading", ("seeding", "Seeding")),
+            ("forcedup", ("seeding", "Seeding")),
+            ("stalledup", ("seeding", "Seeding")),
+            ("error", ("error", "Error")),
+            ("missingfiles", ("error", "Missing files")),
+            ("unknown", ("unknown", "Unknown")),
+        ]
+        for key, result in mapping:
+            if key in s:
+                return result
+        return ("unknown", state or "Unknown")
+
+    def resume_torrent(self, torrent_hash: str) -> bool:
+        """Resume/retry a torrent by hash (works for stopped, paused, and
+        errored torrents — qBittorrent re-checks errored ones on resume)."""
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        resume_url = f"{base_url.rstrip('/')}/api/v2/torrents/resume"
+        if not self._ensure_auth():
+            return False
+        try:
+            resp = self.client.post(
+                resume_url,
+                data={"hashes": torrent_hash},
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"SID={self.sid}"}
+            )
+            return resp.status_code == 200 and resp.text == "Ok."
+        except Exception as e:
+            print(f"Failed to resume torrent {torrent_hash}: {e}")
+            return False
+
+    def delete_torrent_by_hash(self, torrent_hash: str, delete_files: bool = False) -> bool:
+        """Delete a torrent by hash. ``delete_files=False`` keeps the data on
+        disk (safe default for a mistaken remove)."""
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        delete_url = f"{base_url.rstrip('/')}/api/v2/torrents/delete"
+        if not self._ensure_auth():
+            return False
+        try:
+            resp = self.client.post(
+                delete_url,
+                data={"hashes": torrent_hash, "deleteFiles": "true" if delete_files else "false"},
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"SID={self.sid}"}
+            )
+            return resp.status_code == 200 and resp.text == "Ok."
+        except Exception as e:
+            print(f"Failed to delete torrent {torrent_hash}: {e}")
+            return False
 
 qbit = QbitClient()
