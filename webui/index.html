@@ -432,6 +432,29 @@
                   <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Bearer Token (GraphQL API)</label>
                   <input type="password" name="bearerTokenAnilist" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" />
                 </div>
+
+                <!-- OAuth Login State & Token Expiry (T3) -->
+                <div id="anilist-auth-status" class="pt-3">
+                  <div class="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div class="flex items-center gap-2.5">
+                      <span id="auth-status-indicator" class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                      <span id="auth-status-text" class="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        Not connected to AniList
+                      </span>
+                    </div>
+                    <button id="btn-anilist-oauth" type="button" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5">
+                      <i class="fa-solid fa-right-to-bracket text-[10px]"></i>Connect
+                    </button>
+                  </div>
+                  <div id="token-expiry-warning" class="hidden mt-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1.5"></i>
+                    <span class="text-xs font-semibold text-amber-500" id="token-expiry-text"></span>
+                  </div>
+                  <div id="token-expiry-ok" class="hidden mt-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                    <i class="fa-solid fa-circle-check text-emerald-500 mr-1.5"></i>
+                    <span class="text-xs font-semibold text-emerald-500">Token valid — no re-auth needed.</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -581,7 +604,7 @@
                     <input type="text" name="proxyAddress" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" />
                   </div>
                   <div>
-                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Proxy Port</label>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-widener mb-2">Proxy Port</label>
                     <input type="number" name="proxyPort" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" />
                   </div>
                 </div>
@@ -603,9 +626,39 @@
               </div>
             </div>
 
-          </div>
+            <!-- UI Preferences (T3) -->
+            <div class="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200/40 dark:border-slate-800/40 space-y-4">
+              <h3 class="font-['Outfit'] font-bold text-lg flex items-center gap-2.5 text-fuchsia-600 dark:text-fuchsia-400">
+                <i class="fa-solid fa-paintbrush text-base"></i>UI Preferences
+              </h3>
+              <div class="space-y-4">
+                <!-- Theme Toggle -->
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Theme</label>
+                  <div class="flex items-center gap-2">
+                    <button id="btn-theme-light" type="button" data-theme="light" class="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-all cursor-pointer hover:border-violet-500">
+                      <i class="fa-solid fa-sun mr-1"></i>Light
+                    </button>
+                    <button id="btn-theme-dark" type="button" data-theme="dark" class="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-all cursor-pointer hover:border-violet-500">
+                      <i class="fa-solid fa-moon mr-1"></i>Dark
+                    </button>
+                    <button id="btn-theme-system" type="button" data-theme="system" class="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-all cursor-pointer hover:border-violet-500">
+                      <i class="fa-solid fa-desktop mr-1"></i>System
+                    </button>
+                  </div>
+                </div>
 
-        </form>
+                <!-- Title Language Preference -->
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Title Language</label>
+                  <select id="title-language-select" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-semibold outline-none cursor-pointer focus:border-violet-500 text-slate-800 dark:text-slate-200">
+                    <option value="romaji">Romaji</option>
+                    <option value="english">English</option>
+                    <option value="native">Native</option>
+                  </select>
+                </div>
+              </div>
+            </div>
 
         <!-- Ignored Anime Management Panel -->
         <div class="mt-8 border-t border-slate-100 dark:border-slate-800 pt-6">
@@ -704,7 +757,20 @@
   <!-- Toast Notification Wrapper -->
   <div id="toast-wrapper" class="fixed bottom-5 right-5 z-[100] flex flex-col gap-3 max-w-md w-full pointer-events-none"></div>
 
-  <!-- Load JS Client Code -->
+  <!-- Core module contract (loaded before app.js so window.Animu is available) -->
+  <script src="/js/core.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/list.js"></script>
+  <script src="/js/downloads.js"></script>
+  <!-- Feature stubs — no-op until future feature tasks implement them -->
+  <script src="/js/features/home.js"></script>
+  <script src="/js/features/search.js"></script>
+  <script src="/js/features/media-detail.js"></script>
+  <script src="/js/features/lists-social.js"></script>
+  <script src="/js/features/engagement.js"></script>
+  <!-- Settings UI behavior (OAuth, theme, title-language) -->
+  <script src="/js/settings-behavior.js"></script>
+  <!-- Existing app.js (cache-busted via web.py: /app.js?v=<git-SHA>) -->
   <script src="/app.js"></script>
 
 </body>

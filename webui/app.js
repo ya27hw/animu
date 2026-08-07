@@ -286,21 +286,48 @@
 
   // Light/Dark Theme Switcher
   function initTheme() {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    if (savedTheme === 'light') {
-      document.documentElement.classList.remove('dark');
+    // Use the Animu settings system (window.Animu.settings) if available,
+    // otherwise fall back to direct localStorage (backward compat).
+    if (window.Animu && window.Animu.settings) {
+      const savedTheme = window.Animu.settings.get('theme', 'dark');
+      if (savedTheme === 'light') {
+        document.documentElement.classList.remove('dark');
+      } else if (savedTheme === 'system') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (prefersDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } else {
+        document.documentElement.classList.add('dark');
+      }
     } else {
-      document.documentElement.classList.add('dark');
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      if (savedTheme === 'light') {
+        document.documentElement.classList.remove('dark');
+      } else {
+        document.documentElement.classList.add('dark');
+      }
     }
   }
 
+  // Helper: persist theme via Animu settings (with localStorage fallback)
+  function persistTheme(theme) {
+    if (window.Animu && window.Animu.settings) {
+      window.Animu.settings.set('theme', theme);
+    }
+    localStorage.setItem('theme', theme === 'system' ? 'dark' : theme);
+  }
+
   DOM.themeToggle.addEventListener('click', () => {
+    // Cycle: dark -> light -> dark (old behavior, kept for the header toggle)
     const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    persistTheme(isDark ? 'dark' : 'light');
   });
   DOM.themeToggleDesktop.addEventListener('click', () => {
     const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    persistTheme(isDark ? 'dark' : 'light');
   });
 
   // Hamburger menu toggle
@@ -348,6 +375,11 @@
   // Navigation tabs toggle
   function switchTab(target) {
     state.activeTab = target;
+
+    // Emit tab switch on the Animu event bus (populated by core.js / settings-behavior.js)
+    if (window.Animu && window.Animu.bus) {
+      window.Animu.bus.emit('tab:switch', target);
+    }
 
     // Update desktop nav buttons style
     DOM.navTabs.forEach(t => {
@@ -2125,5 +2157,12 @@
   }
 
   initTheme();
+
+  // Sync initial title language from Animu settings (if available)
+  if (window.Animu && window.Animu.settings && typeof window.UI !== 'undefined' && typeof window.UI.setTitleLang === 'function') {
+    const savedLang = window.Animu.settings.get('titleLanguage', 'romaji');
+    state.discover.titleLang = savedLang;
+  }
+
   loadDashboard();
 })();
