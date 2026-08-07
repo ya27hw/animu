@@ -479,15 +479,25 @@
         feed.innerHTML = '<div class="text-slate-400 py-2">No airing schedule available for today.</div>';
         return;
       }
-      feed.innerHTML = schedules.map(s => {
+      // Dedupe re-runs / multiple daily slots: keep the earliest airing per media id.
+      const seenMedia = new Set();
+      const unique = schedules.filter(s => {
+        if (seenMedia.has(s.media.id)) return false;
+        seenMedia.add(s.media.id);
+        return true;
+      });
+      feed.innerHTML = unique.map(s => {
         const title = formatTitle(s.media.title);
+        const coverUrl = (s.media.coverImage && s.media.coverImage.medium) || '';
         const hoursLeft = Math.max(0, Math.round((s.airingAt - Date.now() / 1000) / 3600));
+        // AniList can report negative episode numbers for re-runs; clamp them.
+        const epLabel = s.episode > 0 ? `Ep ${s.episode}` : 'Ep ?';
         return `
           <div onclick="openMediaDetail(${s.media.id})" class="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 shrink-0 cursor-pointer hover:border-violet-500 transition-all">
-            <img src="${s.media.coverImage.medium}" class="w-8 h-10 object-cover rounded-lg" />
+            <img src="${coverUrl}" class="w-8 h-10 object-cover rounded-lg" />
             <div>
               <p class="font-bold text-slate-800 dark:text-slate-200 line-clamp-1 max-w-[140px]">${title}</p>
-              <p class="text-[10px] text-violet-400 font-semibold">Ep ${s.episode} ${hoursLeft > 0 ? `in ~${hoursLeft}h` : 'Airing soon'}</p>
+              <p class="text-[10px] text-violet-400 font-semibold">${epLabel} ${hoursLeft > 0 ? `in ~${hoursLeft}h` : 'Airing soon'}</p>
             </div>
           </div>
         `;
