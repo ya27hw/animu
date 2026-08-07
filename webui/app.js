@@ -620,10 +620,19 @@
 
     try {
       const [season, year] = state.discoverSeason.split('_');
+      // Map chart subtab -> AniList status filter. Upcoming/TBA both use
+      // NOT_YET_RELEASED and are split client-side by whether an air date exists.
+      const subtabStatus = {
+        Airing: 'RELEASING',
+        Upcoming: 'NOT_YET_RELEASED',
+        TBA: 'NOT_YET_RELEASED',
+        Archive: 'FINISHED'
+      };
+      const status = subtabStatus[state.discoverChartTab] || 'RELEASING';
       const query = `
-        query ($season: MediaSeason, $seasonYear: Int) {
+        query ($season: MediaSeason, $seasonYear: Int, $status: MediaStatus) {
           Page(page: 1, perPage: 24) {
-            media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: POPULARITY_DESC) {
+            media(season: $season, seasonYear: $seasonYear, status: $status, type: ANIME, sort: POPULARITY_DESC) {
               id
               title { romaji english native }
               coverImage { extraLarge large }
@@ -636,8 +645,16 @@
           }
         }
       `;
-      const data = await queryAniList(query, { season, seasonYear: parseInt(year) });
+      const data = await queryAniList(query, { season, seasonYear: parseInt(year), status });
       let items = data.Page.media || [];
+
+      // Split NOT_YET_RELEASED shows: Upcoming has a scheduled air time,
+      // TBA has none yet.
+      if (state.discoverChartTab === 'Upcoming') {
+        items = items.filter(i => i.nextAiringEpisode);
+      } else if (state.discoverChartTab === 'TBA') {
+        items = items.filter(i => !i.nextAiringEpisode);
+      }
 
       if (state.hideOnMyList) {
         const onListIds = new Set(state.animeList.map(a => a.mediaId));
@@ -652,6 +669,7 @@
       grid.innerHTML = items.map(m => {
         const title = formatTitle(m.title);
         const score = m.averageScore ? `${m.averageScore}%` : 'N/A';
+        const coverUrl = (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large)) || '';
         const nextEp = m.nextAiringEpisode;
         let countdownStr = 'TBA';
         if (nextEp) {
@@ -664,7 +682,7 @@
 
         return `
           <div onclick="openMediaDetail(${m.id})" class="group p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 hover:border-violet-500 transition-all cursor-pointer flex gap-3.5 shadow-sm">
-            <img src="${m.coverImage.large}" class="w-20 h-28 object-cover rounded-xl shrink-0 group-hover:scale-105 transition-transform" />
+            <img src="${coverUrl}" class="w-20 h-28 object-cover rounded-xl shrink-0 group-hover:scale-105 transition-transform" />
             <div class="flex flex-col justify-between flex-grow">
               <div class="space-y-1">
                 <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${m.format || 'TV'}</span>
