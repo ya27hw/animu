@@ -829,7 +829,7 @@ class AnilistClient:
                 progress
                 progressVolumes
                 repeat
-                score
+                score(format: POINT_100)
                 priority
                 private
                 notes
