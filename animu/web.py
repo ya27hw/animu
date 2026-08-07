@@ -1625,8 +1625,15 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             current = get_config()
             for k, v in body.items():
                 attr = MAP_JSON_TO_ATTR.get(k, k)
-                if hasattr(current, attr):
-                    setattr(current, attr, v)
+                if not hasattr(current, attr):
+                    continue
+                # Credential fields are masked in the UI (never populated from
+                # the API), so their inputs arrive blank on every save. Never
+                # let an empty value wipe the stored secret — the field is only
+                # updated when the user types a replacement.
+                if attr in SENSITIVE_CONFIG_FIELDS and (v is None or v == ""):
+                    continue
+                setattr(current, attr, v)
             save_config(current)
             reload_config()
             self.send_json(200, {"ok": True, "config": sanitize_config_for_api(get_config_dict(get_config()))})

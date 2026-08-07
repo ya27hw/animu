@@ -45,7 +45,15 @@ TOKEN_LIFETIME_SECONDS = 365 * 24 * 3600  # 1 year
 TOKEN_SAFETY_MARGIN = 7 * 24 * 3600       # 7 days
 
 # Fields that must NEVER appear in API responses or logs.
-SENSITIVE_CONFIG_FIELDS = {"bearer_token_anilist", "anilist_client_secret", "anilist_token_issued_at"}
+# ``webhook`` (Discord webhook URL) is a credential — it must not be sent
+# back to the UI; the Settings page shows it masked and the /api/config
+# endpoint strips it like the other secrets.
+SENSITIVE_CONFIG_FIELDS = {
+    "bearer_token_anilist",
+    "anilist_client_secret",
+    "anilist_token_issued_at",
+    "webhook",
+}
 
 # ---------------------------------------------------------------------------
 # JWT helpers (stdlib — no PyJWT dependency needed for read-only decode)
