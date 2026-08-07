@@ -352,9 +352,9 @@
       return _request(`/api/anilist/threads${qs}`);
     },
 
-    /** POST /api/anilist/thread/:id/comments — list thread comments */
+    /** GET /api/anilist/thread/:id/comments — list thread comments */
     async getThreadComments(threadId) {
-      return _request(`/api/anilist/thread/${threadId}/comments`, { method: "POST" });
+      return _request(`/api/anilist/thread/${threadId}/comments`);
     },
 
     // ---- Local / non-AniList ----
