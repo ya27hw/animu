@@ -1258,34 +1258,90 @@
   // TAB 6: STATS (ANALYTICS & BREAKDOWNS)
   // ==========================================
   async function loadStats() {
-    try {
-      const query = `
-        query ($userName: String) {
-          User(name: $userName) {
-            stats {
-              animeStatusDistribution { status count }
-              mangaStatusDistribution { status count }
-              watchedTime
-              chaptersRead
-            }
-          }
-        }
-      `;
-      const data = await queryAniList(query, { userName: state.userName });
-      const stats = data.User?.stats || {};
+    const genreContainer = document.getElementById('chart-genre-container');
+    const formatContainer = document.getElementById('chart-format-container');
 
-      const totalAnime = state.animeList.length;
-      const daysWatched = ((stats.watchedTime || 0) / 1440).toFixed(1);
-      const totalEpisodes = state.animeList.reduce((acc, a) => acc + (a.progress || 0), 0);
+    const showError = (msg) => {
+      console.error('Stats load error:', msg);
+      const errHtml = `
+        <div class="py-8 text-center">
+          <i class="fa-solid fa-triangle-exclamation text-rose-500 text-xl mb-2"></i>
+          <p class="text-xs font-semibold text-rose-500">Failed to load stats</p>
+          <p class="text-[11px] text-slate-400 mt-1">${msg}</p>
+        </div>`;
+      if (genreContainer) genreContainer.innerHTML = errHtml;
+      if (formatContainer) formatContainer.innerHTML = errHtml;
+      showToast(`Stats failed to load: ${msg}`, 'error');
+    };
+
+    const showEmpty = () => {
+      const emptyHtml = `
+        <div class="py-8 text-center">
+          <i class="fa-solid fa-inbox text-slate-400 text-xl mb-2"></i>
+          <p class="text-xs font-semibold text-slate-400">No collection data yet.</p>
+          <p class="text-[11px] text-slate-500 mt-1">Add entries to your AniList collection to see stats here.</p>
+        </div>`;
+      if (genreContainer) genreContainer.innerHTML = emptyHtml;
+      if (formatContainer) formatContainer.innerHTML = emptyHtml;
+    };
+
+    try {
+      // Fetch the full private collection through the backend so the
+      // server-side AniList token is used — the browser has no token
+      // (stripped by /api/config), so a direct query returns empty lists.
+      const params = new URLSearchParams({
+        userName: state.userName || '',
+        type: 'ANIME',
+      });
+      const res = await fetch(`/api/anilist/user-list?${params.toString()}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Failed to load collection (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const collections = data.lists || [];
+
+      // Flatten all list-group entries into one array
+      const entries = [];
+      collections.forEach(l => {
+        (l.entries || []).forEach(e => entries.push(e));
+      });
+
+      if (entries.length === 0) {
+        document.getElementById('stat-total-anime').textContent = 0;
+        document.getElementById('stat-days-watched').textContent = '0.0';
+        document.getElementById('stat-mean-score').textContent = '0.0';
+        document.getElementById('stat-total-episodes').textContent = 0;
+        showEmpty();
+        return;
+      }
+
+      // ---- Overview numbers ----
+      const totalAnime = entries.length;
+      // Approximate minutes watched from per-episode duration (fallback 24 min)
+      const minutesWatched = entries.reduce((acc, e) => {
+        const eps = e.progress || 0;
+        const dur = e.media?.duration || 24;
+        return acc + (eps * dur);
+      }, 0);
+      const daysWatched = (minutesWatched / 1440).toFixed(1);
+      const totalEpisodes = entries.reduce((acc, e) => acc + (e.progress || 0), 0);
+
+      // Mean score — average of scored entries only (POINT_100, 0 = unscored)
+      const scored = entries.filter(e => e.score && e.score > 0).map(e => e.score);
+      const meanScore = scored.length
+        ? (scored.reduce((a, b) => a + b, 0) / scored.length).toFixed(1)
+        : '0.0';
 
       document.getElementById('stat-total-anime').textContent = totalAnime;
       document.getElementById('stat-days-watched').textContent = daysWatched;
+      document.getElementById('stat-mean-score').textContent = meanScore;
       document.getElementById('stat-total-episodes').textContent = totalEpisodes;
 
-      // Genre Distribution
+      // ---- Genre Distribution ----
       const genreCounts = {};
-      state.animeList.forEach(a => {
-        (a.media?.genres || []).forEach(g => {
+      entries.forEach(e => {
+        (e.media?.genres || []).forEach(g => {
           genreCounts[g] = (genreCounts[g] || 0) + 1;
         });
       });
@@ -1293,26 +1349,84 @@
       const sortedGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
       const maxGenre = sortedGenres[0]?.[1] || 1;
 
-      const genreChart = document.getElementById('chart-genre-container');
-      if (genreChart) {
-        genreChart.innerHTML = sortedGenres.map(([g, count]) => {
-          const pct = Math.round((count / maxGenre) * 100);
+      if (genreContainer) {
+        if (sortedGenres.length === 0) {
+          genreContainer.innerHTML = '<div class="text-slate-400 text-xs py-4 text-center">No genre data available.</div>';
+        } else {
+          genreContainer.innerHTML = sortedGenres.map(([g, count]) => {
+            const pct = Math.round((count / maxGenre) * 100);
+            return `
+              <div class="space-y-1">
+                <div class="flex justify-between text-xs font-semibold">
+                  <span>${g}</span>
+                  <span class="text-slate-400">${count} anime (${pct}%)</span>
+                </div>
+                <div class="w-full h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-violet-600 to-pink-500 rounded-full" style="width: ${pct}%"></div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      // ---- Format & Tag Breakdown ----
+      const formatCounts = {};
+      entries.forEach(e => {
+        const fmt = e.media?.format || 'UNKNOWN';
+        formatCounts[fmt] = (formatCounts[fmt] || 0) + 1;
+      });
+      const sortedFormats = Object.entries(formatCounts).sort((a, b) => b[1] - a[1]);
+      const maxFormat = sortedFormats[0]?.[1] || 1;
+
+      const fmtLabel = fmt => fmt.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+
+      let formatHtml = '';
+      if (sortedFormats.length === 0) {
+        formatHtml = '<div class="text-slate-400 text-xs py-4 text-center">No format data available.</div>';
+      } else {
+        formatHtml = sortedFormats.map(([fmt, count]) => {
+          const pct = Math.round((count / maxFormat) * 100);
           return `
             <div class="space-y-1">
               <div class="flex justify-between text-xs font-semibold">
-                <span>${g}</span>
-                <span class="text-slate-400">${count} anime (${pct}%)</span>
+                <span>${fmtLabel(fmt)}</span>
+                <span class="text-slate-400">${count} (${pct}%)</span>
               </div>
               <div class="w-full h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                <div class="h-full bg-gradient-to-r from-violet-600 to-pink-500 rounded-full" style="width: ${pct}%"></div>
+                <div class="h-full bg-gradient-to-r from-pink-500 to-amber-400 rounded-full" style="width: ${pct}%"></div>
               </div>
             </div>
           `;
         }).join('');
       }
 
+      // Top tags (if present in the collection payload)
+      const tagCounts = {};
+      entries.forEach(e => {
+        (e.media?.tags || []).forEach(t => {
+          const name = typeof t === 'string' ? t : t?.name;
+          if (name) tagCounts[name] = (tagCounts[name] || 0) + 1;
+        });
+      });
+      const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+      if (formatContainer) {
+        formatContainer.innerHTML = formatHtml + (topTags.length
+          ? `
+            <div class="pt-3 mt-3 border-t border-slate-200/60 dark:border-slate-800">
+              <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Top Tags</p>
+              <div class="flex flex-wrap gap-1.5">
+                ${topTags.map(([t, count]) =>
+                  `<span class="px-2 py-1 rounded-lg bg-slate-200/70 dark:bg-slate-800 text-[10px] font-semibold text-slate-500 dark:text-slate-300">${t} · ${count}</span>`
+                ).join('')}
+              </div>
+            </div>`
+          : '');
+      }
+
     } catch (e) {
-      console.warn('Stats calculation warning:', e);
+      showError(e.message || 'Unknown error');
     }
   }
 
