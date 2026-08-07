@@ -222,6 +222,7 @@
     logRefreshBtn: document.getElementById('log-refresh-btn'),
     settingsDialog: document.getElementById('settings-dialog'),
     nyaaDialog: document.getElementById('nyaa-dialog'),
+    nyaaList: document.getElementById('nyaa-candidates-list'),
     mediaDetailModal: document.getElementById('media-detail-modal'),
     mediaDetailContent: document.getElementById('media-detail-content'),
     listEditorModal: document.getElementById('list-editor-modal'),
@@ -816,38 +817,20 @@
     if (!container) return;
 
     try {
-      const query = `
-        query ($userName: String, $type: MediaType) {
-          MediaListCollection(userName: $userName, type: $type) {
-            lists {
-              name
-              isCustomList
-              status
-              entries {
-                id
-                mediaId
-                status
-                progress
-                score(format: POINT_100)
-                updatedAt
-                notes
-                media {
-                  id
-                  title { romaji english native }
-                  coverImage { extraLarge large }
-                  bannerImage
-                  episodes
-                  chapters
-                  format
-                  averageScore
-                }
-              }
-            }
-          }
-        }
-      `;
-      const data = await queryAniList(query, { userName: state.userName, type: state.listsMediaType });
-      const collections = data.MediaListCollection?.lists || [];
+      // Fetch via the backend so the server-side AniList token is used —
+      // the browser has no token (/api/config strips bearerTokenAnilist),
+      // so a direct browser->AniList query returns 'Private User' empty lists.
+      const params = new URLSearchParams({
+        userName: state.userName || '',
+        type: state.listsMediaType || 'ANIME',
+      });
+      const res = await fetch(`/api/anilist/user-list?${params.toString()}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Failed to load user list (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const collections = data.lists || [];
 
       let allEntries = [];
       collections.forEach(l => {
@@ -1223,6 +1206,27 @@
       list.innerHTML = '<div class="py-8 text-center text-slate-400 text-xs">Failed to load social activity feed.</div>';
     }
   }
+
+  // Global like toggle — referenced from inline onclick in the activity feed.
+  // Delegates to the backend so the server-side AniList token authorizes the
+  // mutation (the browser never holds bearerTokenAnilist).
+  window.toggleLikeActivity = async function(activityId) {
+    try {
+      const res = await fetch('/api/anilist/like', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: activityId, type: 'ACTIVITY' })
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Failed to toggle like (HTTP ${res.status})`);
+      }
+      showToast('Like updated!');
+      loadActivityFeed();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
 
   document.getElementById('btn-post-activity')?.addEventListener('click', async () => {
     // Delegate to feature module if registered
