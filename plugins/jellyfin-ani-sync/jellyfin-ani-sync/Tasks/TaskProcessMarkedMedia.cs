@@ -64,9 +64,11 @@ public class TaskProcessMarkedMedia {
                 continue;
             };
             
-            var aniSyncConfigUser = Plugin.Instance?.PluginConfiguration.UserConfig.FirstOrDefault(uc => uc.UserId == item.userId);
+            var aniSyncConfigUser = Plugin.Instance?.PluginConfiguration?.UserConfig?.FirstOrDefault(uc => uc.UserId == item.userId);
+            string? directToken = Plugin.Instance?.PluginConfiguration?.AniListBearerToken;
+            bool hasDirectToken = !string.IsNullOrWhiteSpace(directToken);
             List<(Guid userId, Guid? seasonId, Video baseItem)> pairedItems = new List<(Guid userId, Guid? seasonId, Video baseItem)>();
-            if (aniSyncConfigUser != null && UpdateProviderStatus.LibraryCheck(aniSyncConfigUser, _libraryManager, _fileSystem, _logger, item.baseItem)) {
+            if ((aniSyncConfigUser != null || hasDirectToken) && UpdateProviderStatus.LibraryCheck(aniSyncConfigUser, _libraryManager, _fileSystem, _logger, item.baseItem)) {
                 if (_memoryCache.TryGetValue("lastQuery", out DateTime lastQuery)) {
                     if ((DateTime.UtcNow - lastQuery).TotalSeconds <= 5) {
                         await Task.Delay(5000);

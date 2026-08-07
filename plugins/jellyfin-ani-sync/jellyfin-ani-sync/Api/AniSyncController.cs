@@ -117,7 +117,7 @@ namespace jellyfin_ani_sync.Api {
         [HttpGet]
         [Route("user")]
         public async Task<ActionResult> GetUser(ApiName apiName, string userId) {
-            UserConfig? userConfig = Plugin.Instance?.PluginConfiguration.UserConfig.FirstOrDefault(item => item.UserId == Guid.Parse(userId));
+            UserConfig? userConfig = Plugin.Instance?.PluginConfiguration?.UserConfig?.FirstOrDefault(item => item.UserId == Guid.Parse(userId));
             if (userConfig == null) {
                 _logger.LogError("User not found in config");
                 return StatusCode(500, "User not found in config");
@@ -227,7 +227,7 @@ namespace jellyfin_ani_sync.Api {
             var jellyfinUser = _userManager.GetUser(User, user);
             if (jellyfinUser == null) return Forbid();
 
-            var userConfig = Plugin.Instance?.PluginConfiguration.UserConfig.FirstOrDefault(userConfig => userConfig.UserId == jellyfinUser.Id);
+            var userConfig = Plugin.Instance?.PluginConfiguration?.UserConfig?.FirstOrDefault(userConfig => userConfig.UserId == jellyfinUser.Id);
             if (userConfig == null) {
                 _logger.LogTrace("User not found in config, first time?");
                 return Ok(new {});

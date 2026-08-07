@@ -16,7 +16,7 @@ public class ConfigHelper {
     /// <returns>True if successful, false if unsuccessful and the reason why.</returns>
     public static (bool success, string? reason) DeauthenticateUser(Guid userId, ApiName provider) {
         if (Plugin.Instance == null) return (false, "Plugin instance null.");
-        UserConfig? userConfig = Plugin.Instance.PluginConfiguration.UserConfig.FirstOrDefault(userConfig => userConfig.UserId == userId);
+        UserConfig? userConfig = Plugin.Instance.PluginConfiguration?.UserConfig?.FirstOrDefault(userConfig => userConfig.UserId == userId);
 
         if (userConfig == null) return (false, "User configuration not found.");
         userConfig.UserApiAuth = userConfig.UserApiAuth.Where(userApiAuth => userApiAuth.Name != provider).ToArray();

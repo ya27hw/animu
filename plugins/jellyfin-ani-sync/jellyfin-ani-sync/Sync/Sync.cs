@@ -81,7 +81,7 @@ public class Sync {
     }
 
     private async Task<List<Anime>?> GetAnimeList(string userId) {
-        ApiCallHelpers apiCallHelpers = new ApiCallHelpers(aniListApiCalls: new AniListApiCalls(_httpClientFactory, _loggerFactory, _serverApplicationHost, _httpContextAccessor, _memoryCache, _delayer, Plugin.Instance?.PluginConfiguration.UserConfig.FirstOrDefault(item => item.UserId == Guid.Parse(userId))));
+        ApiCallHelpers apiCallHelpers = new ApiCallHelpers(aniListApiCalls: new AniListApiCalls(_httpClientFactory, _loggerFactory, _serverApplicationHost, _httpContextAccessor, _memoryCache, _delayer, Plugin.Instance?.PluginConfiguration?.UserConfig?.FirstOrDefault(item => item.UserId == Guid.Parse(userId))));
         MalApiCalls.User user = await apiCallHelpers.GetUser();
         if (user == null || user.Id == 0) {
             _logger.LogError("(Sync) Could not retrieve user information. Cannot proceed");

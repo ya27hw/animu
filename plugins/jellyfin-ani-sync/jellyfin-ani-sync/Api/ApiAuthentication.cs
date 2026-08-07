@@ -106,7 +106,7 @@ namespace jellyfin_ani_sync.Api {
                 StreamReader streamReader = new StreamReader(content);
                 TokenResponse tokenResponse = JsonSerializer.Deserialize<TokenResponse>(streamReader.ReadToEnd());
 
-                UserConfig? pluginConfig = Plugin.Instance.PluginConfiguration.UserConfig.FirstOrDefault(item => item.UserId == userId);
+                UserConfig? pluginConfig = Plugin.Instance.PluginConfiguration?.UserConfig?.FirstOrDefault(item => item.UserId == userId);
 
                 if (pluginConfig != null) {
                     var apiAuth = pluginConfig.UserApiAuth?.FirstOrDefault(item => item.Name == _provider);

@@ -81,14 +81,10 @@ namespace jellyfin_ani_sync {
                 video.IndexNumber = 1;
             }
 
-            _userConfig = Plugin.Instance?.PluginConfiguration.UserConfig.FirstOrDefault(item => item.UserId == userId);
-            if (_userConfig == null) {
-                _logger.LogWarning($"The user {userId} does not exist in the plugins config file. Skipping");
-                return;
-            }
+            _userConfig = Plugin.Instance?.PluginConfiguration?.UserConfig?.FirstOrDefault(item => item.UserId == userId);
 
             string? directToken = Plugin.Instance?.PluginConfiguration?.AniListBearerToken;
-            bool hasAniListAuth = _userConfig.UserApiAuth != null && _userConfig.UserApiAuth.Any(a => a.Name == ApiName.AniList);
+            bool hasAniListAuth = _userConfig?.UserApiAuth != null && _userConfig.UserApiAuth.Any(a => a.Name == ApiName.AniList);
             bool hasDirectToken = !string.IsNullOrWhiteSpace(directToken);
 
             if (!hasAniListAuth && !hasDirectToken) {
@@ -173,10 +169,10 @@ namespace jellyfin_ani_sync {
             return title;
         }
 
-        public static bool LibraryCheck(UserConfig userConfig, ILibraryManager libraryManager, IFileSystem fileSystem, ILogger logger, BaseItem item) {
+        public static bool LibraryCheck(UserConfig? userConfig, ILibraryManager libraryManager, IFileSystem fileSystem, ILogger logger, BaseItem item) {
             try {
-                // user has no library filters
-                if (userConfig.LibraryToCheck is { Length: 0 }) {
+                // user has no userConfig or no library filters
+                if (userConfig == null || userConfig.LibraryToCheck is null or { Length: 0 }) {
                     return true;
                 }
 
@@ -213,14 +209,17 @@ namespace jellyfin_ani_sync {
                 return;
             }
 
+            bool planToWatchOnly = _userConfig?.PlanToWatchOnly ?? false;
+            bool rewatchCompleted = _userConfig?.RewatchCompleted ?? false;
+
             // only plan to watch
-            if (_userConfig!.PlanToWatchOnly) {
+            if (planToWatchOnly) {
                 if (detectedAnime.MyListStatus != null && detectedAnime.MyListStatus.Status == Status.Plan_to_watch) {
                     _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found on plan to watch list");
                     await UpdateAnimeStatus(detectedAnime, episodeNumber);
                 }
 
-                _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) not found in plan to watch list{(_userConfig.RewatchCompleted ? ", checking completed list.." : null)}");
+                _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) not found in plan to watch list{(rewatchCompleted ? ", checking completed list.." : null)}");
                 await CheckIfRewatchCompleted(detectedAnime, episodeNumber, overrideCheckRewatch);
 
                 return;
@@ -249,11 +248,14 @@ namespace jellyfin_ani_sync {
         }
 
         private async Task<bool> CheckIfRewatchCompleted(Anime detectedAnime, int indexNumber, bool overrideCheckRewatch) {
+            bool rewatchCompleted = _userConfig?.RewatchCompleted ?? false;
+            bool planToWatchOnly = _userConfig?.PlanToWatchOnly ?? false;
+
             // REPEATING is AniList's status for an anime that is already being rewatched.
             // RewatchCompleted controls promotion from COMPLETED to REPEATING; it must not
             // prevent progress updates for an entry that is already REPEATING.
             if (overrideCheckRewatch || detectedAnime.MyListStatus is { Status: Status.Completed }) {
-                if (_userConfig!.RewatchCompleted) {
+                if (rewatchCompleted) {
                     if (detectedAnime.MyListStatus != null && detectedAnime.MyListStatus.Status == Status.Completed) {
                         _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found on completed list, setting as re-watching");
                         await UpdateAnimeStatus(detectedAnime, indexNumber, true, detectedAnime.MyListStatus.RewatchCount, true);
@@ -275,7 +277,7 @@ namespace jellyfin_ani_sync {
             } else if (detectedAnime.MyListStatus != null && detectedAnime.MyListStatus.NumEpisodesWatched >= indexNumber) {
                 _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found, but provider reports episode already watched. Skipping");
                 return true;
-            } else if (_userConfig!.PlanToWatchOnly) {
+            } else if (planToWatchOnly) {
                 _logger.LogInformation($"({ApiName}) {(_animeType == typeof(Episode) ? "Series" : "Movie")} ({GetAnimeTitle(detectedAnime)}) found, but not on completed or plan to watch list. Skipping");
                 return true;
             }
