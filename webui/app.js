@@ -1401,6 +1401,8 @@
   };
 
   document.getElementById('btn-post-activity')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-post-activity');
+    if (btn.disabled) return;
     // Delegate to feature module if registered
     if (window.Animu && window.Animu.lists && typeof window.Animu.lists.postTextActivity === 'function') {
       return window.Animu.lists.postTextActivity();
@@ -1408,20 +1410,22 @@
     // Fallback to legacy inline implementation
     const input = document.getElementById('activity-input');
     if (!input || !input.value.trim()) return;
+    setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Posting...');
     try {
-      const mutation = `
-        mutation ($text: String) {
-          SaveTextActivity(text: $text) {
-            id
-          }
-        }
-      `;
-      await queryAniList(mutation, { text: input.value.trim() });
+      const res = await fetch('/api/anilist/activity/text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: input.value.trim() })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Failed to post activity (HTTP ${res.status})`);
       input.value = '';
       showToast('Activity update posted successfully!');
       loadActivityFeed();
     } catch (e) {
       showToast(e.message, 'error');
+    } finally {
+      setBtnLoading(btn, false);
     }
   });
 
@@ -1776,6 +1780,7 @@
 
   DOM.btnSubmitConfig?.addEventListener('click', async (e) => {
     e.preventDefault();
+    if (DOM.btnSubmitConfig.disabled) return;
     const formData = new FormData(DOM.configForm);
     const payload = {};
     formData.forEach((val, key) => {
@@ -1785,12 +1790,15 @@
       else payload[key] = val;
     });
 
+    setBtnLoading(DOM.btnSubmitConfig, true, '<i class="fa-solid fa-spinner fa-spin"></i> Hotloading...');
     try {
       await API.saveConfig(payload);
       showToast('Configuration hotloaded successfully!');
       loadSettings();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      setBtnLoading(DOM.btnSubmitConfig, false);
     }
   });
 
@@ -2161,10 +2169,12 @@
 
   DOM.btnSaveSettings.addEventListener('click', async (e) => {
     e.preventDefault();
+    if (DOM.btnSaveSettings.disabled) return;
     const mediaId = DOM.editMediaId.value;
     const alternativeTitle = DOM.editAltTitle.value;
     const startingEpisode = DOM.editStartEp.value;
 
+    setBtnLoading(DOM.btnSaveSettings, true, '<i class="fa-solid fa-spinner fa-spin"></i> Saving...');
     try {
       await API.saveAnime(mediaId, { alternativeTitle, startingEpisode });
       showToast('Anime overrides saved successfully.');
@@ -2172,12 +2182,16 @@
       loadWatching();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      setBtnLoading(DOM.btnSaveSettings, false);
     }
   });
 
   DOM.btnResetDownloads.addEventListener('click', async (e) => {
     e.preventDefault();
+    if (DOM.btnResetDownloads.disabled) return;
     const mediaId = DOM.editMediaId.value;
+    setBtnLoading(DOM.btnResetDownloads, true, '<i class="fa-solid fa-spinner fa-spin"></i> Resetting...');
     try {
       await API.resetAnime(mediaId);
       showToast('Downloaded episode cache reset.');
@@ -2185,6 +2199,8 @@
       loadWatching();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      setBtnLoading(DOM.btnResetDownloads, false);
     }
   });
 
