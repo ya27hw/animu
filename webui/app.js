@@ -26,7 +26,8 @@
     searchHasNext: false,
     socialTab: 'feed',
     activeMediaDetail: null,
-    activeListEditorMedia: null
+    activeListEditorMedia: null,
+    listEntriesByMedia: {}
   };
 
   const expandedHistoryIds = new Set();
@@ -880,9 +881,12 @@
       const collections = data.lists || [];
 
       let allEntries = [];
+      // Map mediaId -> list entry for the editor's prefill / delete flows.
+      state.listEntriesByMedia = {};
       collections.forEach(l => {
         l.entries.forEach(e => {
           allEntries.push({ ...e, listName: l.name });
+          state.listEntriesByMedia[e.mediaId] = e;
         });
       });
 
@@ -971,7 +975,7 @@
                   <button onclick="quickIncrementProgress(${e.media.id}, ${e.progress})" class="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all shadow-sm">
                     +1 Watched
                   </button>
-                  <button onclick="openListEditor(${e.media.id})" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all">
+                  <button onclick="openListEditor(${e.media.id}, ${e.id})" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all">
                     Edit
                   </button>
                 </div>
@@ -1891,39 +1895,157 @@
   // ==========================================
   // LIST EDITOR MODAL & 5 SCORE FORMATS
   // ==========================================
-  window.openListEditor = function(mediaId) {
+  // The editor is keyed by mediaId; the backend list-entry id (needed for
+  // DeleteMediaListEntry) is resolved from the loaded collection or fetched.
+  let activeListEditorEntryId = null;
+
+  window.openListEditor = function(mediaId, entryId) {
     // Delegate to feature module if registered
     if (window.Animu && window.Animu.lists && typeof window.Animu.lists.openListEditor === 'function') {
       return window.Animu.lists.openListEditor(mediaId);
     }
     // Fallback to legacy inline implementation
     state.activeListEditorMedia = mediaId;
+    // Prefer the caller-provided entry id; fall back to the loaded collection.
+    const entry = state.listEntriesByMedia ? state.listEntriesByMedia[mediaId] : null;
+    activeListEditorEntryId = entryId || (entry ? entry.id : null);
     document.getElementById('editor-media-id').value = mediaId;
+    // Prefill known fields so the editor is never a blank guess.
+    document.getElementById('editor-status').value = entry?.status || 'CURRENT';
+    document.getElementById('editor-progress').value = entry?.progress || 0;
+    // Collection scores are POINT_100; default the selector to match.
+    document.getElementById('editor-score-format').value = 'POINT_100';
+    document.getElementById('editor-score').value = entry?.score || 0;
+    document.getElementById('editor-notes').value = entry?.notes || '';
+    document.getElementById('editor-repeat').value = entry?.repeat || 0;
+    if (entry?.startedAt) {
+      const d = entry.startedAt;
+      document.getElementById('editor-start-date').value = d.year ? `${d.year}-${String(d.month || 1).padStart(2, '0')}-${String(d.day || 1).padStart(2, '0')}` : '';
+    }
+    if (entry?.completedAt) {
+      const d = entry.completedAt;
+      document.getElementById('editor-finish-date').value = d.year ? `${d.year}-${String(d.month || 1).padStart(2, '0')}-${String(d.day || 1).padStart(2, '0')}` : '';
+    }
     openModal(DOM.listEditorModal);
   };
 
-  document.getElementById('btn-editor-save')?.addEventListener('click', async () => {
+  // Progress +/- steppers next to the episode input (min 0).
+  document.getElementById('btn-progress-dec')?.addEventListener('click', () => {
+    const input = document.getElementById('editor-progress');
+    input.value = Math.max(0, (parseInt(input.value) || 0) - 1);
+  });
+  document.getElementById('btn-progress-inc')?.addEventListener('click', () => {
+    const input = document.getElementById('editor-progress');
+    input.value = (parseInt(input.value) || 0) + 1;
+  });
+
+  // Adjust the score input's range/step when the format selector changes.
+  document.getElementById('editor-score-format')?.addEventListener('change', () => {
+    const format = document.getElementById('editor-score-format').value;
+    const input = document.getElementById('editor-score');
+    const ranges = {
+      POINT_100: { max: 100, step: 1, placeholder: '0' },
+      POINT_10_DECIMAL: { max: 10, step: 0.1, placeholder: '0.0' },
+      POINT_10: { max: 10, step: 1, placeholder: '0' },
+      POINT_5: { max: 5, step: 1, placeholder: '0' },
+      POINT_3: { max: 3, step: 1, placeholder: '0' }
+    };
+    const r = ranges[format] || ranges.POINT_100;
+    input.max = r.max;
+    input.step = r.step;
+    input.placeholder = r.placeholder;
+  });
+
+  // Converts a user-entered score (in the selected display format) to the
+  // 0-100 raw score AniList stores internally.
+  function scoreToRaw(format, value) {
+    const v = parseFloat(value);
+    if (isNaN(v)) return null;
+    switch (format) {
+      case 'POINT_10_DECIMAL':
+      case 'POINT_10':
+        return Math.round(v * 10);
+      case 'POINT_5':
+        return Math.round(v * 20);
+      case 'POINT_3':
+        return Math.round(v * 33.33);
+      case 'POINT_100':
+      default:
+        return Math.round(v);
+    }
+  }
+
+  // Shared: POST /api/anilist/list/update with the server-side AniList token.
+  // The browser never holds the bearer token (stripped by /api/config), so all
+  // mutations must go through the backend rather than the direct GraphQL call.
+  async function saveListEntryViaBackend(payload) {
+    const res = await fetch('/api/anilist/list/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Failed to save list entry (HTTP ${res.status})`);
+    return body;
+  }
+
+  document.getElementById('btn-editor-save')?.addEventListener('click', async (e) => {
+    const btn = document.getElementById('btn-editor-save');
+    if (btn.disabled) return;
     const mediaId = parseInt(document.getElementById('editor-media-id').value);
     const status = document.getElementById('editor-status').value;
     const progress = parseInt(document.getElementById('editor-progress').value) || 0;
-    const score = parseInt(document.getElementById('editor-score').value) || 0;
+    const format = document.getElementById('editor-score-format').value;
+    const raw = scoreToRaw(format, document.getElementById('editor-score').value);
 
+    setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Saving...');
     try {
-      const mutation = `
-        mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $scoreRaw: Int) {
-          SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, scoreRaw: $scoreRaw) {
-            id
-            status
-            progress
-          }
-        }
-      `;
-      await queryAniList(mutation, { mediaId, status, progress, scoreRaw: score * 10 });
+      const payload = { mediaId, status, progress };
+      if (raw !== null) payload.scoreRaw = raw;
+      if (activeListEditorEntryId) payload.id = activeListEditorEntryId;
+      await saveListEntryViaBackend(payload);
       showToast('List entry saved successfully!');
       closeModal(DOM.listEditorModal);
       if (state.activeTab === 'lists') loadUserListsData();
-    } catch (e) {
-      showToast(e.message, 'error');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBtnLoading(btn, false);
+    }
+  });
+
+  // Resolve the AniList list-entry id for a media id via the backend collection
+  // (mirrors the Lists tab load path) — needed for DeleteMediaListEntry.
+  async function resolveListEntryId(mediaId) {
+    const res = await fetch(`/api/anilist/user-list?userName=${encodeURIComponent(state.userName || '')}&type=ANIME&perChunk=500`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    for (const l of data.lists || []) {
+      const hit = (l.entries || []).find(en => en.mediaId === mediaId);
+      if (hit) return hit.id;
+    }
+    return null;
+  }
+
+  document.getElementById('btn-editor-delete')?.addEventListener('click', async (e) => {
+    const btn = document.getElementById('btn-editor-delete');
+    if (btn.disabled) return;
+    const mediaId = parseInt(document.getElementById('editor-media-id').value);
+    setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Removing...');
+    try {
+      let entryId = activeListEditorEntryId;
+      if (!entryId) entryId = await resolveListEntryId(mediaId);
+      if (!entryId) throw new Error('No AniList entry found for this media — nothing to remove.');
+      const res = await fetch(`/api/anilist/list/${entryId}`, { method: 'DELETE' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Failed to remove list entry (HTTP ${res.status})`);
+      showToast('List entry removed from AniList.');
+      closeModal(DOM.listEditorModal);
+      if (state.activeTab === 'lists') loadUserListsData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBtnLoading(btn, false);
     }
   });
 
