@@ -182,6 +182,42 @@ class TestWebAPI(unittest.TestCase):
             self.assertIsNotNone(rec)
             self.assertEqual(rec.alternative_title, "New Alt Title")
 
+    def test_patch_anime_fallback_allows_known_local_during_outage(self):
+        """BUG 6 (review fix): with an empty/stale AniList watch list (outage),
+        a media_id already known to the local DB must still PATCH (not 404)."""
+        from unittest.mock import patch
+        from animu.database import db
+        from animu.models import OfflineAnime
+        known_id = 222333
+        # Seed a local record so the fallback presence check finds it
+        db.upsert(known_id, OfflineAnime(media_id=known_id))
+        try:
+            with patch("animu.web.AnimuHTTPHandler.get_anime_list", return_value=[]):
+                conn = http.client.HTTPConnection("127.0.0.1", self.port)
+                payload = json.dumps({"alternativeTitle": "Outage Alt"})
+                conn.request("PATCH", f"/api/anime/{known_id}", body=payload, headers={"Content-Type": "application/json"})
+                res = conn.getresponse()
+                self.assertEqual(res.status, 200)
+                rec = db.get(known_id)
+                self.assertIsNotNone(rec)
+                self.assertEqual(rec.alternative_title, "Outage Alt")
+        finally:
+            db.delete(known_id)
+
+    def test_patch_anime_fallback_still_rejects_unknown_during_outage(self):
+        """BUG 6 (review fix): during an outage, an ID unknown locally AND not in
+        the watch list must still 404 and create no record."""
+        from unittest.mock import patch
+        from animu.database import db
+        unknown_id = 333444
+        with patch("animu.web.AnimuHTTPHandler.get_anime_list", return_value=[]):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            payload = json.dumps({"alternativeTitle": "Nope"})
+            conn.request("PATCH", f"/api/anime/{unknown_id}", body=payload, headers={"Content-Type": "application/json"})
+            res = conn.getresponse()
+            self.assertEqual(res.status, 404)
+            self.assertIsNone(db.get(unknown_id))
+
 
 if __name__ == "__main__":
     unittest.main()
