@@ -637,11 +637,38 @@ class TestMarkdownAndSiteStats(unittest.TestCase):
         self.assertTrue(q.call_args.kwargs["require_auth"])
 
     def test_get_site_statistics_returns_stats(self):
-        stats = {"documents": 1000, "users": 500000}
+        stats = {"anime": {"count": 1000}, "users": 500000}
         with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
             self.client, "_query", return_value={"data": {"SiteStatistics": stats}}
         ):
             self.assertEqual(self.client.get_site_statistics(), stats)
+
+    def test_get_user_query_uses_statistics_not_stats(self):
+        with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
+            self.client, "_query", return_value={"data": {"User": {"id": 1}}}
+        ) as q:
+            self.client.get_user(user_name="Aymr")
+        query_str = q.call_args.args[0]
+        self.assertIn("statistics", query_str)
+        self.assertNotIn("stats {", query_str)
+
+    def test_get_viewer_query_uses_statistics_not_stats(self):
+        with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
+            self.client, "_query", return_value={"data": {"Viewer": {"id": 1}}}
+        ) as q:
+            self.client.get_viewer()
+        query_str = q.call_args.args[0]
+        self.assertIn("statistics", query_str)
+        self.assertNotIn("stats {", query_str)
+
+    def test_get_site_statistics_query_schema(self):
+        with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
+            self.client, "_query", return_value={"data": {"SiteStatistics": {"anime": {"count": 10}}}}
+        ) as q:
+            self.client.get_site_statistics()
+        query_str = q.call_args.args[0]
+        self.assertNotIn("documents", query_str)
+        self.assertIn("SiteStatistics", query_str)
 
     def test_get_anichart_user_returns_data(self):
         chart_data = {"highlightIds": [1, 2], "theme": "dark"}

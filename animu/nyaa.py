@@ -511,4 +511,10 @@ def remove_failed_trace(media_id: int):
         failed_traces.pop(media_id, None)
 
 
+def get_failed_traces_snapshot() -> list:
+    """Return a thread-safe snapshot of all failed traces."""
+    with trace_lock:
+        return list(failed_traces.values())
+
+
 nyaa = NyaaClient()

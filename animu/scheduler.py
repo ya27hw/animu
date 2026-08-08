@@ -187,6 +187,7 @@ class Scheduler:
 
         # Override title dynamically (on deep copy — never mutate the shared
         # anime dict returned by AniList, which callers may reuse)
+        anime["media"]["title"] = dict(anime["media"]["title"])
         anime["media"]["title"]["romaji"] = alternative_title
 
         start_episode = anime["progress"]
@@ -339,6 +340,7 @@ class Scheduler:
 
             if best_combo and best_seed_count > primary_seed_count:
                 primary_torrent = best_combo_torrent
+                anime["media"]["title"] = dict(anime["media"]["title"])
                 anime["media"]["title"]["romaji"] = best_combo["title"]
                 record.alternative_title = best_combo["title"]
                 record.starting_episode = best_combo["episode_offset"]

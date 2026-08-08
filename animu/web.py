@@ -959,8 +959,8 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/search-debug":
             try:
-                from .nyaa import failed_traces
-                self.send_json(200, list(failed_traces.values()))
+                from .nyaa import get_failed_traces_snapshot
+                self.send_json(200, get_failed_traces_snapshot())
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
             
@@ -1657,8 +1657,12 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             
         elif re.match(r'^/api/anime/(\d+)$', path):
             media_id = int(re.match(r'^/api/anime/(\d+)$', path).group(1))
+            watching = self.get_anime_list()
+            if not any(x.get("mediaId") == media_id or x.get("id") == media_id for x in watching):
+                self.send_json(404, {"error": "Anime not in watching list"})
+                return
+
             body = self.read_json_body()
-            
             record = db.get(media_id) or OfflineAnime(media_id=media_id)
             
             if "alternativeTitle" in body:

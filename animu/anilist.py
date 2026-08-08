@@ -1165,17 +1165,9 @@ class AnilistClient:
           User(id: $id, name: $name) {
             id name about avatar { large medium } bannerImage
             isFollowing isFollower
-            stats {
-              count
-              meanScore
-              episodesWatched
-              chaptersRead
-              minutesWatched
-              volumesRead
-              genres { genre meanScore count }
-              tags { tag meanScore count }
-              advancedScores { amount }
-              status { watching completed paused dropped planning }
+            statistics {
+              anime { count meanScore minutesWatched episodesWatched }
+              manga { count meanScore chaptersRead volumesRead }
             }
             favourites {
               anime { nodes { id title { romaji } } }
@@ -1198,12 +1190,9 @@ class AnilistClient:
           Viewer {
             id name about avatar { large medium } bannerImage
             isFollowing isFollower
-            stats {
-              count meanScore episodesWatched chaptersRead minutesWatched volumesRead
-              genres { genre meanScore count }
-              tags { tag meanScore count }
-              advancedScores { amount }
-              status { watching completed paused dropped planning }
+            statistics {
+              anime { count meanScore minutesWatched episodesWatched }
+              manga { count meanScore chaptersRead volumesRead }
             }
             favourites {
               anime { nodes { id title { romaji } } }
@@ -1615,44 +1604,9 @@ class AnilistClient:
         query = """
         query {
           SiteStatistics {
-            documents
-            anime {
-              count
-              meanScore
-              genres { genre meanScore count }
-              tags { tag meanScore count }
-              advancedScores { amount }
-              status { releasing complete paused hiatus abandoned }
-              length {
-                under15 15to30 30to60 60to90 90to120 over120
-              }
-              format { tv tvShort movie special ova ona ncop ncod }
-              score {
-                10 20 30 40 50 60 70 80 90 100
-              }
-            }
-            manga {
-              count
-              meanScore
-              genres { genre meanScore count }
-              tags { tag meanScore count }
-              advancedScores { amount }
-              status { releasing complete frozen }
-              length {
-                under5 5to10 10to20 20to30 30to50 50to100 over100
-              }
-              format { novel manga oneShot }
-              score {
-                10 20 30 40 50 60 70 80 90 100
-              }
-            }
-            users
-            staff
-            studios
-            reviews
-            forums
-            animeUpdates
-            mangaUpdates
+            anime { count meanScore }
+            manga { count meanScore }
+            users staff studios reviews forums
             createdAt updatedAt
           }
         }

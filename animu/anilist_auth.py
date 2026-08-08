@@ -53,6 +53,10 @@ SENSITIVE_CONFIG_FIELDS = {
     "anilist_client_secret",
     "anilist_token_issued_at",
     "webhook",
+    "password",
+    "email_password",
+    "token",
+    "proxy_password",
 }
 
 # ---------------------------------------------------------------------------
