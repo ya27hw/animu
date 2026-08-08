@@ -1177,7 +1177,11 @@ class AnilistClient:
           }
         }
         """
-        variables: Dict[str, Any] = {"id": user_id, "name": user_name}
+        variables: Dict[str, Any] = {}
+        if user_id is not None:
+            variables["id"] = user_id
+        if user_name is not None:
+            variables["name"] = user_name
         resp = self._query(query, variables)
         if resp and "data" in resp and resp["data"]:
             return resp["data"].get("User")
@@ -1604,9 +1608,34 @@ class AnilistClient:
         query = """
         query {
           SiteStatistics {
-            anime { count meanScore }
-            manga { count meanScore }
-            users staff studios reviews forums
+            anime {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
+            manga {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
+            users {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
+            staff {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
+            studios {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
+            reviews {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
+            forums {
+              pageInfo { total currentPage lastPage hasNextPage }
+              nodes { count change date }
+            }
             createdAt updatedAt
           }
         }

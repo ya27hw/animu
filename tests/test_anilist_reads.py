@@ -663,12 +663,29 @@ class TestMarkdownAndSiteStats(unittest.TestCase):
 
     def test_get_site_statistics_query_schema(self):
         with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
-            self.client, "_query", return_value={"data": {"SiteStatistics": {"anime": {"count": 10}}}}
+            self.client, "_query", return_value={"data": {"SiteStatistics": {"anime": {"pageInfo": {"total": 500}}}}}
         ) as q:
             self.client.get_site_statistics()
         query_str = q.call_args.args[0]
         self.assertNotIn("documents", query_str)
         self.assertIn("SiteStatistics", query_str)
+        self.assertIn("nodes { count change date }", query_str)
+        self.assertIn("pageInfo { total currentPage lastPage hasNextPage }", query_str)
+
+    def test_get_user_variables_omit_null_id(self):
+        """BUG A1: passing only a name must not send id:null (AniList 404s on explicit null id)."""
+        with patch("animu.anilist.get_config", return_value=self._cfg()), patch.object(
+            self.client, "_query", return_value={"data": {"User": {"id": 387521, "name": "Aymr"}}}
+        ) as q:
+            self.client.get_user(user_name="Aymr")
+        variables = q.call_args.args[1]
+        self.assertNotIn("id", variables)
+        self.assertEqual(variables["name"], "Aymr")
+        with patch.object(self.client, "_query", return_value={"data": {"User": {"id": 387521}}}) as q2:
+            self.client.get_user(user_id=387521)
+        variables2 = q2.call_args.args[1]
+        self.assertNotIn("name", variables2)
+        self.assertEqual(variables2["id"], 387521)
 
     def test_get_anichart_user_returns_data(self):
         chart_data = {"highlightIds": [1, 2], "theme": "dark"}
