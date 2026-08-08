@@ -6,7 +6,7 @@ from .config import get_config
 from .database import db
 from .models import OfflineAnime
 from .anilist import anilist
-from .nyaa import nyaa
+from .nyaa import nyaa, parse_seeders
 from .qbittorrent import qbit
 from .discord import alert_user, alert_unresolved_anime, clear_alert_history, send_anime_downloaded_hook
 from .utils import fix_anime_season, count_past_relations
@@ -135,7 +135,8 @@ class Scheduler:
         starting_episode = record.starting_episode
         alternative_title = record.alternative_title or anime["media"]["title"]["romaji"]
         
-        # Override title dynamically
+        # Override title dynamically (copy first — never mutate the shared AniList title dict)
+        anime["media"]["title"] = dict(anime["media"]["title"])
         anime["media"]["title"]["romaji"] = alternative_title
 
         start_episode = anime["progress"] + starting_episode
@@ -173,7 +174,7 @@ class Scheduler:
 
         primary_seed_count = 0
         if primary_torrent:
-            primary_seed_count = sum(int(t.get("nyaa:seeders", 0)) for t in primary_torrent)
+            primary_seed_count = sum(parse_seeders(t.get("nyaa:seeders")) for t in primary_torrent)
 
         # Alternative title search logic if not overridden and has no downloaded episodes
         if not record.alternative_title and not record.downloaded_episodes:
@@ -229,7 +230,7 @@ class Scheduler:
                         downloaded_episodes=record.downloaded_episodes,
                         alt_anime_title=combo["title"]
                     )
-                    seed_count = sum(int(t.get("nyaa:seeders", 0)) for t in result) if result else 0
+                    seed_count = sum(parse_seeders(t.get("nyaa:seeders")) for t in result) if result else 0
                     if seed_count > best_seed_count:
                         best_seed_count = seed_count
                         best_combo = combo
@@ -290,8 +291,8 @@ class Scheduler:
     def check(self) -> None:
         """Core check loop: queries AniList collection and checks missing episodes against database."""
         # Clear active traces for new run; failed_traces remains persistent for unresolved items
-        from .nyaa import active_traces, failed_traces, remove_failed_trace
-        active_traces.clear()
+        from .nyaa import clear_active_traces, get_failed_trace_ids, remove_failed_trace, update_failed_trace_timeouts
+        clear_active_traces()
 
         # Sync any unsynced offline local changes first
         try:
@@ -300,13 +301,16 @@ class Scheduler:
             print(f"Local database sync failed: {e}")
             
         anime_list = anilist.get_anime_user_list()
+        if anime_list is None:
+            print("AniList outage: could not fetch watching list (network/GraphQL error). Skipping this cycle.")
+            return
         if not anime_list:
             print("No anime in watching list.")
             return
 
         # Prune failed traces & alert history for anime no longer in watching list
         active_media_ids = {a["mediaId"] for a in anime_list}
-        stale_ids = [mid for mid in list(failed_traces.keys()) if mid not in active_media_ids]
+        stale_ids = [mid for mid in get_failed_trace_ids() if mid not in active_media_ids]
         for mid in stale_ids:
             remove_failed_trace(mid)
             clear_alert_history(mid)
@@ -338,8 +342,7 @@ class Scheduler:
                     print(f"ℹ️ Next run for {anime['media']['title']['romaji']} in {record.timeouts * interval} minutes")
                     record.timeouts -= 1
                     db.upsert(media_id, record)
-                    if media_id in failed_traces:
-                        failed_traces[media_id]["timeouts"] = record.timeouts
+                    update_failed_trace_timeouts(media_id, record.timeouts)
                     continue
 
                 # Compute airing status

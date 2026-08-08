@@ -75,8 +75,12 @@ class AnilistClient:
 
         return None
 
-    def get_watching_list(self) -> List[Dict[str, Any]]:
-        """Fetch user's current watching list with minimal details."""
+    def get_watching_list(self) -> Optional[List[Dict[str, Any]]]:
+        """Fetch user's current watching list with minimal details.
+
+        Returns None when the request fails (network/GraphQL error — outage),
+        [] for a genuinely empty list, or the list of entries.
+        """
         query = """
         query ($userName :String) {
           MediaListCollection(userName: $userName, type: ANIME, status_in: CURRENT) {
@@ -101,16 +105,25 @@ class AnilistClient:
             return []
 
         resp = self._query(query, {"userName": config.ani_user_name})
-        if resp and "data" in resp:
-            data = resp["data"]
-            if data and "MediaListCollection" in data and data["MediaListCollection"]:
-                lists = data["MediaListCollection"].get("lists", [])
-                if lists:
-                    return lists[0].get("entries", [])
+        if resp is None:
+            print("AniList outage: get_watching_list() request failed after retries (network/GraphQL transport error).")
+            return None
+        if "errors" in resp or resp.get("data") is None:
+            print(f"AniList GraphQL error in get_watching_list(): {resp.get('errors') or 'data is null'}")
+            return None
+        data = resp["data"]
+        if data and "MediaListCollection" in data and data["MediaListCollection"]:
+            lists = data["MediaListCollection"].get("lists", [])
+            if lists:
+                return lists[0].get("entries", [])
         return []
 
-    def get_anime_user_list(self) -> List[Dict[str, Any]]:
-        """Fetch user's current watching list with detailed anime info."""
+    def get_anime_user_list(self) -> Optional[List[Dict[str, Any]]]:
+        """Fetch user's current watching list with detailed anime info.
+
+        Returns None when the request fails (network/GraphQL error — outage),
+        [] for a genuinely empty list, or the list of entries.
+        """
         query = """
         query ($userName :String) {
           MediaListCollection(userName: $userName, type: ANIME, status_in: CURRENT) {
@@ -158,12 +171,17 @@ class AnilistClient:
             return []
 
         resp = self._query(query, {"userName": config.ani_user_name})
-        if resp and "data" in resp:
-            data = resp["data"]
-            if data and "MediaListCollection" in data and data["MediaListCollection"]:
-                lists = data["MediaListCollection"].get("lists", [])
-                if lists:
-                    return lists[0].get("entries", [])
+        if resp is None:
+            print("AniList outage: get_anime_user_list() request failed after retries (network/GraphQL transport error).")
+            return None
+        if "errors" in resp or resp.get("data") is None:
+            print(f"AniList GraphQL error in get_anime_user_list(): {resp.get('errors') or 'data is null'}")
+            return None
+        data = resp["data"]
+        if data and "MediaListCollection" in data and data["MediaListCollection"]:
+            lists = data["MediaListCollection"].get("lists", [])
+            if lists:
+                return lists[0].get("entries", [])
         return []
 
     def get_airing_schedule(self, page: int, media_id: int) -> Optional[Dict[str, Any]]:

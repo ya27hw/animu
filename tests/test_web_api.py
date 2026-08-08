@@ -4,7 +4,7 @@ import time
 import http.client
 import json
 from animu.web import AnimuHTTPHandler, http
-from animu.nyaa import failed_traces, record_failed_trace
+from animu.nyaa import record_failed_trace
 
 class TestWebAPI(unittest.TestCase):
     @classmethod

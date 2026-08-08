@@ -84,6 +84,11 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
     def get_anime_list(self) -> List[Dict[str, Any]]:
         """Fetch AniList watch list and merge local PocketBase configurations."""
         anime_list = anilist.get_anime_user_list()
+        if anime_list is None:
+            # Outage: keep the endpoint up but return an empty list; outage is
+            # logged by anilist.py and distinguishable there.
+            print("AniList outage: get_anime_list() could not fetch watching list; returning empty.")
+            anime_list = []
         pb_records = db.get_all()
         pb_map = {r.media_id: r for r in pb_records}
         
@@ -147,8 +152,8 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/search-debug":
             try:
-                from .nyaa import failed_traces
-                self.send_json(200, list(failed_traces.values()))
+                from .nyaa import get_failed_traces
+                self.send_json(200, get_failed_traces())
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
             
@@ -423,7 +428,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 record.downloaded_episodes = []
                 
             db.upsert(media_id, record)
-            cached = db.local_cache.get(str(media_id), {})
+            cached = db.get_cached_record(media_id) or {}
             synced = not cached.get("_unsynced", False)
             self.send_json(200, {"ok": True, "synced": synced,
                 "warning": "Saved locally but PocketBase sync failed." if not synced else None})

@@ -1,19 +1,27 @@
 import unittest
 import time
-from animu.nyaa import failed_traces, active_traces, record_trace, record_failed_trace, remove_failed_trace
+from animu.nyaa import (
+    clear_failed_traces,
+    clear_active_traces,
+    has_failed_trace,
+    get_failed_trace,
+    update_failed_trace_timeouts,
+    record_failed_trace,
+    remove_failed_trace,
+)
 from animu.discord import alert_history, alert_unresolved_anime, clear_alert_history, sanitize_alert_text, get_config
 from animu.models import OfflineAnime
 
 
 class TestSearchDiagnostics(unittest.TestCase):
     def setUp(self):
-        failed_traces.clear()
-        active_traces.clear()
+        clear_failed_traces()
+        clear_active_traces()
         alert_history.clear()
 
     def tearDown(self):
-        failed_traces.clear()
-        active_traces.clear()
+        clear_failed_traces()
+        clear_active_traces()
         alert_history.clear()
 
     def test_persistent_failed_trace_retention(self):
@@ -33,19 +41,23 @@ class TestSearchDiagnostics(unittest.TestCase):
 
         # Record initial failure trace
         record_failed_trace(media_id, anime=anime, record=record, status="NO_RESULTS")
-        self.assertIn(media_id, failed_traces)
-        self.assertTrue(failed_traces[media_id]["unresolved"])
-        self.assertEqual(failed_traces[media_id]["timeouts"], 1)
+        self.assertTrue(has_failed_trace(media_id))
+        trace = get_failed_trace(media_id)
+        assert trace is not None
+        self.assertTrue(trace["unresolved"])
+        self.assertEqual(trace["timeouts"], 1)
 
         # Simulate backoff cycle where search is skipped but trace is preserved
         record.timeouts = 2
-        failed_traces[media_id]["timeouts"] = record.timeouts
-        self.assertIn(media_id, failed_traces)
-        self.assertEqual(failed_traces[media_id]["timeouts"], 2)
+        update_failed_trace_timeouts(media_id, record.timeouts)
+        self.assertTrue(has_failed_trace(media_id))
+        trace = get_failed_trace(media_id)
+        assert trace is not None
+        self.assertEqual(trace["timeouts"], 2)
 
         # Evict on successful resolution
         remove_failed_trace(media_id)
-        self.assertNotIn(media_id, failed_traces)
+        self.assertFalse(has_failed_trace(media_id))
 
     def test_season_and_media_id_separation(self):
         """Verify distinct media IDs for different seasons maintain separate diagnostic traces."""
@@ -64,10 +76,14 @@ class TestSearchDiagnostics(unittest.TestCase):
         record_failed_trace(media_id_s1, anime=anime_s1)
         record_failed_trace(media_id_s2, anime=anime_s2)
 
-        self.assertIn(media_id_s1, failed_traces)
-        self.assertIn(media_id_s2, failed_traces)
-        self.assertEqual(failed_traces[media_id_s1]["anime_title"], "Mob Psycho 100")
-        self.assertEqual(failed_traces[media_id_s2]["anime_title"], "Mob Psycho 100 II")
+        self.assertTrue(has_failed_trace(media_id_s1))
+        self.assertTrue(has_failed_trace(media_id_s2))
+        trace_s1 = get_failed_trace(media_id_s1)
+        trace_s2 = get_failed_trace(media_id_s2)
+        assert trace_s1 is not None
+        assert trace_s2 is not None
+        self.assertEqual(trace_s1["anime_title"], "Mob Psycho 100")
+        self.assertEqual(trace_s2["anime_title"], "Mob Psycho 100 II")
 
     def test_alert_deduplication(self):
         """Verify that repeated unresolved alerts for the same media_id and condition are deduplicated."""

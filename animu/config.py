@@ -127,7 +127,17 @@ def get_config() -> ProfileConfig:
 
     valid_field_names = {f.name for f in fields(ProfileConfig) if f.name != '_extra_fields'}
     init_args = {k: v for k, v in config_dict.items() if k in valid_field_names}
-    
+
+    # Cast numeric fields to int after loading so environment/config string
+    # values do not break callers expecting integers (proxy_port, interval,
+    # offpeak_interval).
+    for num_key in ("proxy_port", "interval", "offpeak_interval"):
+        if num_key in init_args and init_args[num_key] is not None:
+            try:
+                init_args[num_key] = int(init_args[num_key])
+            except (ValueError, TypeError):
+                print(f"Warning: could not cast config value '{num_key}' to int; keeping as-is")
+
     cfg = ProfileConfig(**init_args)
     cfg._extra_fields = extra_fields
     cached_config = cfg

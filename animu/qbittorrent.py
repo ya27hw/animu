@@ -12,6 +12,18 @@ class QbitClient:
         # verify=False is critical to bypass self-signed SSL errors (a major Node.js issue)
         self.client = httpx.Client(verify=False, timeout=15)
 
+    @staticmethod
+    def _extract_sid_from_set_cookie(header: Optional[str]) -> Optional[str]:
+        """Extract the SID value from a raw Set-Cookie response header.
+
+        Handles single headers (``SID=abc; path=/; HttpOnly``) and headers
+        where multiple cookies are comma-joined (``foo=bar, SID=abc; path=/``).
+        """
+        if not header:
+            return None
+        match = re.search(r"(?:^|[,;]\s*)SID=([^;,\s]+)", header)
+        return match.group(1) if match else None
+
     def _authenticate(self) -> bool:
         """Log in to qBittorrent and retrieve the session ID (SID)."""
         config = get_config()
@@ -25,14 +37,16 @@ class QbitClient:
                 headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
             if resp.status_code == 200 and resp.text == "Ok.":
-                # httpx manages cookies automatically, but we also save the SID explicitly
-                sid = self.client.cookies.get("SID")
+                # httpx manages cookies automatically, but we also save the SID
+                # explicitly. The cookie jar can miss it; fall back to parsing
+                # the Set-Cookie header directly.
+                sid = self.client.cookies.get("SID") or self._extract_sid_from_set_cookie(resp.headers.get("set-cookie", ""))
                 if sid:
+                    self.client.cookies.set("SID", sid)
                     self.sid = sid
                     self.expires = time.time() + 3000
                     return True
-                else:
-                    print("Authentication successful but SID cookie not found in response.")
+                print("Authentication successful but SID cookie not found in response.")
             else:
                 print(f"Authentication failed: HTTP {resp.status_code} - {resp.text}")
         except Exception as e:

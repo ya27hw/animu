@@ -800,14 +800,14 @@
                         <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-900 text-slate-400">
                           <i class="fa-solid fa-users mr-1"></i>${c.seeders}
                         </span>
-                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.88 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${c.rating >= 3.70 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-400'}">
                           Score: ${totalScore}
                         </span>
                       </div>
                     </div>
                     <div class="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                       <i class="fa-solid fa-circle-exclamation text-rose-500/80 shrink-0"></i>
-                      <span>Reason: ${c.rejection_reason || 'Score below verification threshold (3.88)'}</span>
+                      <span>Reason: ${c.rejection_reason || 'Score below verification threshold (3.70)'}</span>
                     </div>
                   </div>
                 `;

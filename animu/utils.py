@@ -308,7 +308,7 @@ def verify_query(
         score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating
         
         rejection_reason = ""
-        if score < 3.88:
+        if score < 3.70:
             failed_checks = []
             if not episode_match:
                 failed_checks.append("episode mismatch")
@@ -355,7 +355,7 @@ def verify_query(
             score = float(verify_range_ok) + float(resolution_match) + float(air_date_match_batch) + best_rating
             
             rejection_reason = ""
-            if score < 3.88:
+            if score < 3.70:
                 failed_checks = []
                 if not verify_range_ok:
                     failed_checks.append("batch range mismatch")
@@ -375,7 +375,7 @@ def verify_query(
 
         score = float(is_batch) + float(resolution_match) + float(air_date_match_batch) + best_rating
         rejection_reason = ""
-        if score < 3.88:
+        if score < 3.70:
             failed_checks = []
             if not is_batch:
                 failed_checks.append("not a batch torrent")
