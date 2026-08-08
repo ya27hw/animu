@@ -1632,11 +1632,6 @@ class AnilistClient:
               pageInfo { total currentPage lastPage hasNextPage }
               nodes { count change date }
             }
-            forums {
-              pageInfo { total currentPage lastPage hasNextPage }
-              nodes { count change date }
-            }
-            createdAt updatedAt
           }
         }
         """
