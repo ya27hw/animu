@@ -119,11 +119,26 @@
 
       let retryCount = 0;
       while (true) {
-        const res = await fetch('https://graphql.anilist.co', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ query, variables })
-        });
+        let res;
+        try {
+          res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ query, variables })
+          });
+        } catch (fetchErr) {
+          // AniList rate-limit responses (429) arrive WITHOUT the CORS
+          // Access-Control-Allow-Origin header, so the browser blocks them
+          // before JS ever sees the status — surfacing as a TypeError here.
+          // Retry those network/CORS-level failures with backoff too.
+          if (retryCount < 2) {
+            const backoffSeconds = 2 * (2 ** retryCount);
+            retryCount += 1;
+            await sleep(backoffSeconds * 1000);
+            continue;
+          }
+          throw new Error(fetchErr.message || 'AniList GraphQL request failed');
+        }
 
         if (res.ok) {
           const json = await res.json();
