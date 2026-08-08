@@ -36,9 +36,24 @@
   // writing DOM if it has moved — prevents stale responses rendering into the
   // now-hidden panel after rapid tab switching.
   let tabToken = 0;
+  // Direct AniList reads can fan out across several Discover rails on boot.
+  // Keep them in one FIFO chain so a cold load does not burst the public API.
+  let anilistQueue = Promise.resolve();
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   function isStaleTab(token) {
     return token !== tabToken;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[char]));
   }
 
   // Toast Notifier
@@ -54,7 +69,7 @@
     }`;
 
     const icon = type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-exclamation text-rose-500';
-    toast.innerHTML = `<i class="fa-solid ${icon} text-lg shrink-0"></i><p class="flex-grow">${message}</p>`;
+    toast.innerHTML = `<i class="fa-solid ${icon} text-lg shrink-0"></i><p class="flex-grow">${escapeHtml(message)}</p>`;
 
     wrapper.appendChild(toast);
     setTimeout(() => toast.classList.remove('opacity-0', 'translate-y-4'), 10);
@@ -93,24 +108,49 @@
 
   // AniList GraphQL Direct API Wrapper
   async function queryAniList(query, variables = {}) {
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
+    const run = async () => {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      };
+      if (state.config && state.config.bearerTokenAnilist) {
+        headers['Authorization'] = `Bearer ${state.config.bearerTokenAnilist}`;
+      }
+
+      let retryCount = 0;
+      while (true) {
+        const res = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ query, variables })
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          return json.data;
+        }
+
+        if (res.status === 429 && retryCount < 2) {
+          const retryAfterHeader = res.headers?.get?.('Retry-After');
+          const retryAfter = Number.parseFloat(retryAfterHeader || '');
+          const backoffSeconds = 2 * (2 ** retryCount);
+          const waitSeconds = Number.isFinite(retryAfter) && retryAfter >= 0
+            ? Math.max(retryAfter, backoffSeconds)
+            : backoffSeconds;
+          retryCount += 1;
+          await sleep(waitSeconds * 1000);
+          continue;
+        }
+
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.errors?.[0]?.message || `AniList GraphQL HTTP ${res.status}`);
+      }
     };
-    if (state.config && state.config.bearerTokenAnilist) {
-      headers['Authorization'] = `Bearer ${state.config.bearerTokenAnilist}`;
-    }
-    const res = await fetch('https://graphql.anilist.co', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query, variables })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.errors?.[0]?.message || `AniList GraphQL HTTP ${res.status}`);
-    }
-    const json = await res.json();
-    return json.data;
+
+    // Promise.then(run, run) also releases the queue after a rejected request.
+    const result = anilistQueue.then(run, run);
+    anilistQueue = result.catch(() => {});
+    return result;
   }
 
   // Local Server API Wrappers
@@ -1491,8 +1531,34 @@
   // ==========================================
   // TAB 5: SOCIAL HUB (ACTIVITIES & PROFILES)
   // ==========================================
+  function switchSocialTab(tabName) {
+    const validTabs = ['feed', 'profile', 'messages'];
+    const activeTab = validTabs.includes(tabName) ? tabName : 'feed';
+    state.socialTab = activeTab;
+
+    document.querySelectorAll('.social-tab-btn').forEach(btn => {
+      const isActive = btn.dataset.socialTab === activeTab;
+      btn.classList.toggle('active-social-tab', isActive);
+      btn.classList.toggle('bg-violet-600', isActive);
+      btn.classList.toggle('text-white', isActive);
+      btn.classList.toggle('text-slate-400', !isActive);
+      btn.classList.toggle('hover:text-white', !isActive);
+    });
+
+    document.querySelectorAll('[id^="social-content-"]').forEach(content => {
+      content.classList.toggle('hidden', content.id !== `social-content-${activeTab}`);
+    });
+
+    // Keep the existing feed refresh behavior when returning to Activity Feed.
+    if (activeTab === 'feed') loadActivityFeed();
+  }
+
+  document.querySelectorAll('.social-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchSocialTab(btn.dataset.socialTab));
+  });
+
   async function loadSocial() {
-    loadActivityFeed();
+    switchSocialTab(state.socialTab);
   }
 
   async function loadActivityFeed() {
@@ -1622,6 +1688,127 @@
     } finally {
       setBtnLoading(btn, false);
     }
+  });
+
+  function renderProfileMessage(message, type = 'error') {
+    const display = document.getElementById('user-profile-display');
+    if (!display) return;
+    display.classList.remove('hidden');
+    const isLoading = type === 'loading';
+    display.innerHTML = `
+      <div class="py-8 text-center ${isLoading ? 'text-slate-400' : 'text-rose-500'}">
+        <i class="fa-solid ${isLoading ? 'fa-spinner fa-spin text-violet-500' : 'fa-circle-exclamation'} text-xl mb-2"></i>
+        <p class="text-xs font-semibold">${escapeHtml(message)}</p>
+      </div>
+    `;
+  }
+
+  function renderUserProfile(user, searchedName) {
+    const display = document.getElementById('user-profile-display');
+    if (!display) return;
+
+    // The current backend returns AniList's `stats`/`favourites` fields under
+    // `user`; accept the `statistics.anime` shape too for API compatibility.
+    const stats = user.statistics?.anime || user.stats?.anime || user.stats || {};
+    const favourites = user.favourites?.anime?.nodes
+      || user.favourites?.anime
+      || user.favorites?.anime?.nodes
+      || [];
+    const favouriteAnime = Array.isArray(favourites) ? favourites : [];
+    const displayName = user.name || searchedName;
+    const avatar = typeof user.avatar === 'string'
+      ? user.avatar
+      : user.avatar?.large || user.avatar?.medium || '';
+    const safeAvatar = /^https?:\/\//i.test(avatar) ? escapeHtml(avatar) : '';
+    const about = escapeHtml(user.about || 'No biography provided.').replace(/\r?\n/g, '<br>');
+    const formatNumber = value => value === null || value === undefined || value === ''
+      ? '—'
+      : escapeHtml(Number(value).toLocaleString());
+
+    const favouriteHtml = favouriteAnime.length
+      ? favouriteAnime.slice(0, 6).map(favourite => `
+          <li class="px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            ${escapeHtml(formatTitle(favourite?.title || favourite))}
+          </li>
+        `).join('')
+      : '<li class="text-xs text-slate-400">No anime favourites listed.</li>';
+
+    display.classList.remove('hidden');
+    display.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-start gap-4">
+        ${safeAvatar
+          ? `<img src="${safeAvatar}" alt="${escapeHtml(displayName)} avatar" class="w-20 h-20 rounded-2xl object-cover border border-violet-500/30 shrink-0" />`
+          : '<div class="w-20 h-20 rounded-2xl bg-violet-600/15 text-violet-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-2xl"></i></div>'}
+        <div class="min-w-0 space-y-1">
+          <h3 class="font-['Outfit'] font-bold text-xl text-slate-800 dark:text-slate-100">${escapeHtml(displayName)}</h3>
+          <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">${about}</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div class="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Anime Count</p>
+          <p class="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">${formatNumber(stats.count)}</p>
+        </div>
+        <div class="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Mean Score</p>
+          <p class="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">${formatNumber(stats.meanScore)}%</p>
+        </div>
+        <div class="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Minutes Watched</p>
+          <p class="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">${formatNumber(stats.minutesWatched)}</p>
+        </div>
+        <div class="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Episodes Watched</p>
+          <p class="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">${formatNumber(stats.episodesWatched)}</p>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">Top Anime Favourites</h4>
+        <ul class="grid grid-cols-1 sm:grid-cols-2 gap-2">${favouriteHtml}</ul>
+      </div>
+    `;
+  }
+
+  async function searchUserProfile() {
+    const input = document.getElementById('social-user-search');
+    const btn = document.getElementById('btn-search-user-profile');
+    const username = input?.value.trim() || '';
+    if (!username) {
+      renderProfileMessage('Enter an AniList username to search.');
+      showToast('Enter an AniList username to search.', 'error');
+      return;
+    }
+
+    renderProfileMessage('Looking up AniList profile…', 'loading');
+    setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Searching...');
+    try {
+      const res = await fetch(`/api/anilist/user/${encodeURIComponent(username)}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = body.error || body.message || `Profile lookup failed (HTTP ${res.status})`;
+        if (res.status === 404) {
+          throw new Error(`AniList user "${username}" was not found.`);
+        }
+        throw new Error(detail);
+      }
+
+      const user = body.user || body.viewer || body;
+      if (!user || !user.name) throw new Error('AniList returned an empty user profile.');
+      renderUserProfile(user, username);
+    } catch (e) {
+      const message = e.message || 'Failed to load AniList user profile.';
+      renderProfileMessage(message);
+      showToast(message, 'error');
+    } finally {
+      setBtnLoading(btn, false);
+    }
+  }
+
+  document.getElementById('btn-search-user-profile')?.addEventListener('click', searchUserProfile);
+  document.getElementById('social-user-search')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') searchUserProfile();
   });
 
 
@@ -2094,7 +2281,14 @@
   document.getElementById('btn-anilist-oauth')?.addEventListener('click', async () => {
     try {
       const res = await fetch('/api/anilist/auth/url?grant=token');
-      if (!res.ok) throw new Error('Could not generate AniList auth URL.');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const detail = body.error || body.message || `HTTP ${res.status}`;
+        const setupHint = /client id.*not configured/i.test(detail)
+          ? ' — add anilistClientId to profile.json'
+          : '';
+        throw new Error(`OAuth setup incomplete: ${detail}${setupHint}`);
+      }
       const data = await res.json();
       const url = data.authUrl || data.url;
       if (!url) throw new Error('No auth URL returned.');
@@ -2121,7 +2315,8 @@
         }
       }, 1000);
     } catch (err) {
-      showToast(`Auth error: ${err.message}`, 'error');
+      const message = err.message || 'Could not generate AniList auth URL.';
+      showToast(message.startsWith('OAuth setup incomplete:') ? message : `Auth error: ${message}`, 'error');
     }
   });
 
