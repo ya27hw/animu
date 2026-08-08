@@ -1657,10 +1657,18 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             
         elif re.match(r'^/api/anime/(\d+)$', path):
             media_id = int(re.match(r'^/api/anime/(\d+)$', path).group(1))
+            # Guard against phantom records: only allow overrides for anime that
+            # exist in the user's AniList watching list. If the (cached) watch
+            # list is empty during an extended AniList outage, fall back to a
+            # local PocketBase/cache presence check so legitimate overrides do
+            # not 404 while the upstream is unreachable.
             watching = self.get_anime_list()
-            if not any(x.get("mediaId") == media_id or x.get("id") == media_id for x in watching):
-                self.send_json(404, {"error": "Anime not in watching list"})
-                return
+            is_watching = any(x.get("mediaId") == media_id or x.get("id") == media_id for x in watching)
+            if not is_watching:
+                known_local = db.get(media_id) is not None
+                if not known_local:
+                    self.send_json(404, {"error": "Anime not in watching list"})
+                    return
 
             body = self.read_json_body()
             record = db.get(media_id) or OfflineAnime(media_id=media_id)
