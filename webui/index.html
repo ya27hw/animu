@@ -76,46 +76,48 @@
         </div>
         <div class="hidden sm:flex flex-col">
           <span class="font-['Outfit'] font-extrabold text-xl tracking-tight bg-gradient-to-r from-violet-600 to-pink-500 bg-clip-text text-transparent">Animu</span>
-          <span class="text-[10px] text-slate-400 font-semibold tracking-wider uppercase -mt-1">AniList Client</span>
+          <span class="text-[10px] text-slate-400 font-semibold tracking-wider uppercase mt-0.5">AniList Client</span>
         </div>
       </a>
 
       <!-- Navigation Tabs (Desktop) -->
-      <nav class="hidden lg:flex items-center gap-1 bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 rounded-2xl shadow-inner overflow-x-auto max-w-3xl">
-        <button data-tab="discover" class="nav-tab active-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-['Outfit']">
-          <i class="fa-solid fa-compass text-xs"></i>Discover
-        </button>
-        <button data-tab="watching" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-tv text-xs"></i>Watching
-        </button>
-        <button data-tab="lists" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-list-check text-xs"></i>Lists
-        </button>
-        <button data-tab="search" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-magnifying-glass text-xs"></i>Search
-        </button>
-        <button data-tab="social" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-users text-xs"></i>Social
-        </button>
-        <button data-tab="stats" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-chart-pie text-xs"></i>Stats
-        </button>
-        <button data-tab="history" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-clock-rotate-left text-xs"></i>History
-        </button>
-        <button data-tab="logs" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-terminal text-xs"></i>Logs
-        </button>
-        <button data-tab="settings" class="nav-tab flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-['Outfit']">
-          <i class="fa-solid fa-sliders text-xs"></i>Settings
-        </button>
+      <nav class="hidden lg:flex flex-1 min-w-0 mx-4 lg:mx-6 items-center bg-slate-100 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/40 p-1 rounded-2xl shadow-inner overflow-x-auto no-scrollbar">
+        <div class="flex items-center gap-1 w-max mx-auto">
+          <button data-tab="discover" class="nav-tab active-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 bg-violet-600 text-white shadow-md shadow-violet-500/25 hover:bg-violet-700 hover:text-white dark:hover:text-white">
+            <i class="fa-solid fa-compass text-xs"></i>Discover
+          </button>
+          <button data-tab="watching" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-tv text-xs"></i>Watching
+          </button>
+          <button data-tab="lists" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-list-check text-xs"></i>Lists
+          </button>
+          <button data-tab="search" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-magnifying-glass text-xs"></i>Search
+          </button>
+          <button data-tab="social" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-users text-xs"></i>Social
+          </button>
+          <button data-tab="stats" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-chart-pie text-xs"></i>Stats
+          </button>
+          <button data-tab="history" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-clock-rotate-left text-xs"></i>History
+          </button>
+          <button data-tab="logs" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-terminal text-xs"></i>Logs
+          </button>
+          <button data-tab="settings" class="nav-tab flex items-center gap-1.5 px-4 h-10 text-xs font-semibold rounded-xl transition-all duration-200 cursor-pointer text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 font-['Outfit'] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <i class="fa-solid fa-sliders text-xs"></i>Settings
+          </button>
+        </div>
       </nav>
 
       <!-- Header Controls (Notifications & Theme) -->
       <div class="flex items-center gap-2">
         <!-- Notifications Bell & Dropdown -->
         <div class="relative">
-          <button id="notif-btn" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm relative">
+          <button id="notif-btn" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
             <i class="fa-solid fa-bell text-base"></i>
             <span id="notif-badge" class="hidden absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold w-4.5 h-4.5 rounded-full flex items-center justify-center animate-pulse">0</span>
           </button>
@@ -138,13 +140,13 @@
         </div>
 
         <!-- Theme Toggle -->
-        <button id="theme-toggle" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm">
+        <button id="theme-toggle" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
           <i class="fa-solid fa-moon dark:hidden text-base"></i>
           <i class="fa-solid fa-sun hidden dark:block text-base"></i>
         </button>
 
         <!-- Mobile Hamburger Button -->
-        <button id="hamburger-btn" class="lg:hidden w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm" aria-label="Open menu">
+        <button id="hamburger-btn" class="lg:hidden w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-colors duration-200 cursor-pointer shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label="Open menu">
           <i class="fa-solid fa-bars text-lg"></i>
         </button>
       </div>
@@ -153,7 +155,7 @@
 
     <!-- Mobile Navigation Panel -->
     <div id="mobile-menu" class="lg:hidden overflow-hidden max-h-0 transition-all duration-300 ease-in-out border-t border-slate-200/50 dark:border-slate-800/50 bg-white/95 dark:bg-[#0f1524]/95 backdrop-blur-xl">
-      <div class="px-4 py-3 grid grid-cols-2 gap-1.5">
+      <div class="px-4 py-3 grid grid-cols-3 gap-1.5">
         <button data-tab="discover" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
           <i class="fa-solid fa-compass text-violet-500 w-4"></i>Discover
         </button>
@@ -178,7 +180,7 @@
         <button data-tab="logs" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
           <i class="fa-solid fa-terminal text-violet-500 w-4"></i>Logs
         </button>
-        <button data-tab="settings" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit'] col-span-2">
+        <button data-tab="settings" class="mobile-nav-tab flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-violet-50 dark:hover:bg-slate-800 font-['Outfit']">
           <i class="fa-solid fa-sliders text-violet-500 w-4"></i>Settings
         </button>
       </div>

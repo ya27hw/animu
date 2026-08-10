@@ -497,12 +497,23 @@
     DOM.navTabs.forEach(btn => {
       const match = btn.getAttribute('data-tab') === tabName;
       btn.classList.toggle('active-tab', match);
-      btn.classList.toggle('bg-white', match);
-      btn.classList.toggle('dark:bg-slate-800', match);
-      btn.classList.toggle('text-slate-900', match);
-      btn.classList.toggle('dark:text-white', match);
-      btn.classList.toggle('shadow-sm', match);
+      btn.classList.toggle('bg-violet-600', match);
+      btn.classList.toggle('text-white', match);
+      btn.classList.toggle('shadow-md', match);
+      btn.classList.toggle('shadow-violet-500/25', match);
+      if (match) {
+        btn.setAttribute('aria-current', 'page');
+        btn.classList.add('hover:bg-violet-700');
+      } else {
+        btn.removeAttribute('aria-current');
+        btn.classList.remove('hover:bg-violet-700');
+      }
     });
+
+    const activeNavBtn = [...DOM.navTabs].find(b => b.getAttribute('data-tab') === tabName);
+    if (activeNavBtn && activeNavBtn.offsetParent !== null) {
+      activeNavBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
 
     DOM.mobileNavTabs.forEach(btn => {
       const match = btn.getAttribute('data-tab') === tabName;
