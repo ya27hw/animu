@@ -27,7 +27,8 @@
     socialTab: 'feed',
     activeMediaDetail: null,
     activeListEditorMedia: null,
-    listEntriesByMedia: {}
+    listEntriesByMedia: {},
+    listEntriesLoaded: false
   };
 
   const expandedHistoryIds = new Set();
@@ -1038,6 +1039,30 @@
   // ==========================================
   // TAB 3: LISTS (FULL ANILIST COLLECTION)
   // ==========================================
+  // Fetch the user's full AniList collection once per session so list
+  // membership is known from the first page load (detail badges, editor
+  // prefill) without requiring a visit to the Lists tab.
+  let listEntriesLoadPromise = null;
+  async function ensureListEntriesLoaded() {
+    if (state.listEntriesLoaded) return true;
+    if (!listEntriesLoadPromise) {
+      listEntriesLoadPromise = (async () => {
+        try {
+          const params = new URLSearchParams({ userName: state.userName || '', type: 'ANIME' });
+          const res = await fetch(`/api/anilist/user-list?${params.toString()}`);
+          if (!res.ok) return false;
+          const data = await res.json();
+          const collections = data.lists || [];
+          state.listEntriesByMedia = {};
+          collections.forEach(l => (l.entries || []).forEach(e => { state.listEntriesByMedia[e.mediaId] = e; }));
+          state.listEntriesLoaded = true;
+          return true;
+        } catch { return false; }
+      })();
+    }
+    try { return await listEntriesLoadPromise; } finally { listEntriesLoadPromise = null; }
+  }
+
   async function loadLists() {
     loadUserListsData();
   }
@@ -1073,6 +1098,7 @@
           state.listEntriesByMedia[e.mediaId] = e;
         });
       });
+      state.listEntriesLoaded = true;
 
       // Filter by status group
       if (state.listsStatusGroup !== 'ALL') {
@@ -1181,8 +1207,14 @@
     try {
       const newEp = currentEp + 1;
       await saveListEntryViaBackend({ mediaId, progress: newEp });
+      if (state.listEntriesByMedia[mediaId]) {
+        state.listEntriesByMedia[mediaId].progress = newEp;
+      }
       showToast(`Updated progress to Episode ${newEp}!`);
       loadUserListsData();
+      if (state.activeMediaDetail && state.activeMediaDetail.id === mediaId) {
+        openMediaDetail(mediaId);
+      }
     } catch (e) {
       showToast(e.message, 'error');
     }
@@ -2346,6 +2378,20 @@
   });
 
 
+  function listStatusLabel(status) {
+    if (!status) return '';
+    const map = {
+      CURRENT: 'Watching',
+      REPEATING: 'Re-watching',
+      COMPLETED: 'Completed',
+      PAUSED: 'Paused',
+      DROPPED: 'Dropped',
+      PLANNING: 'Planning'
+    };
+    if (map[status]) return map[status];
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  }
+
   // ==========================================
   // FULL-SCREEN MEDIA DETAIL MODAL RENDERER
   // ==========================================
@@ -2417,9 +2463,11 @@
       const data = await queryAniList(query, { id: mediaId });
       const m = data.Media;
       state.activeMediaDetail = m;
+      await ensureListEntriesLoaded();
 
       const title = formatTitle(m.title);
       const isDownloaded = state.animeList.some(a => a.mediaId === m.id);
+      const listEntry = state.listEntriesByMedia[m.id] || null;
 
       // Score distribution SVG histogram generator
       const scoreDist = m.stats?.scoreDistribution || [];
@@ -2446,6 +2494,7 @@
                   <span class="px-2.5 py-1 rounded-xl bg-violet-600/20 text-violet-400 text-xs font-bold uppercase">${m.format || 'TV'}</span>
                   <span class="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-400 text-xs font-bold">${m.status}</span>
                   ${isDownloaded ? '<span class="px-2.5 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold"><i class="fa-solid fa-check mr-1"></i>In Watching List</span>' : ''}
+                  ${listEntry ? `<span class="px-2.5 py-1 rounded-xl bg-violet-600/20 text-violet-300 text-xs font-bold"><i class="fa-solid fa-bookmark mr-1"></i>In Your List · ${listStatusLabel(listEntry.status)}${(listEntry.progress > 0 || m.episodes) ? ` · Ep ${listEntry.progress || 0}/${m.episodes || '?'}` : ''}</span>` : ''}
                 </div>
                 <h2 class="text-2xl sm:text-3xl font-extrabold font-['Outfit'] text-slate-900 dark:text-white leading-tight">${title}</h2>
                 <div class="flex items-center gap-4 text-xs font-bold text-slate-400">
@@ -2457,7 +2506,7 @@
                 <!-- Action Toolbar -->
                 <div class="flex flex-wrap gap-3 pt-3">
                   <button onclick="openListEditor(${m.id})" class="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-lg shadow-violet-500/20 text-xs cursor-pointer">
-                    Add / Edit List Entry
+                    <i class="fa-solid ${listEntry ? 'fa-pen' : 'fa-plus'} mr-1"></i>${listEntry ? 'Edit List Entry' : 'Add to List'}
                   </button>
                   <button onclick="openNyaaDialog(${m.id})" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs cursor-pointer">
                     Search Nyaa Torrents
@@ -2545,7 +2594,8 @@
   // DeleteMediaListEntry) is resolved from the loaded collection or fetched.
   let activeListEditorEntryId = null;
 
-  window.openListEditor = function(mediaId, entryId) {
+  window.openListEditor = async function(mediaId, entryId) {
+    await ensureListEntriesLoaded();
     state.activeListEditorMedia = mediaId;
     // Prefer the caller-provided entry id; fall back to the loaded collection.
     const entry = state.listEntriesByMedia ? state.listEntriesByMedia[mediaId] : null;
@@ -2567,6 +2617,16 @@
       const d = entry.completedAt;
       document.getElementById('editor-finish-date').value = d.year ? `${d.year}-${String(d.month || 1).padStart(2, '0')}-${String(d.day || 1).padStart(2, '0')}` : '';
     }
+
+    const btnDelete = document.getElementById('btn-editor-delete');
+    if (btnDelete) {
+      btnDelete.style.display = entry ? '' : 'none';
+    }
+    const titleEl = document.getElementById('list-editor-title');
+    if (titleEl) {
+      titleEl.textContent = entry ? 'Edit List Entry' : 'Add to List';
+    }
+
     openModal(DOM.listEditorModal);
   };
 
@@ -2638,16 +2698,30 @@
     const progress = parseInt(document.getElementById('editor-progress').value) || 0;
     const format = document.getElementById('editor-score-format').value;
     const raw = scoreToRaw(format, document.getElementById('editor-score').value);
+    const notes = document.getElementById('editor-notes')?.value || '';
+    const repeat = parseInt(document.getElementById('editor-repeat')?.value) || 0;
 
     setBtnLoading(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Saving...');
     try {
-      const payload = { mediaId, status, progress };
+      const payload = { mediaId, status, progress, notes, repeat };
       if (raw !== null) payload.scoreRaw = raw;
       if (activeListEditorEntryId) payload.id = activeListEditorEntryId;
-      await saveListEntryViaBackend(payload);
+      const body = await saveListEntryViaBackend(payload);
       showToast('List entry saved successfully!');
+
+      const savedId = (body && (body.id || body.SaveMediaListEntry?.id)) || activeListEditorEntryId || (state.listEntriesByMedia[mediaId] && state.listEntriesByMedia[mediaId].id) || null;
+      state.listEntriesByMedia[mediaId] = {
+        ...(state.listEntriesByMedia[mediaId] || {}),
+        id: savedId, mediaId, status, progress, notes, repeat,
+        score: raw !== null ? raw : (state.listEntriesByMedia[mediaId] ? state.listEntriesByMedia[mediaId].score : 0),
+        updatedAt: Math.floor(Date.now() / 1000)
+      };
+
       closeModal(DOM.listEditorModal);
       if (state.activeTab === 'lists') loadUserListsData();
+      if (state.activeMediaDetail && state.activeMediaDetail.id === mediaId) {
+        openMediaDetail(mediaId);
+      }
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -2681,8 +2755,12 @@
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Failed to remove list entry (HTTP ${res.status})`);
       showToast('List entry removed from AniList.');
+      delete state.listEntriesByMedia[mediaId];
       closeModal(DOM.listEditorModal);
       if (state.activeTab === 'lists') loadUserListsData();
+      if (state.activeMediaDetail && state.activeMediaDetail.id === mediaId) {
+        openMediaDetail(mediaId);
+      }
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -2801,6 +2879,7 @@
   }).catch(() => {});
 
   switchTab('discover');
+  ensureListEntriesLoaded();
   pollNotifications();
   setInterval(pollNotifications, 60000);
 
