@@ -4,6 +4,11 @@ import time
 from typing import List, Dict, Any, Optional
 from .config import get_config
 
+# Torrent verification score threshold (title similarity + episode/resolution/air-date
+# match bonuses must reach this to be accepted).
+SCORE_THRESHOLD = 3.70
+
+
 def dice_coefficient(a: str, b: str) -> float:
     """Calculates Sorenson-Dice similarity coefficient for two strings using bigrams."""
     if not a or not b:
@@ -318,7 +323,6 @@ def verify_query(
         )
 
         score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating
-        SCORE_THRESHOLD = 3.70
 
         rejection_reason = ""
         if score < SCORE_THRESHOLD:
