@@ -11,7 +11,7 @@
     history: [],
     notifications: [],
     unreadNotifCount: 0,
-    discoverSeason: 'SPRING_2026',
+    discoverSeason: `${getCurrentSeason().season}_${getCurrentSeason().year}`,
     discoverChartTab: 'Airing',
     hideOnMyList: false,
     listsMediaType: 'ANIME',
@@ -30,6 +30,18 @@
     listEntriesByMedia: {},
     listEntriesLoaded: false
   };
+
+  // Real current AniList season (WINTER Jan-Mar, SPRING Apr-Jun, SUMMER Jul-Sep,
+  // FALL Oct-Dec) — used for the chart's default season and seasonal rails.
+  function getCurrentSeason() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1; // 1-12
+    if (month >= 1 && month <= 3) return { season: 'WINTER', year };
+    if (month >= 4 && month <= 6) return { season: 'SPRING', year };
+    if (month >= 7 && month <= 9) return { season: 'SUMMER', year };
+    return { season: 'FALL', year };
+  }
 
   const expandedHistoryIds = new Set();
   let downloadsCollapsed = false;
@@ -625,7 +637,7 @@
   async function loadRails() {
     const rails = [
       { id: 'rail-trending', sort: 'TRENDING_DESC', sparkline: true },
-      { id: 'rail-popular-season', sort: 'POPULARITY_DESC', season: 'SPRING', year: 2026 },
+      { id: 'rail-popular-season', sort: 'POPULARITY_DESC', season: getCurrentSeason().season, year: getCurrentSeason().year },
       { id: 'rail-upcoming', sort: 'POPULARITY_DESC', status: 'NOT_YET_RELEASED' },
       { id: 'rail-all-time', sort: 'POPULARITY_DESC' },
       { id: 'rail-top-100', sort: 'SCORE_DESC' }
@@ -721,6 +733,15 @@
       loadSeasonalChartGrid();
     });
   });
+
+  // Activate the real current season chip on load (markup has no hardcoded active).
+  const currentSeasonBtn = document.querySelector(
+    `.discover-season-btn[data-season-tab="${state.discoverSeason}"]`
+  );
+  if (currentSeasonBtn) {
+    currentSeasonBtn.classList.add('bg-violet-600', 'text-white');
+    currentSeasonBtn.classList.remove('text-slate-400');
+  }
 
   document.querySelectorAll('.chart-subtab').forEach(btn => {
     btn.addEventListener('click', (e) => {

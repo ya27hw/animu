@@ -290,38 +290,31 @@
       </div>
 
       <!-- AniChart-Style Seasonal Grid -->
-      <div class="rounded-3xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-6 shadow-sm space-y-6">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-          <div>
-            <h2 class="text-2xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5">
-              <i class="fa-solid fa-layer-group text-violet-500"></i>Seasonal Anime Chart
-            </h2>
-            <p class="text-xs text-slate-400">Interactive AniChart-style overview with airing countdowns and score ranks.</p>
+      <div class="rounded-2xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-5 shadow-sm space-y-4">
+        <!-- Title row + hide toggle -->
+        <div class="flex items-center justify-between gap-4">
+          <h2 class="text-lg sm:text-xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5 min-w-0">
+            <i class="fa-solid fa-layer-group text-violet-500"></i>Seasonal Anime Chart
+          </h2>
+          <label class="flex items-center gap-2 text-xs font-semibold text-slate-400 cursor-pointer select-none shrink-0">
+            <input type="checkbox" id="hide-my-list-toggle" class="w-4 h-4 accent-violet-600 rounded cursor-pointer" />
+            Hide on my list
+          </label>
+        </div>
+
+        <!-- Filter toolbar: season + status selectors, left-aligned -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
+            <button data-season-tab="SPRING_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Spring 2026</button>
+            <button data-season-tab="SUMMER_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Summer 2026</button>
+            <button data-season-tab="FALL_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Fall 2026</button>
+            <button data-season-tab="WINTER_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Winter 2026</button>
           </div>
-
-          <!-- Controls -->
-          <div class="flex flex-wrap items-center gap-3">
-            <!-- Season Selector -->
-            <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
-              <button data-season-tab="SPRING_2026" class="discover-season-btn px-3 py-1.5 rounded-lg bg-violet-600 text-white">Spring 2026</button>
-              <button data-season-tab="SUMMER_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Summer 2026</button>
-              <button data-season-tab="FALL_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Fall 2026</button>
-              <button data-season-tab="WINTER_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Winter 2026</button>
-            </div>
-
-            <!-- Filter Tabs -->
-            <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
-              <button data-chart-subtab="Airing" class="chart-subtab active-subtab px-3 py-1.5 rounded-lg bg-violet-600 text-white">Airing</button>
-              <button data-chart-subtab="Upcoming" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Upcoming</button>
-              <button data-chart-subtab="TBA" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">TBA</button>
-              <button data-chart-subtab="Archive" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Archive</button>
-            </div>
-
-            <!-- Hide Items on My List Toggle -->
-            <label class="flex items-center gap-2 text-xs font-semibold text-slate-400 cursor-pointer select-none">
-              <input type="checkbox" id="hide-my-list-toggle" class="w-4 h-4 accent-violet-600 rounded cursor-pointer" />
-              Hide on my list
-            </label>
+          <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
+            <button data-chart-subtab="Airing" class="chart-subtab active-subtab px-3 py-1.5 rounded-lg bg-violet-600 text-white">Airing</button>
+            <button data-chart-subtab="Upcoming" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Upcoming</button>
+            <button data-chart-subtab="TBA" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">TBA</button>
+            <button data-chart-subtab="Archive" class="chart-subtab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Archive</button>
           </div>
         </div>
 
