@@ -572,26 +572,25 @@
     if (!feed) return;
     const token = tabToken;
     try {
-      const query = `
-        query {
-          Page(page: 1, perPage: 12) {
-            airingSchedules(airingAt_greater: 0, sort: TIME) {
-              episode
-              airingAt
-              media {
-                id
-                title { romaji english native }
-                coverImage { medium }
-              }
-            }
-          }
-        }
-      `;
-      const data = await queryAniList(query);
+      const res = await fetch('/api/anilist/airing-today?hours=24');
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Failed to load schedule (HTTP ${res.status})`);
+      }
+      const data = await res.json();
       if (isStaleTab(token)) return;
-      const schedules = data.Page.airingSchedules || [];
+      const rawEntries = data.entries || [];
+      const schedules = rawEntries.map(e => ({
+        episode: e.episode,
+        airingAt: e.airingAt,
+        media: {
+          id: e.mediaId,
+          title: { romaji: e.romaji, english: e.english } || e.title,
+          coverImage: { medium: e.coverImage }
+        }
+      }));
       if (schedules.length === 0) {
-        feed.innerHTML = '<div class="text-slate-400 py-2">No airing schedule available for today.</div>';
+        feed.innerHTML = '<div class="text-slate-400 py-2">No titles from your list airing today.</div>';
         return;
       }
       // Dedupe re-runs / multiple daily slots: keep the earliest airing per media id.

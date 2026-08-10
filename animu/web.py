@@ -2,6 +2,7 @@ import http.server
 import json
 import os
 import subprocess
+import time
 import httpx
 import re
 import posixpath
@@ -639,6 +640,45 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(200, result)
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
+
+        elif path == "/api/anilist/airing-today":
+            params = urllib.parse.parse_qs(url.query)
+            try:
+                hours = int(params.get("hours", ["24"])[0])
+                hours = max(1, min(168, hours))
+            except ValueError:
+                hours = 24
+            now = time.time()
+            entries = anilist.get_anime_user_list() or []
+            upcoming = []
+            for e in entries:
+                media = e.get("media") or {}
+                nae = media.get("nextAiringEpisode") or {}
+                time_until = nae.get("timeUntilAiring")
+                if time_until is None:
+                    continue
+                try:
+                    time_until = int(time_until)
+                except (TypeError, ValueError):
+                    continue
+                if not (0 <= time_until <= hours * 3600):
+                    continue
+                title = media.get("title") or {}
+                cover = media.get("coverImage") or {}
+                airing_at = int(now + time_until)
+                upcoming.append({
+                    "mediaId": e.get("mediaId"),
+                    "title": title.get("romaji") or title.get("english") or "Untitled",
+                    "romaji": title.get("romaji"),
+                    "english": title.get("english"),
+                    "coverImage": cover.get("medium") or cover.get("large") or "",
+                    "episode": nae.get("episode"),
+                    "airingAt": airing_at,
+                    "timeUntilAiring": time_until,
+                    "progress": e.get("progress", 0),
+                })
+            upcoming.sort(key=lambda x: x["timeUntilAiring"])
+            self.send_json(200, {"entries": upcoming, "windowHours": hours})
 
         elif path == "/api/anilist/genres":
             try:

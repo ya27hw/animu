@@ -218,6 +218,100 @@ class TestWebAPI(unittest.TestCase):
             self.assertEqual(res.status, 404)
             self.assertIsNone(db.get(unknown_id))
 
+    def test_airing_today_filters_to_user_list_within_window(self):
+        """Verify GET /api/anilist/airing-today filters user list to airing within window."""
+        from unittest.mock import patch
+        fixture = [
+            {
+                "mediaId": 111,
+                "progress": 5,
+                "media": {
+                    "title": {"romaji": "Airing Show"},
+                    "coverImage": {"medium": "http://cover/a.jpg"},
+                    "nextAiringEpisode": {"episode": 6, "timeUntilAiring": 3600},
+                },
+            },
+            {
+                "mediaId": 222,
+                "media": {
+                    "title": {"romaji": "Far Future Show"},
+                    "nextAiringEpisode": {"episode": 2, "timeUntilAiring": 10 * 24 * 3600},
+                },
+            },
+            {
+                "mediaId": 333,
+                "media": {
+                    "title": {"romaji": "No Schedule"},
+                },
+            },
+        ]
+        with patch("animu.web.anilist.get_anime_user_list", return_value=fixture):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("GET", "/api/anilist/airing-today")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            entries = data.get("entries", [])
+            self.assertEqual(len(entries), 1)
+            item = entries[0]
+            self.assertEqual(item["mediaId"], 111)
+            self.assertEqual(item["title"], "Airing Show")
+            self.assertEqual(item["episode"], 6)
+            self.assertEqual(item["progress"], 5)
+            self.assertEqual(item["timeUntilAiring"], 3600)
+            self.assertEqual(item["coverImage"], "http://cover/a.jpg")
+            self.assertIn("airingAt", item)
+            self.assertGreater(item["airingAt"], 0)
+
+    def test_airing_today_hours_param_and_empty(self):
+        """Verify GET /api/anilist/airing-today handles hours parameter and empty responses."""
+        from unittest.mock import patch
+        fixture = [
+            {
+                "mediaId": 999,
+                "progress": 1,
+                "media": {
+                    "title": {"romaji": "In Two Hours"},
+                    "coverImage": {"medium": "http://cover/two.jpg"},
+                    "nextAiringEpisode": {"episode": 3, "timeUntilAiring": 7200},
+                },
+            },
+        ]
+        with patch("animu.web.anilist.get_anime_user_list", return_value=fixture):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+
+            # hours=1 -> 0 entries
+            conn.request("GET", "/api/anilist/airing-today?hours=1")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertEqual(len(data.get("entries", [])), 0)
+
+            # hours=3 -> 1 entry
+            conn.request("GET", "/api/anilist/airing-today?hours=3")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertEqual(len(data.get("entries", [])), 1)
+            self.assertEqual(data["entries"][0]["mediaId"], 999)
+
+            # hours=abc -> default 24
+            conn.request("GET", "/api/anilist/airing-today?hours=abc")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertEqual(len(data.get("entries", [])), 1)
+
+        # empty user list
+        with patch("animu.web.anilist.get_anime_user_list", return_value=[]):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("GET", "/api/anilist/airing-today")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertEqual(data.get("entries"), [])
+            self.assertIn("windowHours", data)
+
 
 if __name__ == "__main__":
     unittest.main()
