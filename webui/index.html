@@ -193,27 +193,20 @@
     <!-- VIEW PANEL 1: DISCOVER (HOME RAILS & SEASONAL CHART) -->
     <section id="discover-panel" class="view-panel transition-all duration-300 space-y-10">
 
-      <!-- Discover Banner -->
-      <div class="relative overflow-hidden rounded-3xl border border-slate-200/60 dark:border-violet-900/30 bg-gradient-to-r from-violet-900/20 via-indigo-900/20 to-slate-900/40 p-6 sm:p-8 shadow-sm glow-purple">
-        <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div class="space-y-2">
-            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-bold uppercase tracking-wider">
+      <!-- Discover Banner (compact) -->
+      <div class="relative overflow-hidden rounded-2xl border border-slate-200/60 dark:border-violet-900/30 bg-gradient-to-r from-violet-900/20 via-indigo-900/20 to-slate-900/40 px-5 py-4 shadow-sm glow-purple">
+        <div class="relative z-10 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-bold uppercase tracking-wider shrink-0">
               <i class="fa-solid fa-fire text-violet-400"></i>AniList Discover Hub
             </div>
-            <h1 class="text-3xl sm:text-4xl font-extrabold font-['Outfit'] tracking-tight">
-              Explore Trending <span class="bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent">& Seasonal</span> Anime
+            <h1 class="text-lg sm:text-xl font-extrabold font-['Outfit'] tracking-tight truncate">
+              Explore Trending <span class="bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent">&amp; Seasonal</span> Anime
             </h1>
-            <p class="text-xs sm:text-sm text-slate-400 max-w-xl">
-              Live seasonal charts, trending rails, releasing today schedules, score rankings, and instant download automation.
-            </p>
           </div>
-          <!-- Season Quick Selector -->
-          <div class="flex flex-wrap items-center gap-2 bg-slate-900/60 backdrop-blur-md p-1.5 rounded-2xl border border-slate-800 shrink-0">
-            <button data-season-tab="SPRING_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl bg-violet-600 text-white shadow-sm font-['Outfit']">Spring 2026</button>
-            <button data-season-tab="SUMMER_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white font-['Outfit']">Summer 2026</button>
-            <button data-season-tab="FALL_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white font-['Outfit']">Fall 2026</button>
-            <button data-season-tab="WINTER_2026" class="discover-season-btn px-3 py-1.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white font-['Outfit']">Winter 2026</button>
-          </div>
+          <p class="hidden xl:block text-xs text-slate-400 max-w-md text-right shrink-0">
+            Live seasonal charts, trending rails, releasing today schedules, score rankings, and instant download automation.
+          </p>
         </div>
       </div>
 
@@ -308,6 +301,14 @@
 
           <!-- Controls -->
           <div class="flex flex-wrap items-center gap-3">
+            <!-- Season Selector -->
+            <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
+              <button data-season-tab="SPRING_2026" class="discover-season-btn px-3 py-1.5 rounded-lg bg-violet-600 text-white">Spring 2026</button>
+              <button data-season-tab="SUMMER_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Summer 2026</button>
+              <button data-season-tab="FALL_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Fall 2026</button>
+              <button data-season-tab="WINTER_2026" class="discover-season-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Winter 2026</button>
+            </div>
+
             <!-- Filter Tabs -->
             <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit']">
               <button data-chart-subtab="Airing" class="chart-subtab active-subtab px-3 py-1.5 rounded-lg bg-violet-600 text-white">Airing</button>
