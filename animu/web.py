@@ -1359,10 +1359,17 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         elif re.match(r'^/api/downloads/([0-9a-fA-F]{40})/retry$', path):
             # Retry/resume a stopped, paused, or errored torrent from the queue.
             torrent_hash = re.match(r'^/api/downloads/([0-9a-fA-F]{40})/retry$', path).group(1)
-            if qbit.resume_torrent(torrent_hash):
-                self.send_json(200, {"ok": True, "message": "Torrent resumed."})
+            state = qbit.get_torrent_state(torrent_hash)
+            if state and "missingfiles" in state.lower():
+                if qbit.recheck_torrent(torrent_hash):
+                    self.send_json(200, {"ok": True, "message": "Torrent recheck started."})
+                else:
+                    self.send_json(500, {"ok": False, "error": "Failed to start torrent recheck."})
             else:
-                self.send_json(500, {"ok": False, "error": "Failed to resume torrent."})
+                if qbit.resume_torrent(torrent_hash):
+                    self.send_json(200, {"ok": True, "message": "Torrent resumed."})
+                else:
+                    self.send_json(500, {"ok": False, "error": "Failed to resume torrent."})
             return
 
         elif path == "/api/test/discord":
