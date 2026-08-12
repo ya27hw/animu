@@ -312,6 +312,60 @@ class TestWebAPI(unittest.TestCase):
             self.assertEqual(data.get("entries"), [])
             self.assertIn("windowHours", data)
 
+    def test_retry_missingfiles_calls_recheck(self):
+        """Verify retry endpoint calls recheck_torrent when state is missingFiles."""
+        from unittest.mock import patch
+        torrent_hash = "1234567890abcdef1234567890abcdef12345678"
+        with patch("animu.web.qbit.get_torrent_state", return_value="missingFiles") as mock_get_state, \
+             patch("animu.web.qbit.recheck_torrent", return_value=True) as mock_recheck, \
+             patch("animu.web.qbit.resume_torrent") as mock_resume:
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("POST", f"/api/downloads/{torrent_hash}/retry")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertTrue(data.get("ok"))
+            self.assertEqual(data.get("message"), "Torrent recheck started.")
+            mock_get_state.assert_called_once_with(torrent_hash)
+            mock_recheck.assert_called_once_with(torrent_hash)
+            mock_resume.assert_not_called()
+
+    def test_retry_resume_normal_state(self):
+        """Verify retry endpoint calls resume_torrent when state is stoppedDL."""
+        from unittest.mock import patch
+        torrent_hash = "1234567890abcdef1234567890abcdef12345678"
+        with patch("animu.web.qbit.get_torrent_state", return_value="stoppedDL") as mock_get_state, \
+             patch("animu.web.qbit.recheck_torrent") as mock_recheck, \
+             patch("animu.web.qbit.resume_torrent", return_value=True) as mock_resume:
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("POST", f"/api/downloads/{torrent_hash}/retry")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertTrue(data.get("ok"))
+            self.assertEqual(data.get("message"), "Torrent resumed.")
+            mock_get_state.assert_called_once_with(torrent_hash)
+            mock_resume.assert_called_once_with(torrent_hash)
+            mock_recheck.assert_not_called()
+
+    def test_retry_recheck_failure(self):
+        """Verify retry endpoint returns 500 when recheck_torrent fails for missingFiles."""
+        from unittest.mock import patch
+        torrent_hash = "1234567890abcdef1234567890abcdef12345678"
+        with patch("animu.web.qbit.get_torrent_state", return_value="missingFiles") as mock_get_state, \
+             patch("animu.web.qbit.recheck_torrent", return_value=False) as mock_recheck, \
+             patch("animu.web.qbit.resume_torrent") as mock_resume:
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("POST", f"/api/downloads/{torrent_hash}/retry")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 500)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertFalse(data.get("ok"))
+            self.assertEqual(data.get("error"), "Failed to start torrent recheck.")
+            mock_get_state.assert_called_once_with(torrent_hash)
+            mock_recheck.assert_called_once_with(torrent_hash)
+            mock_resume.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

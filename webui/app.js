@@ -1047,8 +1047,10 @@
 
   window.retryTorrent = async function (hash) {
     try {
-      await API.retryDownload(hash);
-      showToast('Torrent resumed.', 'success');
+      const res = await fetch(`/api/downloads/${hash}/retry`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to retry torrent.');
+      const data = await res.json().catch(() => ({}));
+      showToast(data.message || 'Torrent resumed.', 'success');
       loadActiveDownloads();
     } catch (e) {
       showToast(e.message, 'error');

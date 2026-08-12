@@ -494,6 +494,51 @@ class QbitClient:
             print(f"Failed to resume torrent {torrent_hash}: {e}")
             return False
 
+    def recheck_torrent(self, torrent_hash: str) -> bool:
+        """Force qBittorrent to re-check a torrent's files on disk.
+
+        Required for ``missingFiles`` torrents — qBittorrent refuses to resume
+        them; a recheck makes it re-scan the save path and recover the data
+        (e.g. files moved back into place, stale temp pointer).
+        """
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        recheck_url = f"{base_url.rstrip('/')}/api/v2/torrents/recheck"
+        if not self._ensure_auth():
+            return False
+        try:
+            resp = self.client.post(
+                recheck_url,
+                data={"hashes": torrent_hash},
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"SID={self.sid}"}
+            )
+            return resp.status_code == 200
+        except Exception as e:
+            print(f"Failed to recheck torrent {torrent_hash}: {e}")
+            return False
+
+    def get_torrent_state(self, torrent_hash: str) -> Optional[str]:
+        """Fetch current qBittorrent state string for a torrent by hash."""
+        if not self._ensure_auth():
+            return None
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
+        try:
+            headers = {"Cookie": f"SID={self.sid}"}
+            resp = self.client.get(
+                info_url,
+                params={"hashes": torrent_hash},
+                headers=headers
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    return data[0].get("state")
+        except Exception as e:
+            print(f"Failed to get torrent state for {torrent_hash}: {e}")
+        return None
+
     def delete_torrent_by_hash(self, torrent_hash: str, delete_files: bool = False) -> bool:
         """Delete a torrent by hash. ``delete_files=False`` keeps the data on
         disk (safe default for a mistaken remove)."""
