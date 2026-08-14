@@ -116,6 +116,7 @@
     titleLanguage: typeof localStorage !== 'undefined' ? (localStorage.getItem('titleLanguage') || 'romaji') : 'romaji',
     config: {},
     animeList: [],
+    animeListLoaded: false,
     listEntriesByMedia: {},
     activeMediaDetail: null,
     activeMediaDetailId: null,
@@ -134,7 +135,8 @@
       seasonal: [...FALLBACK_DATA.seasonal],
       upcoming: [...FALLBACK_DATA.upcoming]
     },
-    airingRadar: [...FALLBACK_DATA.trending],
+    airingRadar: [],
+    discoverFeedCache: {},
     seasonalChart: [],
     spotlightMedia: null,
     // Lists state
@@ -177,6 +179,10 @@
 
   let tabToken = 0;
   let seasonalCache = {};
+  let seasonalChartInitialized = false;
+  let seasonalObserver = null;
+  let discoverSearchTimer = null;
+  const DISCOVER_CACHE_TTL = 90 * 1000;
   let anilistQueue = Promise.resolve();
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -215,6 +221,18 @@
     return `in ${m}m`;
   }
 
+  function formatCountdown(seconds) {
+    if (seconds === undefined || seconds === null) return 'TBA';
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return 'Aired';
+    const d = Math.floor(value / 86400);
+    const h = Math.floor((value % 86400) / 3600);
+    const m = Math.floor((value % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${Math.max(1, m)}m`;
+  }
+
   function getAnimeTitle(media) {
     if (!media) return 'Untitled';
     if (typeof media === 'string') return media;
@@ -233,13 +251,29 @@
     return getAnimeTitle({ title: titleObj });
   }
 
-  function getCoverImage(media) {
+  function getCoverImage(media, size = 'extraLarge') {
     if (!media) return SVG_PLACEHOLDER;
     if (media.coverImage) {
-      return media.coverImage.large || media.coverImage.extraLarge || media.coverImage.medium || SVG_PLACEHOLDER;
+      const order = size === 'medium'
+        ? ['medium', 'large', 'extraLarge']
+        : ['extraLarge', 'large', 'medium'];
+      return order.map(key => media.coverImage[key]).find(Boolean) || SVG_PLACEHOLDER;
     }
     if (media.image) return media.image;
     return SVG_PLACEHOLDER;
+  }
+
+  function isMediaOnList(media) {
+    if (!media) return false;
+    const id = Number(media.id || media.mediaId);
+    return Boolean(media.inList || media.mediaListEntry || state.listEntriesByMedia[id] ||
+      state.animeList.some(entry => Number(entry.mediaId || entry.id) === id));
+  }
+
+  function renderInListBadge(media, extraClass = '') {
+    return isMediaOnList(media)
+      ? `<span class="in-list-badge ${extraClass}">✓ In List</span>`
+      : '';
   }
 
   // Toast HTML representation (escaped)
@@ -357,7 +391,7 @@
 
     async getDiscover(type) {
       try {
-        const res = await fetch(`/api/anilist/discover?type=${encodeURIComponent(type || 'trending')}`);
+        const res = await fetch(`/api/anilist/discover?type=${encodeURIComponent(type || 'trending')}&perPage=12`);
         if (!res.ok) return { media: FALLBACK_DATA[type] || [] };
         return res.json();
       } catch (e) {
@@ -368,10 +402,10 @@
     async getAiringToday(hours = 168) {
       try {
         const res = await fetch(`/api/anilist/airing-today?hours=${hours}`);
-        if (!res.ok) return { schedules: FALLBACK_DATA.trending };
+        if (!res.ok) return { entries: [] };
         return res.json();
       } catch (e) {
-        return { schedules: FALLBACK_DATA.trending };
+        return { entries: [] };
       }
     },
 
@@ -503,201 +537,91 @@
   // HTML RENDER TEMPLATES (B1: Fully Escaped + Safe Delegated Hooks)
   // ==============================================================
 
-  function renderDiscoverCardHtml(m, theme = 'dark') {
+  function renderDiscoverCardHtml(m) {
     if (!m) return '';
     const title = escapeHtml(getAnimeTitle(m));
     const cover = escapeHtml(getCoverImage(m));
-    const score = escapeHtml(m.averageScore || m.meanScore || '—');
+    const score = escapeHtml(m.averageScore ?? m.meanScore ?? '—');
     const format = escapeHtml(m.format || 'TV');
     const eps = escapeHtml(m.episodes ? `${m.episodes} eps` : 'Airing');
-    const year = escapeHtml(m.seasonYear || '2026');
+    const year = escapeHtml(m.seasonYear || '—');
     const nextAiring = m.nextAiringEpisode
-      ? escapeHtml(`Ep ${m.nextAiringEpisode.episode} ${formatRelativeTime(m.nextAiringEpisode.timeUntilAiring)}`)
-      : null;
+      ? escapeHtml(`Ep ${m.nextAiringEpisode.episode} · ${formatCountdown(m.nextAiringEpisode.timeUntilAiring)}`)
+      : '';
     const mediaId = Number(m.id) || 0;
-
-    if (theme === 'light') {
-      return `
-        <div class="group cursor-pointer bg-white hover:bg-slate-50/50 border border-slate-200/80 hover:border-slate-300 rounded-2xl overflow-hidden transition-all duration-200 flex flex-col justify-between relative shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-md hover:-translate-y-0.5" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
-          <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-slate-100">
-            <img src="${cover}" alt="${title}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent opacity-40 group-hover:opacity-20 transition-opacity"></div>
-            
-            <!-- Format Pill -->
-            <div class="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-white/90 backdrop-blur-sm text-slate-800 border border-slate-200/60 font-mono text-[10px] font-bold shadow-xs">
-              ${format}
-            </div>
-
-            <!-- Score Badge -->
-            <div class="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-white/90 backdrop-blur-sm text-rose-600 border border-rose-100 font-mono text-[10px] font-bold shadow-xs">
-              ★ ${score}%
-            </div>
-
-            ${nextAiring ? `
-              <div class="absolute bottom-2 left-2 right-2 px-2 py-0.5 rounded-md bg-white/95 backdrop-blur-sm text-slate-800 border border-slate-200/60 text-[10px] font-mono truncate shadow-xs flex items-center gap-1.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
-                <span class="truncate">${nextAiring}</span>
-              </div>
-            ` : ''}
-
-            <!-- Quick Action Overlay on Hover -->
-            <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2" onclick="event.stopPropagation()">
-              <button data-action="nyaa-search" data-media-id="${mediaId}" data-media-title="${title}" class="p-2.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-all font-bold text-xs shadow-lg cursor-pointer" title="Search Torrents">
-                <i class="fa-solid fa-download"></i>
-              </button>
-              <button data-action="open-detail" data-media-id="${mediaId}" class="p-2.5 rounded-xl bg-white text-slate-900 hover:bg-slate-100 transition-all text-xs shadow-lg cursor-pointer" title="Inspect Media">
-                <i class="fa-solid fa-eye"></i>
-              </button>
-            </div>
-          </div>
-
-          <!-- Metadata Strip -->
-          <div class="p-3 flex flex-col gap-1 min-w-0">
-            <h4 class="font-semibold text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-rose-600 transition-colors" title="${title}">${title}</h4>
-            <div class="flex items-center justify-between text-[11px] text-slate-500 font-mono pt-0.5">
-              <span>${eps}</span>
-              <span>${year}</span>
-            </div>
-          </div>
-        </div>
-      `;
-    }
+    const inList = renderInListBadge(m, 'absolute bottom-2 right-2');
 
     return `
-      <div class="group cursor-pointer bg-[#0d1322] hover:bg-[#131b2e] hud-border hover:border-cyan-500/50 rounded-xl overflow-hidden transition-all duration-200 flex flex-col justify-between relative shadow-md hover:-translate-y-1" data-action="open-detail" data-media-id="${mediaId}">
-        <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-[#090d16]">
-          <img src="${cover}" alt="${title}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
-          <div class="absolute inset-0 bg-gradient-to-t from-[#090d16] via-transparent to-transparent opacity-80 group-hover:opacity-40 transition-opacity"></div>
-          
-          <!-- Format Pill -->
-          <div class="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-[#090d16]/90 border border-cyan-500/30 text-cyan-300 font-mono text-[10px] font-bold shadow-sm">
-            ${format}
-          </div>
-
-          <!-- Score Badge -->
-          <div class="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-[#090d16]/90 border border-amber-500/30 text-amber-400 font-mono text-[10px] font-bold flex items-center gap-1 shadow-sm">
-            ★ ${score}%
-          </div>
-
-          ${nextAiring ? `
-            <div class="absolute bottom-2 left-2 right-2 px-2 py-0.5 rounded bg-[#090d16]/90 border border-cyan-500/30 text-cyan-300 text-[10px] font-mono truncate shadow-sm flex items-center gap-1">
-              <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping shrink-0"></span>
-              <span class="truncate">${nextAiring}</span>
-            </div>
-          ` : ''}
-
-          <!-- Quick Action Overlay on Hover -->
-          <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2" onclick="event.stopPropagation()">
-            <button data-action="nyaa-search" data-media-id="${mediaId}" data-media-title="${title}" class="p-2 rounded-lg bg-cyan-500 text-obsidian-950 hover:bg-cyan-400 transition-all font-bold text-xs shadow-lg cursor-pointer" title="Search Torrents">
-              <i class="fa-solid fa-download"></i>
-            </button>
-            <button data-action="open-detail" data-media-id="${mediaId}" class="p-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-all text-xs border border-slate-600 cursor-pointer" title="Inspect Media">
-              <i class="fa-solid fa-eye"></i>
-            </button>
+      <article class="group cursor-pointer bg-white dark:bg-[#0d1322] hover:bg-slate-50 dark:hover:bg-[#131b2e] border border-slate-200 dark:border-[#1c2742] hover:border-slate-300 dark:hover:border-cyan-500/40 rounded-2xl overflow-hidden transition-all duration-200 flex flex-col relative shadow-sm hover:shadow-md hover:-translate-y-0.5 min-w-0" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
+        <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-slate-100 dark:bg-[#090d16]">
+          <img src="${cover}" alt="${title}" loading="lazy" decoding="async" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+          <div class="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-transparent to-transparent opacity-60 group-hover:opacity-35 transition-opacity"></div>
+          <span class="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-white/90 dark:bg-slate-950/85 backdrop-blur-sm text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-slate-700 font-mono text-[10px] font-bold">${format}</span>
+          <span class="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-white/90 dark:bg-slate-950/85 backdrop-blur-sm text-amber-600 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 font-mono text-[10px] font-bold">★ ${score}%</span>
+          ${nextAiring ? `<span class="absolute bottom-2 left-2 max-w-[calc(100%-5rem)] px-2 py-1 rounded-md bg-white/95 dark:bg-slate-950/90 text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-slate-700 text-[10px] font-mono truncate">${nextAiring}</span>` : ''}
+          ${inList}
+          <div class="absolute inset-0 bg-slate-950/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2" onclick="event.stopPropagation()">
+            <button data-action="nyaa-search" data-media-id="${mediaId}" data-media-title="${title}" class="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 dark:bg-cyan-400 dark:hover:bg-cyan-300 dark:text-slate-950 text-white transition-all font-bold text-xs shadow-lg cursor-pointer" title="Search torrents"><i class="fa-solid fa-download"></i></button>
+            <button data-action="open-detail" data-media-id="${mediaId}" class="p-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition-all text-xs shadow-lg cursor-pointer" title="Inspect media"><i class="fa-solid fa-eye"></i></button>
           </div>
         </div>
-
-        <!-- Metadata Info Strip -->
-        <div class="p-2.5 flex flex-col gap-1">
-          <h4 class="font-bold text-xs text-slate-100 line-clamp-1 group-hover:text-cyan-400 transition-colors" title="${title}">${title}</h4>
-          <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-            <span>${eps}</span>
-            <span>${year}</span>
-          </div>
+        <div class="p-3 flex flex-col gap-1 min-w-0">
+          <h4 class="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 line-clamp-2 leading-snug group-hover:text-rose-600 dark:group-hover:text-cyan-300 transition-colors" title="${title}">${title}</h4>
+          <div class="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono pt-0.5"><span>${eps}</span><span>${year}</span></div>
         </div>
-      </div>
+      </article>
     `;
   }
 
-  function renderAiringRadarItemHtml(item, theme = 'dark') {
+  function renderAiringRadarItemHtml(item) {
     if (!item) return '';
-    const m = item.media || item;
+    const raw = item.media || item;
+    const m = raw.coverImage
+      ? raw
+      : { ...raw, id: raw.id || raw.mediaId, title: raw.title || { romaji: raw.romaji, english: raw.english }, coverImage: { medium: raw.coverImage } };
     const title = escapeHtml(getAnimeTitle(m));
-    const cover = escapeHtml(getCoverImage(m));
-    const ep = escapeHtml(item.episode || (m.nextAiringEpisode ? m.nextAiringEpisode.episode : 8));
-    const countdown = escapeHtml(formatRelativeTime(item.timeUntilAiring !== undefined ? item.timeUntilAiring : 18000));
-    const mediaId = Number(m.id) || 0;
-
-    if (theme === 'light') {
-      return `
-        <div class="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition-all flex items-center justify-between gap-3 group cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <img src="${cover}" alt="${title}" class="w-10 h-14 rounded-lg object-cover flex-shrink-0 bg-slate-100 border border-slate-200/60 shadow-xs">
-            <div class="flex flex-col min-w-0">
-              <span class="text-xs sm:text-sm font-semibold text-slate-900 truncate group-hover:text-rose-600 transition-colors" title="${title}">${title}</span>
-              <span class="text-[11px] font-mono text-slate-500">Episode ${ep}</span>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded-md bg-rose-50 border border-rose-100 text-rose-600 font-bold">${countdown}</span>
-            <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-rose-600 text-white text-[10px] font-mono font-medium transition-colors cursor-pointer" title="Sync Tracking">+ AutoSync</button>
-          </div>
-        </div>
-      `;
-    }
+    const cover = escapeHtml(getCoverImage(m, 'medium'));
+    const ep = escapeHtml(item.episode ?? m.nextAiringEpisode?.episode ?? '—');
+    const seconds = item.timeUntilAiring ?? m.nextAiringEpisode?.timeUntilAiring;
+    const countdown = escapeHtml(`Ep ${ep} · ${formatCountdown(seconds)}`);
+    const mediaId = Number(m.id || item.mediaId) || 0;
 
     return `
-      <div class="p-2.5 rounded-xl bg-[#111827] hover:bg-[#18233a] hud-border hover:border-cyan-500/40 transition-colors flex items-center justify-between gap-3 group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <img src="${cover}" alt="${title}" class="w-9 h-12 rounded-lg object-cover flex-shrink-0 bg-[#090d16] hud-border">
-          <div class="flex flex-col min-w-0">
-            <span class="text-xs font-semibold text-slate-200 truncate group-hover:text-cyan-300 transition-colors" title="${title}">${title}</span>
-            <span class="text-[11px] font-mono text-slate-400">Episode ${ep}</span>
-          </div>
+      <article class="p-2.5 rounded-xl bg-slate-50 dark:bg-[#111827] hover:bg-white dark:hover:bg-[#18233a] border border-slate-200 dark:border-[#1c2742] hover:border-slate-300 dark:hover:border-cyan-500/40 transition-colors flex items-center gap-2.5 group cursor-pointer min-w-[190px] flex-shrink-0" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
+        <img src="${cover}" alt="${title}" loading="lazy" decoding="async" class="w-10 h-14 rounded-lg object-cover flex-shrink-0 bg-slate-100 dark:bg-[#090d16] border border-slate-200 dark:border-slate-700">
+        <div class="flex flex-col min-w-0 gap-1">
+          <span class="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate group-hover:text-rose-600 dark:group-hover:text-cyan-300 transition-colors" title="${title}">${title}</span>
+          ${renderInListBadge(m)}
+          <span class="text-[10px] font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">${countdown}</span>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/20 text-cyan-300">${countdown}</span>
-          <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="px-2 py-1 rounded bg-[#1c2742] hover:bg-cyan-500 hover:text-obsidian-950 text-slate-300 text-[10px] font-mono transition-colors cursor-pointer" title="Sync Tracking">+ AutoSync</button>
-        </div>
-      </div>
+      </article>
     `;
   }
 
-  function renderSeasonalItemHtml(m, theme = 'dark') {
+  function renderSeasonalItemHtml(m) {
     if (!m) return '';
     const title = escapeHtml(getAnimeTitle(m));
-    const cover = escapeHtml(getCoverImage(m));
-    const score = escapeHtml(m.averageScore || m.meanScore || '—');
+    const cover = escapeHtml(getCoverImage(m, 'medium'));
+    const score = escapeHtml(m.averageScore ?? m.meanScore ?? '—');
     const format = escapeHtml(m.format || 'TV');
     const eps = escapeHtml(m.episodes ? `${m.episodes} eps` : 'TBA');
     const mediaId = Number(m.id) || 0;
-
-    if (theme === 'light') {
-      return `
-        <div class="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 flex items-center justify-between gap-2.5 transition-all group cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <img src="${cover}" alt="${title}" class="w-9 h-12 rounded-lg object-cover flex-shrink-0 bg-slate-100 border border-slate-200/60 shadow-xs">
-            <div class="flex flex-col min-w-0">
-              <span class="text-xs sm:text-sm font-semibold text-slate-900 truncate group-hover:text-rose-600 transition-colors" title="${title}">${title}</span>
-              <span class="text-[10px] font-mono text-slate-500">${format} • ${eps}</span>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <span class="text-[10px] font-mono text-rose-600 font-bold bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded">★ ${score}%</span>
-            <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-900 hover:text-white border border-slate-200 text-slate-700 text-xs flex items-center justify-center transition-colors cursor-pointer" title="Bookmark / Add to List">
-              <i class="fa-solid fa-plus text-[10px]"></i>
-            </button>
-          </div>
-        </div>
-      `;
-    }
+    const airing = m.nextAiringEpisode
+      ? escapeHtml(`Ep ${m.nextAiringEpisode.episode} · ${formatCountdown(m.nextAiringEpisode.timeUntilAiring)}`)
+      : '';
 
     return `
-      <div class="p-2 rounded-xl bg-[#111827] hover:bg-[#18233a] hud-border flex items-center justify-between gap-2.5 transition-colors group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <img src="${cover}" alt="${title}" class="w-8 h-11 rounded-lg object-cover flex-shrink-0 bg-[#090d16] hud-border">
-          <div class="flex flex-col min-w-0">
-            <span class="text-xs font-semibold text-slate-200 truncate group-hover:text-cyan-300 transition-colors" title="${title}">${title}</span>
-            <span class="text-[10px] font-mono text-slate-400">${format} • ${eps}</span>
+      <article class="p-3 sm:p-3.5 rounded-xl bg-slate-50 dark:bg-[#111827] hover:bg-white dark:hover:bg-[#18233a] border border-slate-200 dark:border-[#1c2742] hover:border-slate-300 dark:hover:border-cyan-500/40 flex items-center justify-between gap-3 transition-colors group cursor-pointer min-w-0" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
+        <div class="flex items-center gap-3 min-w-0">
+          <img src="${cover}" alt="${title}" loading="lazy" decoding="async" class="w-11 h-16 sm:w-12 sm:h-[4.5rem] rounded-lg object-cover flex-shrink-0 bg-slate-100 dark:bg-[#090d16] border border-slate-200 dark:border-slate-700">
+          <div class="flex flex-col min-w-0 gap-1">
+            <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-100 truncate group-hover:text-rose-600 dark:group-hover:text-cyan-300 transition-colors" title="${title}">${title}</span>
+            <span class="text-[11px] font-mono text-slate-500 dark:text-slate-400">${format} · ${eps}${airing ? ` · ${airing}` : ''}</span>
+            ${renderInListBadge(m)}
           </div>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <span class="text-[10px] font-mono text-amber-400 font-bold">★ ${score}%</span>
-          <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="p-1 rounded bg-[#1c2742] hover:bg-cyan-500 hover:text-obsidian-950 text-slate-300 text-xs transition-colors cursor-pointer" title="Bookmark / Add to List">
-            <i class="fa-solid fa-plus"></i>
-          </button>
-        </div>
-      </div>
+        <span class="text-[11px] font-mono text-amber-600 dark:text-amber-300 font-bold whitespace-nowrap">★ ${score}%</span>
+      </article>
     `;
   }
 
@@ -854,9 +778,7 @@
     if (typeof document === 'undefined') return;
     const isDark = document.documentElement.classList.toggle('dark');
     state.theme = isDark ? 'dark' : 'light';
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('theme', state.theme);
-    }
+    if (typeof localStorage !== 'undefined') localStorage.setItem('theme', state.theme);
     if (state.activeTab === 'discover') {
       renderDiscover();
       renderAiringRadar();
@@ -864,137 +786,56 @@
     }
   }
 
-  // ==============================================================
-  // NAVIGATION & TAB SYSTEM (N4: Increments tabToken)
-  // ==============================================================
   function switchTab(tabName) {
     if (!tabName || typeof document === 'undefined') return;
     state.activeTab = tabName;
     tabToken++;
 
-    // 1. Update Dark Rail navigation buttons
-    document.querySelectorAll('.dark-nav-tab').forEach(btn => {
-      const isTarget = btn.dataset.tab === tabName;
-      if (isTarget) {
-        btn.className = 'nav-tab dark-nav-tab flex items-center gap-3 px-3 py-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 font-medium transition-all group cursor-pointer text-left w-full';
-        const dot = btn.querySelector('.badge-glow');
-        if (dot) dot.classList.remove('hidden');
-      } else {
-        btn.className = 'nav-tab dark-nav-tab flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-[#151f33] font-medium transition-all group cursor-pointer text-left w-full';
-        const dot = btn.querySelector('.badge-glow');
-        if (dot) dot.classList.add('hidden');
-      }
+    const activeNav = 'nav-tab px-3 py-1.5 rounded-lg text-xs font-bold text-slate-900 dark:text-slate-950 bg-slate-100 dark:bg-cyan-500 transition-all flex items-center gap-1.5 cursor-pointer';
+    const idleNav = 'nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-1.5 cursor-pointer';
+    document.querySelectorAll('.nav-tab').forEach(btn => {
+      btn.className = btn.dataset.tab === tabName ? activeNav : idleNav;
     });
 
-    // 2. Update Light Ribbon navigation buttons
-    document.querySelectorAll('.light-nav-tab').forEach(btn => {
-      const isTarget = btn.dataset.tab === tabName;
-      if (isTarget) {
-        btn.className = 'nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-bold text-slate-900 bg-slate-100 transition-all flex items-center gap-1.5 cursor-pointer';
-      } else {
-        btn.className = 'nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all flex items-center gap-1.5 cursor-pointer';
-      }
-    });
-
-    // 3. Update Mobile Drawer buttons
     document.querySelectorAll('.mobile-nav-tab').forEach(btn => {
-      const isTarget = btn.dataset.tab === tabName;
-      if (isTarget) {
-        btn.classList.add('text-cyan-400', 'bg-cyan-500/10', 'text-editorial-crimson', 'bg-rose-50');
-      } else {
-        btn.classList.remove('text-cyan-400', 'bg-cyan-500/10', 'text-editorial-crimson', 'bg-rose-50');
-      }
+      const active = btn.dataset.tab === tabName;
+      btn.className = active
+        ? 'mobile-nav-tab flex items-center gap-2 px-2.5 py-2 text-xs font-bold rounded-lg text-rose-600 dark:text-cyan-300 bg-rose-50 dark:bg-cyan-500/10 cursor-pointer'
+        : 'mobile-nav-tab flex items-center gap-2 px-2.5 py-2 text-xs font-semibold rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer';
     });
 
-    // 4. Update breadcrumb
-    const breadcrumbTitles = {
-      discover: 'Discover Matrix',
-      watching: 'Watching Cockpit',
-      lists: 'AniList Collection',
-      search: 'Global Search',
-      social: 'Social Hub',
-      stats: 'Analytics & Stats',
-      history: 'Download History',
-      logs: 'System Logs',
-      settings: 'Config & Preferences'
-    };
-    const darkBreadcrumb = document.getElementById('dark-breadcrumb-tab');
-    if (darkBreadcrumb) {
-      darkBreadcrumb.textContent = breadcrumbTitles[tabName] || tabName.toUpperCase();
-    }
-
-    // 5. Toggle panel visibility
     document.querySelectorAll('.view-panel').forEach(panel => {
-      panel.classList.toggle('hidden', panel.id !== `${tabName}-panel`);
+      panel.classList.toggle('hidden', panel.id !== tabName + '-panel');
     });
-
-    // 6. Close mobile menu drawers
     document.getElementById('mobile-menu')?.classList.add('hidden');
-    document.getElementById('dark-mobile-menu')?.classList.add('hidden');
+    document.getElementById('hamburger-btn')?.setAttribute('aria-expanded', 'false');
 
-    // 7. Load Tab Data
     switch (tabName) {
-      case 'discover':
-        loadDiscover();
-        break;
-      case 'watching':
-        loadWatching();
-        break;
-      case 'lists':
-        loadUserListsData();
-        break;
+      case 'discover': loadDiscover(); break;
+      case 'watching': loadWatching(); break;
+      case 'lists': loadUserListsData(); break;
       case 'search':
-        if (state.searchResults.length === 0 && !state.searchQuery) {
-          performSearch();
-        }
+        if (state.searchResults.length === 0 && !state.searchQuery) performSearch();
         break;
-      case 'social':
-        loadSocialFeed();
-        break;
-      case 'stats':
-        loadUserStats();
-        break;
-      case 'history':
-        loadDownloadHistory();
-        break;
-      case 'logs':
-        loadLogs();
-        break;
-      case 'settings':
-        loadSettingsConfig();
-        break;
+      case 'social': loadSocialFeed(); break;
+      case 'stats': loadUserStats(); break;
+      case 'history': loadDownloadHistory(); break;
+      case 'logs': loadLogs(); break;
+      case 'settings': loadSettingsConfig(); break;
     }
   }
 
-  // ==============================================================
-  // DISCOVER MATRIX CONTROLLER
-  // ==============================================================
   function switchFeed(feedKey) {
     if (!['trending', 'popular', 'top', 'seasonal', 'upcoming'].includes(feedKey)) return;
     state.discoverFeedKey = feedKey;
-
     if (typeof document !== 'undefined') {
-      // Update Dark HUD Tab Switchers
-      document.querySelectorAll('.dark-feed-tab').forEach(btn => {
-        const isTarget = btn.id === `dark-tab-${feedKey}`;
-        if (isTarget) {
-          btn.className = 'dark-feed-tab px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold tracking-wide bg-cyan-500 text-obsidian-950 shadow-sm transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
-        } else {
-          btn.className = 'dark-feed-tab px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold tracking-wide text-slate-400 hover:text-slate-100 hover:bg-[#151f33] transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
-        }
-      });
-
-      // Update Light Stream Feed Buttons
-      document.querySelectorAll('.light-feed-btn').forEach(btn => {
-        const isTarget = btn.id === `light-feed-${feedKey}`;
-        if (isTarget) {
-          btn.className = 'light-feed-btn px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white shadow-xs transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
-        } else {
-          btn.className = 'light-feed-btn px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
-        }
+      document.querySelectorAll('.discover-feed-tab').forEach(btn => {
+        const active = btn.id === 'feed-tab-' + feedKey;
+        btn.className = active
+          ? 'discover-feed-tab px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-cyan-500 dark:text-slate-950 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer'
+          : 'discover-feed-tab px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
       });
     }
-
     renderDiscover();
     fetchFeedData(feedKey);
   }
@@ -1002,10 +843,8 @@
   function filterDiscoverFormat(format) {
     state.discoverFormatFilter = format || 'ALL';
     if (typeof document !== 'undefined') {
-      const darkSelect = document.getElementById('dark-format-filter');
-      const lightSelect = document.getElementById('light-format-select');
-      if (darkSelect) darkSelect.value = format;
-      if (lightSelect) lightSelect.value = format;
+      const select = document.getElementById('format-filter');
+      if (select) select.value = state.discoverFormatFilter;
     }
     renderDiscover();
   }
@@ -1014,32 +853,18 @@
   function setDiscoverSeason(season) {
     state.discoverSeason = season;
     if (typeof document !== 'undefined') {
-      ['SPRING', 'SUMMER', 'FALL', 'WINTER'].forEach(s => {
-        const dBtn = document.getElementById(`dark-season-${s}`);
-        if (dBtn) {
-          if (s === season) {
-            dBtn.className = 'dark-season-btn py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 text-obsidian-950 shadow-sm transition-all text-center cursor-pointer';
-          } else {
-            dBtn.className = 'dark-season-btn py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white transition-all text-center cursor-pointer';
-          }
-        }
-        const lBtn = document.getElementById(`light-season-${s}`);
-        if (lBtn) {
-          if (s === season) {
-            lBtn.className = 'light-season-btn py-1.5 rounded-lg text-xs font-bold bg-white text-slate-900 shadow-sm transition-all text-center cursor-pointer';
-          } else {
-            lBtn.className = 'light-season-btn py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer';
-          }
-        }
+      ['SPRING', 'SUMMER', 'FALL', 'WINTER'].forEach(value => {
+        const button = document.getElementById('season-' + value);
+        if (!button) return;
+        button.className = value === season
+          ? 'discover-season-btn py-1.5 px-3 rounded-lg text-xs font-bold bg-white dark:bg-cyan-500 text-slate-900 dark:text-slate-950 shadow-sm transition-all text-center cursor-pointer'
+          : 'discover-season-btn py-1.5 px-3 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all text-center cursor-pointer';
       });
-
-      const darkYearTag = document.getElementById('dark-seasonal-year-tag');
-      if (darkYearTag) darkYearTag.textContent = `${state.discoverSeasonYear} ${season}`;
-      const lightYearTag = document.getElementById('light-seasonal-year-tag');
-      if (lightYearTag) lightYearTag.textContent = `${state.discoverSeasonYear} ${season}`;
+      const yearTag = document.getElementById('seasonal-year-tag');
+      if (yearTag) yearTag.textContent = state.discoverSeasonYear + ' ' + season;
     }
-
-    fetchSeasonalChartData();
+    if (seasonalChartInitialized) fetchSeasonalChartData();
+    else renderSeasonalChart();
   }
 
   // N1 & N2: Subtab Switcher Controller (Airing, Upcoming, TBA, Archive)
@@ -1053,68 +878,63 @@
   function setDiscoverSubtab(subtab) {
     state.discoverChartTab = subtab;
     if (typeof document !== 'undefined') {
-      ['Airing', 'Upcoming', 'TBA', 'Archive'].forEach(st => {
-        const dBtn = document.getElementById(`dark-subtab-${st}`);
-        if (dBtn) {
-          if (st === subtab) {
-            dBtn.className = 'dark-status-btn px-2.5 py-1 rounded-md text-[11px] font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex-shrink-0 cursor-pointer';
-          } else {
-            dBtn.className = 'dark-status-btn px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-400 hover:text-slate-200 flex-shrink-0 cursor-pointer';
-          }
-        }
-        const lBtn = document.getElementById(`light-subtab-${st}`);
-        if (lBtn) {
-          if (st === subtab) {
-            lBtn.className = 'light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-900 text-white flex-shrink-0 cursor-pointer';
-          } else {
-            lBtn.className = 'light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 hover:text-slate-900 flex-shrink-0 cursor-pointer';
-          }
-        }
+      ['Airing', 'Upcoming', 'TBA', 'Archive'].forEach(value => {
+        const button = document.getElementById('subtab-' + value);
+        if (!button) return;
+        button.className = value === subtab
+          ? 'discover-status-btn px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-900 text-white dark:bg-cyan-500 dark:text-slate-950 flex-shrink-0 cursor-pointer'
+          : 'discover-status-btn px-3 py-1.5 rounded-lg text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex-shrink-0 cursor-pointer';
       });
     }
-    fetchSeasonalChartData();
+    if (seasonalChartInitialized) fetchSeasonalChartData();
+    else renderSeasonalChart();
   }
 
   // N3: Hide My List Toggle
   function toggleHideMyList(checked) {
     state.hideOnMyList = Boolean(checked);
     if (typeof document !== 'undefined') {
-      const dChk = document.getElementById('dark-hide-my-list');
-      const lChk = document.getElementById('light-hide-my-list');
-      if (dChk) dChk.checked = state.hideOnMyList;
-      if (lChk) lChk.checked = state.hideOnMyList;
+      const checkbox = document.getElementById('hide-my-list');
+      if (checkbox) checkbox.checked = state.hideOnMyList;
     }
     renderSeasonalChart();
   }
 
   // Discover feed fetch with N4 stale-tab guard
   async function fetchFeedData(feedKey) {
+    const cached = state.discoverFeedCache[feedKey];
+    if (cached && Date.now() - cached.cachedAt < DISCOVER_CACHE_TTL) {
+      state.discoverFeeds[feedKey] = cached.items;
+      renderDiscover();
+      return;
+    }
+
     const token = tabToken;
     try {
       const res = await API.getDiscover(feedKey);
       if (isStaleTab(token)) return;
-      if (res && res.media && res.media.length > 0) {
-        state.discoverFeeds[feedKey] = res.media;
+      const items = Array.isArray(res?.media) ? res.media.slice(0, 12) : [];
+      if (items.length > 0) {
+        state.discoverFeeds[feedKey] = items;
+        state.discoverFeedCache[feedKey] = { items, cachedAt: Date.now() };
       }
-    } catch (err) {}
-    if (!isStaleTab(token) && state.activeTab === 'discover') {
-      renderDiscover();
+    } catch (err) {
+      // Keep the local seed visible when AniList is unavailable.
     }
+    if (!isStaleTab(token) && state.activeTab === 'discover') renderDiscover();
   }
 
-  // Airing radar fetch with N4 stale-tab guard
+  // Airing strip fetch with N4 stale-tab guard
   async function fetchAiringRadarData() {
     const token = tabToken;
     try {
       const res = await API.getAiringToday(168);
       if (isStaleTab(token)) return;
-      if (res && res.schedules && res.schedules.length > 0) {
-        state.airingRadar = res.schedules;
-      }
-    } catch (err) {}
-    if (!isStaleTab(token) && state.activeTab === 'discover') {
-      renderAiringRadar();
+      state.airingRadar = Array.isArray(res?.entries) ? res.entries : [];
+    } catch (err) {
+      state.airingRadar = [];
     }
+    if (!isStaleTab(token) && state.activeTab === 'discover') renderAiringRadar();
   }
 
   // Seasonal Chart GraphQL Query (N1)
@@ -1141,62 +961,66 @@
 
   // Seasonal Chart fetch with Direct GraphQL, caching & N4 stale-tab guard (N1, N2, N4)
   async function fetchSeasonalChartData() {
+    if (!seasonalChartInitialized) return;
     const token = tabToken;
     const season = state.discoverSeason || 'SUMMER';
     const year = parseInt(state.discoverSeasonYear || 2026, 10);
     const subtab = state.discoverChartTab || 'Airing';
     const status = SUBTAB_STATUS_MAP[subtab] || 'RELEASING';
-    const cacheKey = `${season}_${year}_${status}`;
+    const cacheKey = season + '_' + year + '_' + status;
 
-    // If cached, use immediately
     if (seasonalCache[cacheKey]) {
       state.seasonalChart = seasonalCache[cacheKey];
       renderSeasonalChart();
       return;
     }
 
-    // Show loading state
-    if (typeof document !== 'undefined') {
-      const darkChart = document.getElementById('dark-seasonal-chart');
-      if (darkChart) {
-        darkChart.innerHTML = `
-          <div class="py-12 text-center text-slate-400 font-mono text-xs">
-            <i class="fa-solid fa-spinner fa-spin text-xl text-cyan-400 mb-2"></i>
-            <p>Loading ${escapeHtml(season)} ${escapeHtml(year)} chart...</p>
-          </div>
-        `;
-      }
-      const lightChart = document.getElementById('light-seasonal-list');
-      if (lightChart) {
-        lightChart.innerHTML = `
-          <div class="py-12 text-center text-editorial-slate400 font-mono text-xs">
-            <i class="fa-solid fa-spinner fa-spin text-xl text-editorial-crimson mb-2"></i>
-            <p>Loading ${escapeHtml(season)} ${escapeHtml(year)} chart...</p>
-          </div>
-        `;
-      }
-    }
+    const chart = document.getElementById('seasonal-chart');
+    if (chart) chart.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 font-mono text-xs"><i class="fa-solid fa-spinner fa-spin text-xl text-rose-500 dark:text-cyan-400 mb-2"></i><p>Loading ${season} ${year} chart...</p></div>`;
 
     try {
-      const data = await queryAniList(SEASONAL_CHART_QUERY, {
-        season,
-        seasonYear: year,
-        status
-      });
-
+      const data = await queryAniList(SEASONAL_CHART_QUERY, { season, seasonYear: year, status });
       if (isStaleTab(token)) return;
-
       const items = data?.Page?.media || [];
       seasonalCache[cacheKey] = items;
-
       if (state.discoverSeason === season && state.discoverChartTab === subtab) {
         state.seasonalChart = items;
         renderSeasonalChart();
       }
     } catch (err) {
-      if (isStaleTab(token)) return;
-      // On fetch error: show error message or honest empty state (never fallback data for filter empty)
-      renderSeasonalChart(err.message);
+      if (!isStaleTab(token)) renderSeasonalChart(err.message);
+    }
+  }
+
+  async function ensureUserList() {
+    if (state.animeListLoaded) return;
+    const payload = await API.getAnimeList();
+    const list = Array.isArray(payload) ? payload : (payload?.anime || []);
+    state.animeList = list;
+    list.forEach(entry => {
+      const id = Number(entry.mediaId || entry.id);
+      if (id) state.listEntriesByMedia[id] = { ...state.listEntriesByMedia[id], mediaId: id, status: 'CURRENT', progress: entry.progress || 0 };
+    });
+    state.animeListLoaded = true;
+  }
+
+  function setupSeasonalObserver() {
+    if (typeof document === 'undefined') return;
+    const section = document.getElementById('seasonal-chart-section');
+    if (!section) return;
+    const initialize = () => {
+      if (seasonalChartInitialized) return;
+      seasonalChartInitialized = true;
+      seasonalObserver?.disconnect();
+      fetchSeasonalChartData();
+    };
+    if ('IntersectionObserver' in window) {
+      seasonalObserver = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) initialize();
+      }, { rootMargin: '240px 0px' });
+      seasonalObserver.observe(section);
+    } else {
+      initialize();
     }
   }
 
@@ -1206,222 +1030,130 @@
     renderSeasonalChart();
 
     await Promise.allSettled([
+      ensureUserList(),
       fetchFeedData(state.discoverFeedKey),
-      fetchAiringRadarData(),
-      fetchSeasonalChartData()
+      fetchAiringRadarData()
     ]);
+    if (state.activeTab === 'discover') {
+      renderDiscover();
+      renderAiringRadar();
+    }
   }
 
-  // Render Discover Hero Spotlight & Grids
+  // Render Discover Hero Spotlight & Grid
   function renderDiscover() {
     if (typeof document === 'undefined') return;
     const feedKey = state.discoverFeedKey;
-    let list = state.discoverFeeds[feedKey] || FALLBACK_DATA[feedKey] || [];
+    let list = (state.discoverFeeds[feedKey] || FALLBACK_DATA[feedKey] || []).slice(0, 12);
 
-    // Filter by Format
     if (state.discoverFormatFilter !== 'ALL') {
       list = list.filter(m => m.format === state.discoverFormatFilter);
     }
-
-    // Filter by Search Query
     if (state.discoverSearchTerm) {
-      list = list.filter(m => {
-        const title = getAnimeTitle(m).toLowerCase();
-        return title.includes(state.discoverSearchTerm);
-      });
+      list = list.filter(m => getAnimeTitle(m).toLowerCase().includes(state.discoverSearchTerm));
     }
 
-    // Update Counts & Badges
     const feedNames = {
-      trending: 'Trending Pulse',
-      popular: 'Most Popular',
-      top: 'Top Rated',
-      seasonal: `Season ${state.discoverSeasonYear || 2026}`,
-      upcoming: 'Upcoming Next'
+      trending: 'Trending now',
+      popular: 'Most popular',
+      top: 'Top rated',
+      seasonal: 'Seasonal picks',
+      upcoming: 'Coming soon'
     };
-
-    ['trending', 'popular', 'top', 'seasonal', 'upcoming'].forEach(k => {
-      const count = (state.discoverFeeds[k] || FALLBACK_DATA[k] || []).length || 12;
-      const dBadge = document.getElementById(`dark-badge-${k}`);
-      if (dBadge) dBadge.textContent = count;
-      const lBadge = document.getElementById(`light-badge-${k}`);
-      if (lBadge) lBadge.textContent = count;
+    ['trending', 'popular', 'top', 'seasonal', 'upcoming'].forEach(key => {
+      const badge = document.getElementById('feed-badge-' + key);
+      if (badge) badge.textContent = Math.min(12, (state.discoverFeeds[key] || FALLBACK_DATA[key] || []).length);
     });
+    const count = document.getElementById('feed-count');
+    if (count) count.textContent = list.length + ' items';
+    const title = document.getElementById('feed-title');
+    if (title) title.textContent = feedNames[feedKey] || 'Discover';
+    const subtitle = document.getElementById('feed-subtitle');
+    if (subtitle) subtitle.textContent = list.length + ' titles';
 
-    const dCount = document.getElementById('dark-feed-count');
-    if (dCount) dCount.textContent = `${list.length} Items`;
-    const lCount = document.getElementById('light-feed-count');
-    if (lCount) lCount.textContent = `${list.length} Records`;
-    const lTitle = document.getElementById('light-feed-title');
-    if (lTitle) lTitle.textContent = feedNames[feedKey] || 'Catalog';
-
-    // Render Spotlight Hero Banner
-    const heroMedia = list[0] || FALLBACK_DATA.trending[0];
+    const hero = document.getElementById('spotlight-hero');
+    const heroMedia = list[0] || (state.discoverFeeds.trending || [])[0];
     if (heroMedia) {
+      hero?.classList.remove('hidden');
       state.spotlightMedia = heroMedia;
-      const title = getAnimeTitle(heroMedia);
-      const cover = getCoverImage(heroMedia);
-      const score = heroMedia.averageScore || heroMedia.meanScore || 88;
-      const format = heroMedia.format || 'TV';
-      const eps = heroMedia.episodes ? `${heroMedia.episodes} Episodes` : 'Releasing';
-      const desc = sanitizeHtml(heroMedia.description) || 'Featured masterpiece in the current catalog collection.';
-
-      // Dark Hero
-      const dCover = document.getElementById('dark-hero-cover');
-      if (dCover) dCover.src = cover;
-      const dTitle = document.getElementById('dark-hero-title');
-      if (dTitle) dTitle.textContent = title;
-      const dDesc = document.getElementById('dark-hero-desc');
-      if (dDesc) dDesc.textContent = desc;
-      const dScore = document.getElementById('dark-hero-score');
-      if (dScore) dScore.textContent = `★ ${score}%`;
-      const dMeta = document.getElementById('dark-hero-meta');
-      if (dMeta) dMeta.textContent = `${format} • ${eps}`;
-
-      const dBtnAdd = document.getElementById('dark-hero-btn-add');
-      if (dBtnAdd) {
-        dBtnAdd.onclick = () => quickAddWatching(heroMedia.id, title);
+      const heroTitle = getAnimeTitle(heroMedia);
+      const desc = sanitizeHtml(heroMedia.description);
+      const heroCover = document.getElementById('hero-cover');
+      if (heroCover) heroCover.src = getCoverImage(heroMedia);
+      const heroTitleEl = document.getElementById('hero-title');
+      if (heroTitleEl) {
+        heroTitleEl.textContent = heroTitle;
+        heroTitleEl.title = heroTitle;
       }
-      const dBtnInsp = document.getElementById('dark-hero-btn-inspect');
-      if (dBtnInsp) {
-        dBtnInsp.onclick = () => openMediaDetail(heroMedia.id);
+      const heroDesc = document.getElementById('hero-desc');
+      if (heroDesc) {
+        heroDesc.textContent = desc;
+        heroDesc.classList.toggle('hidden', !desc);
       }
-
-      // Light Hero
-      const lCover = document.getElementById('light-hero-cover');
-      if (lCover) lCover.src = cover;
-      const lTitleEl = document.getElementById('light-hero-title');
-      if (lTitleEl) {
-        lTitleEl.textContent = title;
-        lTitleEl.setAttribute('title', title);
+      const heroScore = document.getElementById('hero-score');
+      if (heroScore) heroScore.textContent = '★ ' + (heroMedia.averageScore || heroMedia.meanScore || '—') + '%';
+      const heroMeta = document.getElementById('hero-meta');
+      if (heroMeta) heroMeta.textContent = (heroMedia.format || 'TV') + ' · ' + (heroMedia.episodes ? heroMedia.episodes + ' episodes' : 'releasing');
+      const heroListBadge = document.getElementById('hero-list-badge');
+      if (heroListBadge) heroListBadge.classList.toggle('hidden', !isMediaOnList(heroMedia));
+      const addButton = document.getElementById('hero-btn-add');
+      const inspectButton = document.getElementById('hero-btn-inspect');
+      if (addButton) {
+        addButton.replaceWith(addButton.cloneNode(true));
+        document.getElementById('hero-btn-add').addEventListener('click', () => quickAddWatching(heroMedia.id, heroTitle));
       }
-      const lDesc = document.getElementById('light-hero-desc');
-      if (lDesc) lDesc.textContent = desc;
-      const lScore = document.getElementById('light-hero-score');
-      if (lScore) lScore.textContent = `★ ${score}% Score`;
-      const lMeta = document.getElementById('light-hero-meta');
-      if (lMeta) lMeta.textContent = `${format} • ${eps}`;
-
-      const lBtnAdd = document.getElementById('light-hero-btn-add');
-      if (lBtnAdd) {
-        lBtnAdd.onclick = () => quickAddWatching(heroMedia.id, title);
+      if (inspectButton) {
+        inspectButton.replaceWith(inspectButton.cloneNode(true));
+        document.getElementById('hero-btn-inspect').addEventListener('click', () => openMediaDetail(heroMedia.id));
       }
-      const lBtnInsp = document.getElementById('light-hero-btn-inspect');
-      if (lBtnInsp) {
-        lBtnInsp.onclick = () => openMediaDetail(heroMedia.id);
-      }
+    } else {
+      hero?.classList.add('hidden');
     }
 
-    // Render Dark Discover Grid
-    const darkGrid = document.getElementById('dark-discover-grid');
-    if (darkGrid) {
-      if (list.length === 0) {
-        darkGrid.innerHTML = `
-          <div class="col-span-full py-16 text-center text-slate-400 font-mono text-xs">
-            <i class="fa-solid fa-magnifying-glass text-2xl text-cyan-400/50 mb-2"></i>
-            <p>No titles matched the current filter criteria.</p>
-          </div>
-        `;
-      } else {
-        darkGrid.innerHTML = list.map(m => renderDiscoverCardHtml(m, 'dark')).join('');
-      }
-    }
-
-    // Render Light Discover Grid
-    const lightGrid = document.getElementById('light-discover-grid');
-    if (lightGrid) {
-      if (list.length === 0) {
-        lightGrid.innerHTML = `
-          <div class="col-span-full py-16 text-center text-slate-400 font-mono text-xs">
-            <i class="fa-solid fa-magnifying-glass text-2xl text-rose-400 mb-2"></i>
-            <p>No records matched your filter selection.</p>
-          </div>
-        `;
-      } else {
-        lightGrid.innerHTML = list.map(m => renderDiscoverCardHtml(m, 'light')).join('');
-      }
-    }
+    const grid = document.getElementById('discover-grid');
+    if (!grid) return;
+    grid.innerHTML = list.length
+      ? list.map(m => renderDiscoverCardHtml(m)).join('')
+      : `<div class="col-span-full py-16 text-center text-slate-400 font-mono text-xs"><i class="fa-solid fa-magnifying-glass text-2xl text-rose-500 dark:text-cyan-400 mb-2"></i><p>No titles match these filters.</p></div>`;
   }
 
-  // Render Airing Radar Timeline
+  // Render Airing from your list strip
   function renderAiringRadar() {
     if (typeof document === 'undefined') return;
-    const schedules = state.airingRadar.length > 0 ? state.airingRadar : FALLBACK_DATA.trending;
-
-    const darkRadar = document.getElementById('dark-airing-radar');
-    if (darkRadar) {
-      darkRadar.innerHTML = schedules.slice(0, 10).map(item => renderAiringRadarItemHtml(item, 'dark')).join('');
-    }
-
-    const lightRadar = document.getElementById('light-airing-radar');
-    if (lightRadar) {
-      lightRadar.innerHTML = schedules.slice(0, 10).map(item => renderAiringRadarItemHtml(item, 'light')).join('');
-    }
+    const radar = document.getElementById('airing-radar');
+    if (!radar) return;
+    const schedules = (state.airingRadar || []).slice(0, 6);
+    radar.innerHTML = schedules.length
+      ? schedules.map(item => renderAiringRadarItemHtml(item)).join('')
+      : `<div class="w-full py-4 text-center text-slate-500 dark:text-slate-400 text-xs">No airing titles from your list this week.</div>`;
   }
 
-  // Render Seasonal Chart Hub & Workspace (N1, N2, N3: Honest Empty State, TBA Filter, Hide-My-List)
+  // Render the full-width seasonal chart
   function renderSeasonalChart(errorMessage = null) {
     if (typeof document === 'undefined') return;
-    const darkChart = document.getElementById('dark-seasonal-chart');
-    const lightChart = document.getElementById('light-seasonal-list');
-    if (!darkChart && !lightChart) return;
+    const chart = document.getElementById('seasonal-chart');
+    if (!chart) return;
 
-    let items = Array.isArray(state.seasonalChart) ? [...state.seasonalChart] : [];
-
-    // Filter by Subtab (Airing, Upcoming, TBA, Archive)
-    if (state.discoverChartTab === 'Upcoming') {
-      items = items.filter(m => Boolean(m.nextAiringEpisode));
-    } else if (state.discoverChartTab === 'TBA') {
-      items = items.filter(m => !m.nextAiringEpisode);
-    }
-
-    // Filter by Hide My List (N3)
-    if (state.hideOnMyList) {
-      const onListIds = new Set(state.animeList.map(a => Number(a.mediaId || a.id)));
-      items = items.filter(m => {
-        const id = Number(m.id);
-        const onWatch = onListIds.has(id);
-        const onAniList = Boolean(state.listEntriesByMedia[id]) || Boolean(m.mediaListEntry);
-        return !onWatch && !onAniList;
-      });
-    }
-
-    // N3: Honest empty state message — NEVER re-insert fallback data on empty filter
-    if (items.length === 0) {
-      const emptyMsg = errorMessage
-        ? `Failed to load seasonal data: ${escapeHtml(errorMessage)}`
-        : 'No titles for this season/filter.';
-
-      const emptyDark = `
-        <div class="col-span-full py-12 text-center text-slate-400 font-mono text-xs">
-          <i class="fa-solid fa-calendar-xmark text-2xl text-cyan-400/50 mb-2"></i>
-          <p>${emptyMsg}</p>
-        </div>
-      `;
-      const emptyLight = `
-        <div class="col-span-full py-12 text-center text-editorial-slate500 font-mono text-xs">
-          <i class="fa-solid fa-calendar-xmark text-2xl text-editorial-crimson/50 mb-2"></i>
-          <p>${emptyMsg}</p>
-        </div>
-      `;
-      if (darkChart) darkChart.innerHTML = emptyDark;
-      if (lightChart) lightChart.innerHTML = emptyLight;
+    if (!seasonalChartInitialized && !errorMessage) {
+      chart.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 text-xs">Seasonal chart loads when you reach this section.</div>`;
       return;
     }
 
-    // Dark Seasonal Chart
-    if (darkChart) {
-      darkChart.innerHTML = items.slice(0, 15).map(m => renderSeasonalItemHtml(m, 'dark')).join('');
-    }
+    let items = Array.isArray(state.seasonalChart) ? [...state.seasonalChart] : [];
+    if (state.discoverChartTab === 'Upcoming') items = items.filter(m => Boolean(m.nextAiringEpisode));
+    if (state.discoverChartTab === 'TBA') items = items.filter(m => !m.nextAiringEpisode);
+    if (state.hideOnMyList) items = items.filter(m => !isMediaOnList(m));
 
-    // Light Seasonal Chart
-    if (lightChart) {
-      lightChart.innerHTML = items.slice(0, 15).map(m => renderSeasonalItemHtml(m, 'light')).join('');
+    if (items.length === 0) {
+      const message = errorMessage ? 'Failed to load seasonal data: ' + escapeHtml(errorMessage) : 'No titles for this season and filter.';
+      chart.innerHTML = `<div class="col-span-full py-12 text-center text-slate-500 dark:text-slate-400 font-mono text-xs"><i class="fa-solid fa-calendar-xmark text-xl text-rose-500 dark:text-cyan-400 mb-2"></i><p>${message}</p></div>`;
+      return;
     }
+    chart.innerHTML = items.slice(0, 30).map(m => renderSeasonalItemHtml(m)).join('');
   }
 
   // ==============================================================
-  // MEDIA DETAIL ART SHEET MODAL (B1: Fully Escaped)
+  // MEDIA DETAIL ART SHEET MODAL  // MEDIA DETAIL ART SHEET MODAL (B1: Fully Escaped)
   // ==============================================================
   async function openMediaDetail(mediaId) {
     if (!mediaId || typeof document === 'undefined') return;
@@ -1581,16 +1313,19 @@
     const token = tabToken;
 
     try {
-      const anime = await API.getAnimeList();
+      const payload = await API.getAnimeList();
       if (isStaleTab(token)) return;
-      state.animeList = anime || [];
+      state.animeList = Array.isArray(payload) ? payload : (payload?.anime || []);
+      state.animeListLoaded = true;
+      state.animeList.forEach(entry => {
+        const id = Number(entry.mediaId || entry.id);
+        if (id) state.listEntriesByMedia[id] = { ...state.listEntriesByMedia[id], mediaId: id, status: 'CURRENT', progress: entry.progress || 0 };
+      });
 
       // Update badge count
       const count = state.animeList.length;
-      const darkBadge = document.getElementById('dark-watching-badge');
-      if (darkBadge) darkBadge.textContent = count;
-      const lightBadge = document.getElementById('light-watching-badge');
-      if (lightBadge) lightBadge.textContent = count;
+      const badge = document.getElementById('watching-badge');
+      if (badge) badge.textContent = count;
 
       if (state.animeList.length === 0) {
         grid.innerHTML = `
@@ -2114,7 +1849,7 @@
     });
 
     // Desktop navigation tabs
-    document.querySelectorAll('.dark-nav-tab, .light-nav-tab').forEach(btn => {
+    document.querySelectorAll('.nav-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.tab) switchTab(btn.dataset.tab);
       });
@@ -2130,19 +1865,18 @@
     });
 
     // Theme toggles
-    document.querySelectorAll('#theme-toggle-dark, #theme-toggle-light, .theme-toggle-btn').forEach(btn => {
+    document.querySelectorAll('.theme-toggle-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         toggleTheme();
       });
     });
 
-    // Hamburger menus
-    document.getElementById('light-hamburger-btn')?.addEventListener('click', () => {
-      document.getElementById('mobile-menu')?.classList.toggle('hidden');
-    });
-    document.getElementById('dark-mobile-menu-btn')?.addEventListener('click', () => {
-      document.getElementById('dark-mobile-menu')?.classList.toggle('hidden');
+    // Shared mobile menu
+    document.getElementById('hamburger-btn')?.addEventListener('click', (event) => {
+      const menu = document.getElementById('mobile-menu');
+      menu?.classList.toggle('hidden');
+      event.currentTarget.setAttribute('aria-expanded', String(!menu?.classList.contains('hidden')));
     });
 
     // Global Search Inputs
@@ -2152,7 +1886,8 @@
         const term = e.target.value.toLowerCase().trim();
         if (state.activeTab === 'discover') {
           state.discoverSearchTerm = term;
-          renderDiscover();
+          clearTimeout(discoverSearchTimer);
+          discoverSearchTimer = setTimeout(renderDiscover, 300);
         }
       });
       inputEl.addEventListener('keydown', (e) => {
@@ -2168,22 +1903,16 @@
         }
       });
     }
-    setupGlobalSearch(document.getElementById('dark-global-search'));
-    setupGlobalSearch(document.getElementById('light-global-search'));
+    setupGlobalSearch(document.getElementById('global-header-search'));
 
     // Command-K / Ctrl-K shortcut
     window.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        const isDark = document.documentElement.classList.contains('dark');
-        const darkSearch = document.getElementById('dark-global-search');
-        const lightSearch = document.getElementById('light-global-search');
-        if (isDark && darkSearch) {
-          darkSearch.focus();
-          darkSearch.select();
-        } else if (!isDark && lightSearch) {
-          lightSearch.focus();
-          lightSearch.select();
+        const search = document.getElementById('global-header-search');
+        if (search) {
+          search.focus();
+          search.select();
         }
       }
     });
@@ -2311,16 +2040,13 @@
     toggleBtns.forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isDark = document.documentElement.classList.contains('dark');
-        const panel = isDark ? document.getElementById('notif-dropdown-dark') : document.getElementById('notif-dropdown-light');
-        panel?.classList.toggle('hidden');
+        document.getElementById('notif-dropdown')?.classList.toggle('hidden');
       });
     });
 
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.notif-toggle-btn, .notif-dropdown-panel')) {
-        document.getElementById('notif-dropdown-dark')?.classList.add('hidden');
-        document.getElementById('notif-dropdown-light')?.classList.add('hidden');
+        document.getElementById('notif-dropdown')?.classList.add('hidden');
       }
     });
 
@@ -2365,6 +2091,7 @@
     document.addEventListener('DOMContentLoaded', async () => {
       initTheme();
       setupDelegatedActions();
+      setupSeasonalObserver();
       await loadSettingsConfig();
       setDiscoverSeason(state.discoverSeason);
       switchTab('discover');
@@ -2379,9 +2106,11 @@
     escapeHtml,
     sanitizeHtml,
     formatRelativeTime,
+    formatCountdown,
     getAnimeTitle,
     formatTitle,
     getCoverImage,
+    isMediaOnList,
     renderDiscoverCardHtml,
     renderAiringRadarItemHtml,
     renderSeasonalItemHtml,
@@ -2400,3 +2129,6 @@
     isStaleTab
   };
 });
+
+
+

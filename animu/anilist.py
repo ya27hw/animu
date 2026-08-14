@@ -556,7 +556,7 @@ class AnilistClient:
         return {"pageInfo": {"total": 0, "perPage": per_page, "currentPage": page, "lastPage": 1, "hasNextPage": False}, "media": []}
 
     def get_media_detail(self, media_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve detailed anime metadata, airing schedule, relations, and user list entry."""
+        """Retrieve the metadata needed by the Discover media detail sheet."""
         query = """
         query ($id: Int) {
           Media(id: $id, type: ANIME) {
@@ -623,10 +623,42 @@ class AnilistClient:
                   format
                   status
                   coverImage {
+                    extraLarge
                     medium
                     large
                   }
                 }
+              }
+            }
+            characters(sort: [ROLE, RELEVANCE], perPage: 12) {
+              edges {
+                role
+                node {
+                  id
+                  name {
+                    full
+                  }
+                  image {
+                    large
+                    medium
+                  }
+                }
+                voiceActors {
+                  id
+                  language
+                  name {
+                    full
+                  }
+                  image {
+                    medium
+                  }
+                }
+              }
+            }
+            studios(isMain: true) {
+              nodes {
+                id
+                name
               }
             }
             mediaListEntry {
