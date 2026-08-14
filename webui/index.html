@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -263,47 +263,67 @@
 <body class="min-h-screen bg-[#f8fafc] dark:bg-[#090d16] text-slate-900 dark:text-slate-100 font-sans antialiased selection:bg-cyan-500/30 selection:text-cyan-200 w-full overflow-x-hidden">
 
   <!-- ============================================================== -->
-  <!-- LIGHT THEME SHELL HEADER (DESIGN 2: EDITORIAL SLATE WORKSTATION) -->
+  <!-- LIGHT THEME SHELL HEADER (SINGLE COMPACT ROW MASTHEAD) -->
   <!-- ============================================================== -->
-  <header id="header-light" class="dark:hidden w-full bg-white hairline-b sticky top-0 z-40 overflow-hidden">
-    <!-- Top Deck: Brand + Search + Utilities -->
-    <div class="w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4 hairline-b min-w-0">
-      <!-- Left: Logo & Issue Tag -->
-      <div class="flex items-center gap-2 sm:gap-4 flex-shrink-0 min-w-0">
-        <a href="#" class="flex items-center gap-2 sm:gap-3 group" onclick="switchTab('discover'); return false;">
-          <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-editorial-slate900 text-white flex items-center justify-center font-serif font-black text-base sm:text-lg tracking-widest group-hover:bg-editorial-crimson transition-colors shadow-sm flex-shrink-0">
+  <header id="header-light" class="dark:hidden w-full bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40">
+    <div class="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-3 sm:gap-6 min-w-0">
+      <!-- Left: Logo & Wordmark -->
+      <div class="flex items-center gap-3 flex-shrink-0 min-w-0">
+        <a href="#" class="flex items-center gap-2.5 group" onclick="switchTab('discover'); return false;">
+          <div class="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-display font-black text-sm tracking-wider shadow-xs group-hover:bg-rose-600 transition-colors flex-shrink-0">
             A
           </div>
-          <div class="flex flex-col min-w-0">
-            <span class="font-serif font-black text-sm sm:text-lg tracking-[0.15em] sm:tracking-[0.2em] text-editorial-slate900 leading-none">ANIMU</span>
-            <span class="text-[8px] sm:text-[9px] font-mono tracking-wider text-editorial-slate500 uppercase mt-0.5 truncate">Media Archive // Ed. 2026</span>
-          </div>
+          <span class="font-display font-black text-base tracking-wider text-slate-900 leading-none">ANIMU</span>
         </a>
-        <div class="hidden lg:flex items-center gap-2 pl-4 hairline-l">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span class="text-[11px] font-mono text-editorial-slate500">Sync: AniList + qBittorrent</span>
-        </div>
       </div>
 
-      <!-- Center: Fast Live Search Bar -->
-      <div class="hidden sm:flex flex-1 max-w-md mx-2 min-w-0">
-        <div class="relative w-full">
-          <svg class="w-4 h-4 text-editorial-slate400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-          <input id="light-global-search" type="text" placeholder="Search catalog..." class="w-full bg-editorial-slate100 text-editorial-slate900 text-xs rounded-lg pl-9 pr-8 py-1.5 sm:py-2 border border-editorial-slate200 focus:border-editorial-crimson focus:bg-white focus:outline-none transition-all placeholder:text-editorial-slate400">
-          <kbd class="hidden md:inline-block absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono bg-white text-editorial-slate500 px-1.5 py-0.5 rounded border border-editorial-slate200">⌘K</kbd>
-        </div>
-      </div>
+      <!-- Center: Single-Row Desktop Navigation Ribbon -->
+      <nav id="light-nav-ribbon" class="hidden lg:flex items-center gap-1 min-w-0 flex-1 justify-center max-w-2xl">
+        <button data-tab="discover" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-bold text-slate-900 bg-slate-100 transition-all flex items-center gap-1.5 cursor-pointer">
+          Discover
+        </button>
+        <button data-tab="watching" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all flex items-center gap-1.5 cursor-pointer">
+          Watching <span id="light-watching-badge" class="text-[10px] font-mono text-slate-400"></span>
+        </button>
+        <button data-tab="lists" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          Lists
+        </button>
+        <button data-tab="search" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          Search
+        </button>
+        <button data-tab="social" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          Social
+        </button>
+        <button data-tab="stats" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          Stats
+        </button>
+        <button data-tab="history" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          History
+        </button>
+        <button data-tab="logs" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          Logs
+        </button>
+        <button data-tab="settings" class="nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all cursor-pointer">
+          Settings
+        </button>
+      </nav>
 
-      <!-- Right: Utilities & User -->
-      <div class="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
-        <!-- Notification Button -->
+      <!-- Right: Search + Utilities (Notifications, Theme Toggle, Profile, Mobile Menu) -->
+      <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+        <!-- Search Input -->
+        <div class="hidden sm:flex relative w-40 md:w-52 min-w-0">
+          <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input id="light-global-search" type="text" placeholder="Search catalog..." class="w-full bg-slate-100 text-slate-900 text-xs rounded-lg pl-8 pr-7 py-1.5 border border-slate-200 focus:border-rose-500 focus:bg-white focus:outline-none transition-all placeholder:text-slate-400">
+          <kbd class="hidden md:inline-block absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono bg-white text-slate-400 px-1 py-0.2 rounded border border-slate-200">⌘K</kbd>
+        </div>
+
+        <!-- Notification Bell -->
         <div class="relative">
-          <button id="notif-btn-light" class="notif-toggle-btn relative p-1.5 sm:p-2 rounded-lg bg-editorial-slate100 hover:bg-editorial-slate200 text-editorial-slate700 transition-colors cursor-pointer" title="Notifications">
+          <button id="notif-btn-light" class="notif-toggle-btn relative p-1.5 sm:p-2 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" title="Notifications">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-            <span id="notif-badge-light" class="notif-badge-shared hidden absolute top-1 right-1 w-2 h-2 rounded-full bg-editorial-crimson"></span>
+            <span id="notif-badge-light" class="notif-badge-shared hidden absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-600"></span>
           </button>
-          <!-- Notification Dropdown Light -->
-          <div id="notif-dropdown-light" class="notif-dropdown-panel hidden absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-4 space-y-3">
+          <div id="notif-dropdown-light" class="notif-dropdown-panel hidden absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 p-4 space-y-3">
             <div class="flex items-center justify-between pb-2.5 border-b border-slate-100">
               <h4 class="font-bold text-sm flex items-center gap-2 text-slate-800">
                 <i class="fa-solid fa-bell text-rose-500"></i>Notifications
@@ -317,70 +337,26 @@
         </div>
 
         <!-- Theme Toggle Light -->
-        <button id="theme-toggle-light" class="theme-toggle-btn p-1.5 sm:p-2 rounded-lg bg-editorial-slate100 hover:bg-editorial-slate200 text-editorial-slate700 transition-colors cursor-pointer" title="Switch to Dark Mode">
+        <button id="theme-toggle-light" class="theme-toggle-btn p-1.5 sm:p-2 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" title="Switch to Dark Mode">
           <i class="fa-solid fa-moon text-sm"></i>
         </button>
 
         <!-- User Profile Badge -->
-        <div class="flex items-center gap-2 pl-2 sm:pl-3 border-l border-editorial-slate200">
-          <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-editorial-slate900 text-white font-bold text-xs flex items-center justify-center font-display">
-            H
-          </div>
-          <div class="hidden xl:flex flex-col text-left">
-            <span class="text-xs font-semibold text-editorial-slate900">hermes</span>
-            <span class="text-[10px] text-editorial-crimson font-mono font-medium">AniList Synced</span>
-          </div>
+        <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-900 text-white font-bold text-xs flex items-center justify-center font-display shadow-xs flex-shrink-0">
+          H
         </div>
 
         <!-- Mobile Hamburger Button (Light) -->
-        <button id="light-hamburger-btn" class="lg:hidden p-1.5 sm:p-2 rounded-lg bg-editorial-slate100 hover:bg-editorial-slate200 text-editorial-slate700 transition-colors cursor-pointer" aria-label="Open menu">
+        <button id="light-hamburger-btn" class="lg:hidden p-1.5 sm:p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer" aria-label="Open menu">
           <i class="fa-solid fa-bars text-base"></i>
         </button>
       </div>
     </div>
 
-    <!-- Lower Deck: Full Destination Navigation Ribbon -->
-    <div class="w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 h-10 sm:h-11 flex items-center justify-between overflow-x-auto custom-scroll min-w-0">
-      <nav id="light-nav-ribbon" class="flex items-center gap-1 sm:gap-2 whitespace-nowrap min-w-max">
-        <button data-tab="discover" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-bold text-editorial-crimson border-b-2 border-editorial-crimson tracking-wide flex items-center gap-1.5 flex-shrink-0 cursor-pointer transition-colors">
-          <span>Discover</span>
-          <span class="text-[9px] font-mono px-1 rounded bg-rose-100 text-rose-800">New</span>
-        </button>
-        <button data-tab="watching" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Watching <span id="light-watching-badge" class="text-[10px] font-mono text-editorial-slate400 ml-0.5 sm:ml-1"></span>
-        </button>
-        <button data-tab="lists" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Lists
-        </button>
-        <button data-tab="search" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Search
-        </button>
-        <button data-tab="social" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Social
-        </button>
-        <button data-tab="stats" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Stats
-        </button>
-        <button data-tab="history" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          History
-        </button>
-        <button data-tab="logs" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Logs
-        </button>
-        <button data-tab="settings" class="nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer">
-          Settings
-        </button>
-      </nav>
-
-      <div class="hidden xl:flex items-center gap-3 text-xs text-editorial-slate500 font-mono flex-shrink-0 ml-4">
-        <span>LAYOUT: TRI-COLUMN WORKSPACE</span>
-      </div>
-    </div>
-
     <!-- Mobile Navigation Drawer (Light) -->
-    <div id="mobile-menu" class="hidden lg:hidden border-t border-editorial-slate200 bg-white/95 backdrop-blur-xl px-4 py-3">
+    <div id="mobile-menu" class="hidden lg:hidden border-t border-slate-200 bg-white/95 backdrop-blur-xl px-4 py-3 shadow-lg">
       <div class="grid grid-cols-3 gap-1.5">
-        <button data-tab="discover" class="mobile-nav-tab flex items-center gap-2 px-2.5 py-2 text-xs font-bold rounded-lg text-editorial-crimson bg-rose-50 cursor-pointer">
+        <button data-tab="discover" class="mobile-nav-tab flex items-center gap-2 px-2.5 py-2 text-xs font-bold rounded-lg text-rose-600 bg-rose-50 cursor-pointer">
           <i class="fa-solid fa-compass text-rose-500 w-4"></i>Discover
         </button>
         <button data-tab="watching" class="mobile-nav-tab flex items-center gap-2 px-2.5 py-2 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-100 cursor-pointer">
@@ -786,181 +762,146 @@
           </div>
 
           <!-- ------------------------------------------------------------ -->
-          <!-- LIGHT THEME DISCOVER (DESIGN 2: EDITORIAL SLATE WORKSTATION) -->
+          <!-- LIGHT THEME DISCOVER (CALM, POLISHED STREAMING INTERFACE) -->
           <!-- ------------------------------------------------------------ -->
-          <div id="discover-light" class="dark:hidden flex flex-col gap-4 sm:gap-6 w-full">
+          <div id="discover-light" class="dark:hidden flex flex-col gap-5 sm:gap-6 w-full">
 
-            <div class="workstation-grid items-start">
-
-              <!-- COLUMN 1 (Left ~28%): CURATED STREAMS & LIVE BROADCAST RADAR -->
-              <div class="workstation-col-1 flex flex-col gap-4 sm:gap-5 min-w-0">
-
-                <!-- Curated Feeds Menu (Collapses 5 rails into 1 compact controller) -->
-                <section class="bg-white rounded-xl p-3 sm:p-4 hairline-border card-shadow flex flex-col gap-3 min-w-0">
-                  <div class="flex items-center justify-between pb-2 hairline-b">
-                    <span class="text-[11px] font-mono font-bold tracking-wider text-editorial-slate500 uppercase">Curated Feeds</span>
-                    <span class="text-[10px] font-mono text-editorial-crimson font-semibold">5 Channels</span>
-                  </div>
-
-                  <div class="flex flex-col gap-1.5">
-                    <!-- Trending -->
-                    <button onclick="switchFeed('trending')" id="light-feed-trending" class="light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-bold bg-editorial-slate900 text-white flex items-center justify-between transition-all shadow-sm cursor-pointer">
-                      <span class="flex items-center gap-2">
-                        <span>🔥</span>
-                        <span>Trending Pulse</span>
-                      </span>
-                      <span id="light-badge-trending" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/20">12</span>
-                    </button>
-
-                    <!-- Top Rated -->
-                    <button onclick="switchFeed('top')" id="light-feed-top" class="light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-editorial-slate700 hover:bg-editorial-slate100 flex items-center justify-between transition-all cursor-pointer">
-                      <span class="flex items-center gap-2">
-                        <span>👑</span>
-                        <span>Top Rated</span>
-                      </span>
-                      <span id="light-badge-top" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-editorial-slate200 text-editorial-slate700">12</span>
-                    </button>
-
-                    <!-- Popular -->
-                    <button onclick="switchFeed('popular')" id="light-feed-popular" class="light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-editorial-slate700 hover:bg-editorial-slate100 flex items-center justify-between transition-all cursor-pointer">
-                      <span class="flex items-center gap-2">
-                        <span>⭐</span>
-                        <span>Most Popular</span>
-                      </span>
-                      <span id="light-badge-popular" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-editorial-slate200 text-editorial-slate700">12</span>
-                    </button>
-
-                    <!-- Seasonal -->
-                    <button onclick="switchFeed('seasonal')" id="light-feed-seasonal" class="light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-editorial-slate700 hover:bg-editorial-slate100 flex items-center justify-between transition-all cursor-pointer">
-                      <span class="flex items-center gap-2">
-                        <span>🌸</span>
-                        <span>Season 2026</span>
-                      </span>
-                      <span id="light-badge-seasonal" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-editorial-slate200 text-editorial-slate700">16</span>
-                    </button>
-
-                    <!-- Upcoming -->
-                    <button onclick="switchFeed('upcoming')" id="light-feed-upcoming" class="light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-editorial-slate700 hover:bg-editorial-slate100 flex items-center justify-between transition-all cursor-pointer">
-                      <span class="flex items-center gap-2">
-                        <span>✨</span>
-                        <span>Upcoming Next</span>
-                      </span>
-                      <span id="light-badge-upcoming" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-editorial-slate200 text-editorial-slate700">12</span>
-                    </button>
-                  </div>
-                </section>
-
-                <!-- Live Broadcast Ticker Card -->
-                <section class="bg-white rounded-xl p-3 sm:p-4 hairline-border card-shadow flex flex-col gap-3 min-w-0">
-                  <div class="flex items-center justify-between pb-2 hairline-b">
-                    <div class="flex items-center gap-1.5">
-                      <span class="w-2 h-2 rounded-full bg-rose-600 animate-pulse"></span>
-                      <h3 class="text-xs font-bold uppercase tracking-wider text-editorial-slate900">Broadcast Radar</h3>
-                    </div>
-                    <span class="text-[10px] font-mono text-editorial-slate500">Upcoming</span>
-                  </div>
-
-                  <div id="light-airing-radar" class="flex flex-col gap-2.5 max-h-[380px] overflow-y-auto custom-scroll pr-1 min-w-0">
-                    <div class="text-slate-400 text-xs py-4 text-center">Loading broadcast schedule...</div>
-                  </div>
-                </section>
-
+            <!-- 1. Stream Selector & Filter Controls Bar -->
+            <div class="bg-white border border-slate-200/80 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)] min-w-0">
+              <!-- Stream Tabs -->
+              <div class="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 sm:pb-0 min-w-0">
+                <button onclick="switchFeed('trending')" id="light-feed-trending" class="light-feed-btn px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white shadow-xs transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer">
+                  <span>🔥</span>
+                  <span>Trending</span>
+                  <span id="light-badge-trending" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/20">12</span>
+                </button>
+                <button onclick="switchFeed('popular')" id="light-feed-popular" class="light-feed-btn px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer">
+                  <span>⭐</span>
+                  <span>Popular</span>
+                  <span id="light-badge-popular" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">12</span>
+                </button>
+                <button onclick="switchFeed('top')" id="light-feed-top" class="light-feed-btn px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer">
+                  <span>👑</span>
+                  <span>Top Rated</span>
+                  <span id="light-badge-top" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">12</span>
+                </button>
+                <button onclick="switchFeed('seasonal')" id="light-feed-seasonal" class="light-feed-btn px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer">
+                  <span>🌸</span>
+                  <span>Season 2026</span>
+                  <span id="light-badge-seasonal" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">16</span>
+                </button>
+                <button onclick="switchFeed('upcoming')" id="light-feed-upcoming" class="light-feed-btn px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer">
+                  <span>✨</span>
+                  <span>Upcoming</span>
+                  <span id="light-badge-upcoming" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">12</span>
+                </button>
               </div>
 
-              <!-- COLUMN 2 (Center ~44%): PRIMARY CATALOG SHOWCASE & MATRIX -->
-              <div class="workstation-col-2 flex flex-col gap-4 sm:gap-5 min-w-0">
+              <!-- Format Filter & Items Counter -->
+              <div class="flex items-center gap-2.5 self-end sm:self-auto flex-shrink-0">
+                <span id="light-feed-title" class="hidden">Trending</span>
+                <select id="light-format-select" onchange="filterDiscoverFormat(this.value)" class="bg-slate-100 text-slate-800 text-xs font-medium rounded-xl px-3 py-1.5 border border-slate-200 focus:outline-none focus:border-rose-500">
+                  <option value="ALL">All Formats</option>
+                  <option value="TV">TV Series</option>
+                  <option value="MOVIE">Movies</option>
+                  <option value="ONA">ONA / Specials</option>
+                </select>
+                <span id="light-feed-count" class="text-xs font-mono font-medium text-slate-600 px-2.5 py-1 rounded-xl bg-slate-100 border border-slate-200">12 Records</span>
+              </div>
+            </div>
 
-                <!-- Editorial Spotlight Card (140px banner) -->
-                <div id="light-spotlight-hero" class="bg-gradient-to-r from-editorial-slate900 to-editorial-slate800 text-white rounded-2xl p-4 sm:p-5 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 card-shadow relative overflow-hidden min-w-0">
-                  <div class="flex items-center gap-3 sm:gap-4 z-10 w-full sm:w-auto min-w-0">
-                    <img id="light-hero-cover" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300' width='200' height='300' fill='%23f1f5f9'%3E%3Crect width='200' height='300' fill='%23f1f5f9'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2394a3b8' font-family='sans-serif' font-size='14'%3ERe:Zero%3C/text%3E%3C/svg%3E" alt="Featured" class="w-16 h-22 sm:w-20 sm:h-28 object-cover rounded-xl border border-white/20 shadow-md flex-shrink-0">
-                    <div class="flex flex-col gap-1 min-w-0">
-                      <div class="flex items-center gap-2 flex-wrap">
-                        <span id="light-hero-tag" class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-editorial-crimson text-white">EDITOR'S SELECTION</span>
-                        <span id="light-hero-score" class="text-xs font-bold text-amber-300">★ 90% Score</span>
-                        <span id="light-hero-meta" class="text-xs font-mono text-slate-300">19 Episodes</span>
-                      </div>
-                      <h2 id="light-hero-title" class="font-serif font-black text-base sm:text-xl truncate">Re:ZERO Season 4</h2>
-                      <p id="light-hero-desc" class="text-xs text-slate-300 line-clamp-1">Subaru Natsuki faces new harrowing trials and witch cult machinations in the 2026 continuation.</p>
-                    </div>
+            <!-- 2. Spotlight Hero Banner (Refined Light Surface) -->
+            <section id="light-spotlight-hero" class="bg-gradient-to-r from-slate-100/90 via-slate-50 to-rose-50/20 border border-slate-200/90 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)] relative overflow-hidden min-w-0">
+              <div class="flex items-center gap-3.5 sm:gap-4 z-10 w-full md:w-auto min-w-0">
+                <img id="light-hero-cover" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300' width='200' height='300' fill='%23f1f5f9'%3E%3Crect width='200' height='300' fill='%23f1f5f9'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2394a3b8' font-family='sans-serif' font-size='14'%3EFrieren%3C/text%3E%3C/svg%3E" alt="Featured" class="w-16 h-22 sm:w-20 sm:h-28 object-cover rounded-xl border border-slate-200/80 shadow-sm flex-shrink-0">
+                <div class="flex flex-col gap-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span id="light-hero-tag" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-rose-100 text-rose-700 border border-rose-200/60">FEATURED SPOTLIGHT</span>
+                    <span id="light-hero-score" class="text-xs font-bold text-amber-600 flex items-center gap-1">★ 91% Score</span>
+                    <span id="light-hero-meta" class="text-xs font-mono text-slate-500">TV • 28 Episodes</span>
                   </div>
-
-                  <div class="flex items-center gap-2 w-full xl:w-auto justify-start xl:justify-end z-10 flex-wrap flex-shrink-0">
-                    <button id="light-hero-btn-add" class="px-3.5 sm:px-4 py-2 rounded-lg bg-editorial-crimson hover:bg-editorial-crimsonDark text-white font-bold text-xs transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer">
-                      <span>+ Add to Watch</span>
-                    </button>
-                    <button id="light-hero-btn-inspect" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/20 transition-colors cursor-pointer">
-                      Details
-                    </button>
-                  </div>
+                  <h2 id="light-hero-title" class="font-display font-bold text-base sm:text-xl text-slate-900 truncate">Sousou no Frieren</h2>
+                  <p id="light-hero-desc" class="text-xs sm:text-sm text-slate-600 line-clamp-1 max-w-xl">An elf mage embarks on a nostalgic pilgrimage to understand humans after the defeat of the Demon King.</p>
                 </div>
+              </div>
 
-                <!-- Catalog Header & Filter Strip -->
-                <div class="bg-white rounded-xl p-3 sm:p-4 hairline-border card-shadow flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <h3 id="light-feed-title" class="font-serif font-black text-sm uppercase tracking-wide text-editorial-slate900">Trending Pulse</h3>
-                    <span id="light-feed-count" class="text-[11px] font-mono px-2 py-0.5 rounded bg-editorial-slate100 text-editorial-slate700 font-semibold">12 Records</span>
-                  </div>
+              <div class="flex items-center gap-2 w-full md:w-auto justify-end z-10 flex-shrink-0">
+                <button id="light-hero-btn-add" class="px-3.5 sm:px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs transition-all shadow-xs flex items-center gap-1.5 cursor-pointer">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  <span>Add to Watching</span>
+                </button>
+                <button id="light-hero-btn-inspect" class="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200 transition-colors cursor-pointer">
+                  Details
+                </button>
+              </div>
+            </section>
 
-                  <!-- Format Filter -->
-                  <div class="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
-                    <span class="text-[11px] font-mono text-editorial-slate500">Filter:</span>
-                    <select id="light-format-select" onchange="filterDiscoverFormat(this.value)" class="bg-editorial-slate100 text-editorial-slate800 text-xs rounded-lg px-2.5 py-1.5 border border-editorial-slate200 focus:outline-none focus:border-editorial-crimson">
-                      <option value="ALL">All Formats</option>
-                      <option value="TV">TV Series</option>
-                      <option value="MOVIE">Theatrical Films</option>
-                      <option value="ONA">ONA / Specials</option>
-                    </select>
-                  </div>
-                </div>
+            <!-- 3. Main Split View: Primary Catalog Grid (8 cols) + Radar/Seasonal Radar Hub (4 cols) -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start w-full min-w-0">
 
-                <!-- Primary Catalog Magazine Grid -->
-                <div id="light-discover-grid" class="catalog-grid min-w-0">
+              <!-- Left Main Feed Grid (8 cols on lg = ~67%) -->
+              <div class="lg:col-span-8 flex flex-col gap-4 min-w-0">
+                <div id="light-discover-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-6 gap-3 sm:gap-4 min-w-0">
                   <div class="col-span-full py-16 text-center text-slate-400 font-mono text-xs">
                     <i class="fa-solid fa-spinner fa-spin text-2xl text-rose-500 mb-2"></i>
                     <p>Loading catalog items...</p>
                   </div>
                 </div>
-
               </div>
 
-              <!-- COLUMN 3 (Right ~28%): FIRST-CLASS SEASONAL CHART WORKSTATION -->
-              <div class="workstation-col-3 flex flex-col gap-4 sm:gap-5 min-w-0">
+              <!-- Right Intelligence & Seasonal Radar Hub (4 cols on lg = ~33%) -->
+              <div class="lg:col-span-4 flex flex-col gap-5 sm:gap-6 min-w-0">
 
-                <section class="bg-white rounded-xl p-3 sm:p-4 hairline-border card-shadow flex flex-col gap-3.5 min-w-0">
-                  <div class="flex items-center justify-between pb-2 hairline-b">
-                    <div>
-                      <h3 class="font-serif font-black text-xs uppercase tracking-wider text-editorial-slate900">Seasonal Archive</h3>
-                      <span id="light-seasonal-year-tag" class="text-[10px] font-mono text-editorial-slate500">2026 Schedule</span>
+                <!-- Live Broadcast Radar -->
+                <section class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex flex-col gap-3 min-w-0">
+                  <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div class="flex items-center gap-2">
+                      <span class="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse"></span>
+                      <h3 class="font-display font-bold text-sm text-slate-900 uppercase tracking-wide">Live Broadcast Radar</h3>
                     </div>
-                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-editorial-slate900 text-white">CHART</span>
+                    <span class="text-[11px] font-mono text-slate-500">Next 7 Days</span>
+                  </div>
+
+                  <div id="light-airing-radar" class="flex flex-col gap-2 max-h-[340px] overflow-y-auto custom-scrollbar pr-1 min-w-0">
+                    <div class="text-slate-400 text-xs py-4 text-center">Loading broadcast schedule...</div>
+                  </div>
+                </section>
+
+                <!-- Seasonal Chart Workspace -->
+                <section class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex flex-col gap-3.5 min-w-0">
+                  <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div class="flex items-center gap-2">
+                      <svg class="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                      <h3 class="font-display font-bold text-sm text-slate-900 uppercase tracking-wide">Seasonal Chart Hub</h3>
+                    </div>
+                    <span id="light-seasonal-year-tag" class="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">2026 Summer</span>
                   </div>
 
                   <!-- 4 Season Switcher Tabs -->
-                  <div class="grid grid-cols-4 gap-1 p-1 bg-editorial-slate100 rounded-lg">
-                    <button onclick="setDiscoverSeason('SPRING')" id="light-season-SPRING" class="light-season-btn py-1 rounded text-xs font-semibold text-editorial-slate600 hover:text-editorial-slate900 transition-all text-center cursor-pointer">Spring</button>
-                    <button onclick="setDiscoverSeason('SUMMER')" id="light-season-SUMMER" class="light-season-btn py-1 rounded text-xs font-bold bg-white text-editorial-slate900 shadow-sm transition-all text-center cursor-pointer">Summer</button>
-                    <button onclick="setDiscoverSeason('FALL')" id="light-season-FALL" class="light-season-btn py-1 rounded text-xs font-semibold text-editorial-slate600 hover:text-editorial-slate900 transition-all text-center cursor-pointer">Fall</button>
-                    <button onclick="setDiscoverSeason('WINTER')" id="light-season-WINTER" class="light-season-btn py-1 rounded text-xs font-semibold text-editorial-slate600 hover:text-editorial-slate900 transition-all text-center cursor-pointer">Winter</button>
+                  <div class="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl">
+                    <button onclick="setDiscoverSeason('SPRING')" id="light-season-SPRING" class="light-season-btn py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer">Spring</button>
+                    <button onclick="setDiscoverSeason('SUMMER')" id="light-season-SUMMER" class="light-season-btn py-1.5 rounded-lg text-xs font-bold bg-white text-slate-900 shadow-sm transition-all text-center cursor-pointer">Summer</button>
+                    <button onclick="setDiscoverSeason('FALL')" id="light-season-FALL" class="light-season-btn py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer">Fall</button>
+                    <button onclick="setDiscoverSeason('WINTER')" id="light-season-WINTER" class="light-season-btn py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer">Winter</button>
                   </div>
 
-                  <!-- Subtabs: Airing / Upcoming / TBA / Archive + Hide My List -->
-                  <div class="flex flex-col gap-2 pt-1 min-w-0">
-                    <div class="flex items-center justify-between gap-1 overflow-x-auto pb-1 min-w-0">
-                      <button onclick="setDiscoverSubtab('Airing')" id="light-subtab-Airing" class="light-status-btn px-2.5 py-1 rounded text-[11px] font-bold bg-editorial-slate900 text-white flex-shrink-0 cursor-pointer">Airing</button>
-                      <button onclick="setDiscoverSubtab('Upcoming')" id="light-subtab-Upcoming" class="light-status-btn px-2.5 py-1 rounded text-[11px] font-medium text-editorial-slate600 hover:text-editorial-slate900 flex-shrink-0 cursor-pointer">Upcoming</button>
-                      <button onclick="setDiscoverSubtab('TBA')" id="light-subtab-TBA" class="light-status-btn px-2.5 py-1 rounded text-[11px] font-medium text-editorial-slate600 hover:text-editorial-slate900 flex-shrink-0 cursor-pointer">TBA</button>
-                      <button onclick="setDiscoverSubtab('Archive')" id="light-subtab-Archive" class="light-status-btn px-2.5 py-1 rounded text-[11px] font-medium text-editorial-slate600 hover:text-editorial-slate900 flex-shrink-0 cursor-pointer">Archive</button>
+                  <!-- Status Subtabs & Hide On List Toggle -->
+                  <div class="flex items-center justify-between text-xs gap-2 pt-1 flex-wrap">
+                    <div class="flex items-center gap-1 overflow-x-auto pb-1 min-w-0">
+                      <button onclick="setDiscoverSubtab('Airing')" id="light-subtab-Airing" class="light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-900 text-white flex-shrink-0 cursor-pointer">Airing</button>
+                      <button onclick="setDiscoverSubtab('Upcoming')" id="light-subtab-Upcoming" class="light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 hover:text-slate-900 flex-shrink-0 cursor-pointer">Upcoming</button>
+                      <button onclick="setDiscoverSubtab('TBA')" id="light-subtab-TBA" class="light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 hover:text-slate-900 flex-shrink-0 cursor-pointer">TBA</button>
+                      <button onclick="setDiscoverSubtab('Archive')" id="light-subtab-Archive" class="light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 hover:text-slate-900 flex-shrink-0 cursor-pointer">Archive</button>
                     </div>
 
-                    <label class="flex items-center justify-between text-[11px] text-editorial-slate600 cursor-pointer pt-1 hairline-t select-none">
-                      <span>Hide items on my list</span>
-                      <input type="checkbox" id="light-hide-my-list" onchange="toggleHideMyList(this.checked)" class="rounded border-editorial-slate300 text-editorial-crimson focus:ring-0">
+                    <label class="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer flex-shrink-0 select-none">
+                      <input type="checkbox" id="light-hide-my-list" onchange="toggleHideMyList(this.checked)" class="rounded border-slate-300 text-rose-600 focus:ring-0">
+                      <span>Hide My List</span>
                     </label>
                   </div>
 
                   <!-- Dense Seasonal Anime Cards -->
-                  <div id="light-seasonal-list" class="flex flex-col gap-2 max-h-[460px] overflow-y-auto custom-scroll pr-1 min-w-0">
+                  <div id="light-seasonal-list" class="flex flex-col gap-2 max-h-[380px] overflow-y-auto custom-scrollbar pr-1 min-w-0">
                     <div class="text-slate-400 text-xs py-4 text-center">Loading seasonal items...</div>
                   </div>
                 </section>

@@ -109,7 +109,7 @@
   // Application State
   const state = {
     activeTab: 'discover',
-    theme: typeof localStorage !== 'undefined' ? (localStorage.getItem('theme') || 'dark') : 'dark',
+    theme: typeof localStorage !== 'undefined' ? (localStorage.getItem('theme') || 'light') : 'light',
     userName: '',
     userId: null,
     titleLang: typeof localStorage !== 'undefined' ? (localStorage.getItem('titleLanguage') || 'romaji') : 'romaji',
@@ -518,43 +518,43 @@
 
     if (theme === 'light') {
       return `
-        <div class="group cursor-pointer bg-white hover:bg-white/90 hairline-border hover:border-editorial-slate400 rounded-xl overflow-hidden transition-all duration-200 flex flex-col justify-between relative card-shadow hover:-translate-y-0.5" data-action="open-detail" data-media-id="${mediaId}">
+        <div class="group cursor-pointer bg-white hover:bg-slate-50/50 border border-slate-200/80 hover:border-slate-300 rounded-2xl overflow-hidden transition-all duration-200 flex flex-col justify-between relative shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-md hover:-translate-y-0.5" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
           <div class="relative aspect-[3/4.2] w-full overflow-hidden bg-slate-100">
             <img src="${cover}" alt="${title}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-transparent opacity-60 group-hover:opacity-30 transition-opacity"></div>
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent opacity-40 group-hover:opacity-20 transition-opacity"></div>
             
             <!-- Format Pill -->
-            <div class="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-white/95 text-editorial-slate900 border border-editorial-slate200 font-mono text-[10px] font-bold shadow-sm">
+            <div class="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-white/90 backdrop-blur-sm text-slate-800 border border-slate-200/60 font-mono text-[10px] font-bold shadow-xs">
               ${format}
             </div>
 
             <!-- Score Badge -->
-            <div class="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-white/95 text-editorial-crimson border border-rose-200 font-mono text-[10px] font-bold shadow-sm">
+            <div class="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-white/90 backdrop-blur-sm text-rose-600 border border-rose-100 font-mono text-[10px] font-bold shadow-xs">
               ★ ${score}%
             </div>
 
             ${nextAiring ? `
-              <div class="absolute bottom-2 left-2 right-2 px-2 py-0.5 rounded bg-white/95 text-editorial-slate800 border border-editorial-slate200 text-[10px] font-mono truncate shadow-sm flex items-center gap-1">
+              <div class="absolute bottom-2 left-2 right-2 px-2 py-0.5 rounded-md bg-white/95 backdrop-blur-sm text-slate-800 border border-slate-200/60 text-[10px] font-mono truncate shadow-xs flex items-center gap-1.5">
                 <span class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
                 <span class="truncate">${nextAiring}</span>
               </div>
             ` : ''}
 
             <!-- Quick Action Overlay on Hover -->
-            <div class="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2" onclick="event.stopPropagation()">
-              <button data-action="nyaa-search" data-media-id="${mediaId}" data-media-title="${title}" class="p-2 rounded-lg bg-editorial-crimson text-white hover:bg-editorial-crimsonDark transition-all font-bold text-xs shadow-lg cursor-pointer" title="Search Torrents">
+            <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2" onclick="event.stopPropagation()">
+              <button data-action="nyaa-search" data-media-id="${mediaId}" data-media-title="${title}" class="p-2.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-all font-bold text-xs shadow-lg cursor-pointer" title="Search Torrents">
                 <i class="fa-solid fa-download"></i>
               </button>
-              <button data-action="open-detail" data-media-id="${mediaId}" class="p-2 rounded-lg bg-white text-editorial-slate900 hover:bg-slate-100 transition-all text-xs shadow cursor-pointer" title="Inspect Media">
+              <button data-action="open-detail" data-media-id="${mediaId}" class="p-2.5 rounded-xl bg-white text-slate-900 hover:bg-slate-100 transition-all text-xs shadow-lg cursor-pointer" title="Inspect Media">
                 <i class="fa-solid fa-eye"></i>
               </button>
             </div>
           </div>
 
           <!-- Metadata Strip -->
-          <div class="p-2.5 flex flex-col gap-1">
-            <h4 class="font-bold text-xs text-editorial-slate900 line-clamp-1 group-hover:text-editorial-crimson transition-colors" title="${title}">${title}</h4>
-            <div class="flex items-center justify-between text-[10px] text-editorial-slate500 font-mono">
+          <div class="p-3 flex flex-col gap-1 min-w-0">
+            <h4 class="font-semibold text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-rose-600 transition-colors" title="${title}">${title}</h4>
+            <div class="flex items-center justify-between text-[11px] text-slate-500 font-mono pt-0.5">
               <span>${eps}</span>
               <span>${year}</span>
             </div>
@@ -620,17 +620,17 @@
 
     if (theme === 'light') {
       return `
-        <div class="p-2.5 rounded-xl bg-editorial-slate100 hover:bg-editorial-slate200/80 border border-editorial-slate200 transition-colors flex items-center justify-between gap-2.5 group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}">
+        <div class="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition-all flex items-center justify-between gap-3 group cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
           <div class="flex items-center gap-2.5 min-w-0">
-            <img src="${cover}" alt="${title}" class="w-9 h-12 rounded-md object-cover flex-shrink-0 bg-white border border-editorial-slate200">
+            <img src="${cover}" alt="${title}" class="w-10 h-14 rounded-lg object-cover flex-shrink-0 bg-slate-100 border border-slate-200/60 shadow-xs">
             <div class="flex flex-col min-w-0">
-              <span class="text-xs font-semibold text-editorial-slate900 truncate group-hover:text-editorial-crimson transition-colors">${title}</span>
-              <span class="text-[10px] font-mono text-editorial-slate500">Episode ${ep}</span>
+              <span class="text-xs sm:text-sm font-semibold text-slate-900 truncate group-hover:text-rose-600 transition-colors" title="${title}">${title}</span>
+              <span class="text-[11px] font-mono text-slate-500">Episode ${ep}</span>
             </div>
           </div>
-          <div class="flex items-center gap-1.5 flex-shrink-0">
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-white border border-editorial-slate200 text-editorial-crimson font-bold">${countdown}</span>
-            <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="px-2 py-1 rounded bg-editorial-slate900 text-white hover:bg-editorial-crimson text-[10px] font-mono transition-colors cursor-pointer" title="Sync Tracking">+ AutoSync</button>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-md bg-rose-50 border border-rose-100 text-rose-600 font-bold">${countdown}</span>
+            <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-rose-600 text-white text-[10px] font-mono font-medium transition-colors cursor-pointer" title="Sync Tracking">+ AutoSync</button>
           </div>
         </div>
       `;
@@ -664,18 +664,18 @@
 
     if (theme === 'light') {
       return `
-        <div class="p-2 rounded-lg bg-editorial-slate50 hover:bg-editorial-slate100 border border-editorial-slate200 flex items-center justify-between gap-2.5 transition-colors group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}">
+        <div class="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 flex items-center justify-between gap-2.5 transition-all group cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
           <div class="flex items-center gap-2.5 min-w-0">
-            <img src="${cover}" alt="${title}" class="w-8 h-11 rounded-md object-cover flex-shrink-0 bg-white border border-editorial-slate200">
+            <img src="${cover}" alt="${title}" class="w-9 h-12 rounded-lg object-cover flex-shrink-0 bg-slate-100 border border-slate-200/60 shadow-xs">
             <div class="flex flex-col min-w-0">
-              <span class="text-xs font-semibold text-editorial-slate900 truncate group-hover:text-editorial-crimson transition-colors">${title}</span>
-              <span class="text-[10px] font-mono text-editorial-slate500">${format} • ${eps}</span>
+              <span class="text-xs sm:text-sm font-semibold text-slate-900 truncate group-hover:text-rose-600 transition-colors" title="${title}">${title}</span>
+              <span class="text-[10px] font-mono text-slate-500">${format} • ${eps}</span>
             </div>
           </div>
           <div class="flex items-center gap-2 flex-shrink-0">
-            <span class="text-[10px] font-mono text-editorial-crimson font-bold">★ ${score}%</span>
-            <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="p-1 rounded bg-white hover:bg-editorial-slate900 hover:text-white border border-editorial-slate200 text-editorial-slate700 text-xs transition-colors cursor-pointer" title="Bookmark / Add to List">
-              <i class="fa-solid fa-plus"></i>
+            <span class="text-[10px] font-mono text-rose-600 font-bold bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded">★ ${score}%</span>
+            <button data-action="quick-add" data-media-id="${mediaId}" data-media-title="${title}" class="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-900 hover:text-white border border-slate-200 text-slate-700 text-xs flex items-center justify-center transition-colors cursor-pointer" title="Bookmark / Add to List">
+              <i class="fa-solid fa-plus text-[10px]"></i>
             </button>
           </div>
         </div>
@@ -841,7 +841,7 @@
   // ==============================================================
   function initTheme() {
     if (typeof document === 'undefined') return;
-    const saved = (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) || 'dark';
+    const saved = (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) || 'light';
     state.theme = saved;
     if (saved === 'light') {
       document.documentElement.classList.remove('dark');
@@ -890,9 +890,9 @@
     document.querySelectorAll('.light-nav-tab').forEach(btn => {
       const isTarget = btn.dataset.tab === tabName;
       if (isTarget) {
-        btn.className = 'nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-bold text-editorial-crimson border-b-2 border-editorial-crimson tracking-wide flex items-center gap-1.5 flex-shrink-0 cursor-pointer transition-colors';
+        btn.className = 'nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-bold text-slate-900 bg-slate-100 transition-all flex items-center gap-1.5 cursor-pointer';
       } else {
-        btn.className = 'nav-tab light-nav-tab px-2.5 sm:px-3 py-1.5 text-xs font-medium text-editorial-slate600 hover:text-editorial-slate900 border-b-2 border-transparent transition-colors flex-shrink-0 cursor-pointer';
+        btn.className = 'nav-tab light-nav-tab px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all flex items-center gap-1.5 cursor-pointer';
       }
     });
 
@@ -984,13 +984,13 @@
         }
       });
 
-      // Update Light Editorial Feed Buttons
+      // Update Light Stream Feed Buttons
       document.querySelectorAll('.light-feed-btn').forEach(btn => {
         const isTarget = btn.id === `light-feed-${feedKey}`;
         if (isTarget) {
-          btn.className = 'light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-bold bg-editorial-slate900 text-white flex items-center justify-between transition-all shadow-sm cursor-pointer';
+          btn.className = 'light-feed-btn px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white shadow-xs transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
         } else {
-          btn.className = 'light-feed-btn w-full px-3 py-2 rounded-lg text-left text-xs font-semibold text-editorial-slate700 hover:bg-editorial-slate100 flex items-center justify-between transition-all cursor-pointer';
+          btn.className = 'light-feed-btn px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer';
         }
       });
     }
@@ -1026,9 +1026,9 @@
         const lBtn = document.getElementById(`light-season-${s}`);
         if (lBtn) {
           if (s === season) {
-            lBtn.className = 'light-season-btn py-1 rounded text-xs font-bold bg-white text-editorial-slate900 shadow-sm transition-all text-center cursor-pointer';
+            lBtn.className = 'light-season-btn py-1.5 rounded-lg text-xs font-bold bg-white text-slate-900 shadow-sm transition-all text-center cursor-pointer';
           } else {
-            lBtn.className = 'light-season-btn py-1 rounded text-xs font-semibold text-editorial-slate600 hover:text-editorial-slate900 transition-all text-center cursor-pointer';
+            lBtn.className = 'light-season-btn py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition-all text-center cursor-pointer';
           }
         }
       });
@@ -1065,9 +1065,9 @@
         const lBtn = document.getElementById(`light-subtab-${st}`);
         if (lBtn) {
           if (st === subtab) {
-            lBtn.className = 'light-status-btn px-2.5 py-1 rounded text-[11px] font-bold bg-editorial-slate900 text-white flex-shrink-0 cursor-pointer';
+            lBtn.className = 'light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-900 text-white flex-shrink-0 cursor-pointer';
           } else {
-            lBtn.className = 'light-status-btn px-2.5 py-1 rounded text-[11px] font-medium text-editorial-slate600 hover:text-editorial-slate900 flex-shrink-0 cursor-pointer';
+            lBtn.className = 'light-status-btn px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 hover:text-slate-900 flex-shrink-0 cursor-pointer';
           }
         }
       });
@@ -1291,7 +1291,10 @@
       const lCover = document.getElementById('light-hero-cover');
       if (lCover) lCover.src = cover;
       const lTitleEl = document.getElementById('light-hero-title');
-      if (lTitleEl) lTitleEl.textContent = title;
+      if (lTitleEl) {
+        lTitleEl.textContent = title;
+        lTitleEl.setAttribute('title', title);
+      }
       const lDesc = document.getElementById('light-hero-desc');
       if (lDesc) lDesc.textContent = desc;
       const lScore = document.getElementById('light-hero-score');
@@ -1721,12 +1724,14 @@
         items = data?.Page?.media || [];
       } catch (e) {}
 
-      if (items.length === 0) {
-        const res = await fetch(`/api/anilist/search?query=${encodeURIComponent(term || '')}&type=${entity === 'MANGA' ? 'MANGA' : 'ANIME'}`);
-        if (res.ok) {
-          const json = await res.json();
-          items = json.media || json.results || [];
-        }
+      if (items.length === 0 && term) {
+        try {
+          const res = await fetch(`/api/anilist/search?query=${encodeURIComponent(term)}&type=${entity === 'MANGA' ? 'MANGA' : 'ANIME'}`);
+          if (res.ok) {
+            const json = await res.json();
+            items = json.media || json.results || [];
+          }
+        } catch (e) {}
       }
 
       if (items.length === 0) {
@@ -2332,6 +2337,8 @@
 
   // Expose Global functions for inline HTML callers & tests
   if (typeof window !== 'undefined') {
+    window.toggleTheme = toggleTheme;
+    window.initTheme = initTheme;
     window.switchTab = switchTab;
     window.switchFeed = switchFeed;
     window.setDiscoverSeason = setDiscoverSeason;
