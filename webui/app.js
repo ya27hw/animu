@@ -536,6 +536,15 @@
     }
   };
 
+  // Wire desktop navigation tab clicks (both dark and light shells)
+  document.querySelectorAll('.dark-nav-tab, .light-nav-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tab) {
+        switchTab(btn.dataset.tab);
+      }
+    });
+  });
+
   // Wire mobile navigation tab clicks
   DOM.mobileNavTabs.forEach(btn => {
     btn.addEventListener('click', () => {
