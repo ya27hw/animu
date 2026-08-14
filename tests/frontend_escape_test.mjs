@@ -102,22 +102,26 @@ test('B1 (b): Malicious title renders escaped in card title AND alt attribute ac
   // 3. Airing Radar Item (Dark & Light)
   const darkRadarHtml = renderAiringRadarItemHtml(media, 'dark');
   assert.ok(darkRadarHtml.includes(`alt="${expectedEscapedTitle}"`));
+  assert.ok(darkRadarHtml.includes(`title="${expectedEscapedTitle}"`));
   assert.ok(darkRadarHtml.includes(`>${expectedEscapedTitle}</span>`));
   assert.equal(darkRadarHtml.includes('<img src=x onerror=alert(1)>'), false);
 
   const lightRadarHtml = renderAiringRadarItemHtml(media, 'light');
   assert.ok(lightRadarHtml.includes(`alt="${expectedEscapedTitle}"`));
+  assert.ok(lightRadarHtml.includes(`title="${expectedEscapedTitle}"`));
   assert.ok(lightRadarHtml.includes(`>${expectedEscapedTitle}</span>`));
   assert.equal(lightRadarHtml.includes('<img src=x onerror=alert(1)>'), false);
 
   // 4. Seasonal Item (Dark & Light)
   const darkSeasonalHtml = renderSeasonalItemHtml(media, 'dark');
   assert.ok(darkSeasonalHtml.includes(`alt="${expectedEscapedTitle}"`));
+  assert.ok(darkSeasonalHtml.includes(`title="${expectedEscapedTitle}"`));
   assert.ok(darkSeasonalHtml.includes(`>${expectedEscapedTitle}</span>`));
   assert.equal(darkSeasonalHtml.includes('<img src=x onerror=alert(1)>'), false);
 
   const lightSeasonalHtml = renderSeasonalItemHtml(media, 'light');
   assert.ok(lightSeasonalHtml.includes(`alt="${expectedEscapedTitle}"`));
+  assert.ok(lightSeasonalHtml.includes(`title="${expectedEscapedTitle}"`));
   assert.ok(lightSeasonalHtml.includes(`>${expectedEscapedTitle}</span>`));
   assert.equal(lightSeasonalHtml.includes('<img src=x onerror=alert(1)>'), false);
 

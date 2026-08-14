@@ -637,11 +637,11 @@
     }
 
     return `
-      <div class="p-2.5 rounded-xl bg-[#111827] hover:bg-[#18233a] hud-border hover:border-cyan-500/40 transition-colors flex items-center justify-between gap-3 group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}">
+      <div class="p-2.5 rounded-xl bg-[#111827] hover:bg-[#18233a] hud-border hover:border-cyan-500/40 transition-colors flex items-center justify-between gap-3 group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
         <div class="flex items-center gap-2.5 min-w-0">
           <img src="${cover}" alt="${title}" class="w-9 h-12 rounded-lg object-cover flex-shrink-0 bg-[#090d16] hud-border">
           <div class="flex flex-col min-w-0">
-            <span class="text-xs font-semibold text-slate-200 truncate group-hover:text-cyan-300 transition-colors">${title}</span>
+            <span class="text-xs font-semibold text-slate-200 truncate group-hover:text-cyan-300 transition-colors" title="${title}">${title}</span>
             <span class="text-[11px] font-mono text-slate-400">Episode ${ep}</span>
           </div>
         </div>
@@ -683,11 +683,11 @@
     }
 
     return `
-      <div class="p-2 rounded-xl bg-[#111827] hover:bg-[#18233a] hud-border flex items-center justify-between gap-2.5 transition-colors group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}">
+      <div class="p-2 rounded-xl bg-[#111827] hover:bg-[#18233a] hud-border flex items-center justify-between gap-2.5 transition-colors group cursor-pointer" data-action="open-detail" data-media-id="${mediaId}" title="${title}">
         <div class="flex items-center gap-2.5 min-w-0">
           <img src="${cover}" alt="${title}" class="w-8 h-11 rounded-lg object-cover flex-shrink-0 bg-[#090d16] hud-border">
           <div class="flex flex-col min-w-0">
-            <span class="text-xs font-semibold text-slate-200 truncate group-hover:text-cyan-300 transition-colors">${title}</span>
+            <span class="text-xs font-semibold text-slate-200 truncate group-hover:text-cyan-300 transition-colors" title="${title}">${title}</span>
             <span class="text-[10px] font-mono text-slate-400">${format} • ${eps}</span>
           </div>
         </div>
@@ -714,7 +714,7 @@
           <img src="${cover}" alt="${title}" class="w-16 h-24 rounded-xl object-cover flex-shrink-0 bg-slate-900 border border-slate-700/50">
           <div class="flex flex-col justify-between min-w-0">
             <div>
-              <h3 class="font-bold text-sm text-slate-900 dark:text-white truncate cursor-pointer hover:text-cyan-400 transition-colors" data-action="open-detail" data-media-id="${id}">${title}</h3>
+              <h3 class="font-bold text-sm text-slate-900 dark:text-white truncate cursor-pointer hover:text-cyan-400 transition-colors" data-action="open-detail" data-media-id="${id}" title="${title}">${title}</h3>
               <span class="text-xs font-mono text-slate-400">Progress: ${ep} / ${totalEp}</span>
             </div>
             <div class="flex items-center gap-2 pt-2">
@@ -807,7 +807,7 @@
         <div class="flex items-center gap-3 min-w-0">
           <i class="fa-solid fa-cloud-arrow-down text-cyan-400 text-base"></i>
           <div class="flex flex-col min-w-0">
-            <span class="font-bold text-slate-800 dark:text-slate-100 truncate">${title}</span>
+            <span class="font-bold text-slate-800 dark:text-slate-100 truncate" title="${title}">${title}</span>
             <span class="text-[10px] font-mono text-slate-400">${time}</span>
           </div>
         </div>
@@ -826,7 +826,7 @@
     return `
       <div class="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#111827] border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
         <div class="flex flex-col min-w-0">
-          <span class="font-bold text-slate-800 dark:text-slate-100 truncate">${title}</span>
+          <span class="font-bold text-slate-800 dark:text-slate-100 truncate" title="${title}">${title}</span>
           <span class="text-[10px] font-mono text-slate-400">${size} • Seeders: ${seeders}</span>
         </div>
         <button data-action="download-torrent" data-media-id="${Number(mediaId) || 0}" data-torrent-link="${link}" data-episode="${episode}" class="px-3.5 py-1.5 bg-pink-500 hover:bg-pink-400 text-white rounded-xl font-bold shrink-0 transition-colors cursor-pointer">
