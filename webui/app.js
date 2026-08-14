@@ -1197,6 +1197,33 @@
             startDate { year month day }
             endDate { year month day }
             nextAiringEpisode { episode airingAt timeUntilAiring }
+            airingSchedule(page: 1, perPage: 25) {
+              nodes { id episode airingAt timeUntilAiring }
+            }
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  type
+                  title { romaji english native userPreferred }
+                }
+              }
+            }
+            characters(sort: [ROLE, RELEVANCE], perPage: 24) {
+              edges {
+                role
+                node {
+                  id
+                  name { full }
+                  image { large medium }
+                }
+                voiceActors {
+                  language
+                  name { full }
+                }
+              }
+            }
             mediaListEntry {
               id
               status
@@ -1216,7 +1243,10 @@
 
       if (!media) {
         const res = await fetch(`/api/anilist/media/${mediaId}`);
-        if (res.ok) media = await res.json();
+        if (res.ok) {
+          const payload = await res.json();
+          media = payload?.media || payload;
+        }
       }
 
       if (!media) {
@@ -1227,18 +1257,122 @@
       state.activeMediaDetail = media;
 
       const title = escapeHtml(getAnimeTitle(media));
-      const cover = escapeHtml(getCoverImage(media));
-      const banner = escapeHtml(media.bannerImage || cover);
+      const coverUrl = getCoverImage(media);
+      const cover = escapeHtml(coverUrl);
+      const banner = escapeHtml(media.bannerImage || coverUrl);
       const score = escapeHtml(media.averageScore || media.meanScore || '—');
       const desc = sanitizeHtml(media.description) || 'Rich metadata from AniList GraphQL directory.';
-      const studio = escapeHtml(media.studios?.nodes?.[0]?.name || 'Animation Studio');
-      const genres = (media.genres || ['Action', 'Fantasy']).map(g => `<span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300">${escapeHtml(g)}</span>`).join('');
+      const studioName = media.studios?.nodes?.find(item => item?.name)?.name || '';
+      const studio = escapeHtml(studioName || 'Animation Studio');
+      const genreItems = Array.isArray(media.genres) ? media.genres.filter(Boolean) : [];
+      const genres = genreItems.length
+        ? genreItems.map(g => `<span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300">${escapeHtml(g)}</span>`).join('')
+        : '<span class="text-xs text-slate-500 dark:text-slate-400">No genres listed.</span>';
+
+      const formatAirDate = timestamp => {
+        const value = Number(timestamp);
+        return Number.isFinite(value) && value > 0 ? new Date(value * 1000).toLocaleString() : '';
+      };
+      const renderAirDate = timestamp => {
+        const date = formatAirDate(timestamp);
+        return date ? `<span>${escapeHtml(date)}</span>` : '';
+      };
+      const nextAiring = media.nextAiringEpisode;
+      const airingSchedule = Array.isArray(media.airingSchedule?.nodes) ? media.airingSchedule.nodes : [];
+      const scheduleRows = airingSchedule
+        .filter(item => item && (!nextAiring?.id || String(item.id) !== String(nextAiring.id)))
+        .slice(0, 5)
+        .map(item => `
+          <div class="flex items-center justify-between gap-3 py-2 border-t border-slate-200 dark:border-slate-800 text-xs">
+            <span class="font-mono text-slate-500 dark:text-slate-400">Episode ${escapeHtml(item.episode ?? '—')}</span>
+            <span class="text-right text-slate-600 dark:text-slate-300">${renderAirDate(item.airingAt) || escapeHtml(formatCountdown(item.timeUntilAiring))}</span>
+          </div>
+        `).join('');
+      const airing = nextAiring
+        ? `
+          <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cyan-50 dark:bg-cyan-950/20 border border-cyan-200 dark:border-cyan-900/50 px-3 py-2.5">
+            <div>
+              <p class="text-[10px] uppercase tracking-wider font-bold text-cyan-700 dark:text-cyan-300">Next episode</p>
+              <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">Episode ${escapeHtml(nextAiring.episode ?? '—')}</p>
+            </div>
+            <div class="text-right text-xs font-mono text-cyan-700 dark:text-cyan-300">
+              <p>${escapeHtml(formatCountdown(nextAiring.timeUntilAiring))}</p>
+              ${renderAirDate(nextAiring.airingAt)}
+            </div>
+          </div>
+          ${scheduleRows ? `<div class="mt-2">${scheduleRows}</div>` : ''}
+        `
+        : '<p class="text-xs text-slate-500 dark:text-slate-400">No upcoming airing information.</p>';
+
+      const relationEdges = Array.isArray(media.relations?.edges)
+        ? media.relations.edges.filter(edge => edge?.node)
+        : [];
+      const relations = relationEdges.length
+        ? relationEdges.map(edge => {
+          const relationId = Number(edge.node.id) || 0;
+          const relationTitle = escapeHtml(getAnimeTitle(edge.node));
+          const relationType = escapeHtml(edge.relationType || edge.node.type || 'Related');
+          const relationLink = relationId
+            ? `<button type="button" data-action="open-detail" data-media-id="${escapeHtml(relationId)}" class="text-left text-sm font-semibold text-slate-800 dark:text-slate-100 hover:text-cyan-500 dark:hover:text-cyan-300 transition-colors">${relationTitle}</button>`
+            : `<span class="text-sm font-semibold text-slate-800 dark:text-slate-100">${relationTitle}</span>`;
+          return `
+            <div class="flex items-center justify-between gap-3 py-2 border-b last:border-b-0 border-slate-200 dark:border-slate-800">
+              ${relationLink}
+              <span class="shrink-0 text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400">${relationType}</span>
+            </div>
+          `;
+        }).join('')
+        : '<p class="text-xs text-slate-500 dark:text-slate-400">No related titles listed.</p>';
+
+      const characterEdges = Array.isArray(media.characters?.edges)
+        ? media.characters.edges.filter(edge => edge?.node)
+        : [];
+      const renderCharacter = edge => {
+        const character = edge.node;
+        const characterName = escapeHtml(character.name?.full || 'Unknown character');
+        const characterRole = escapeHtml(edge.role || 'Supporting');
+        const characterImageUrl = character.image?.large || character.image?.medium;
+        const characterImage = characterImageUrl
+          ? `<img src="${escapeHtml(characterImageUrl)}" alt="${characterName}" loading="lazy" class="w-14 h-20 rounded-lg object-cover bg-slate-100 dark:bg-slate-800 shrink-0">`
+          : '<div class="w-14 h-20 rounded-lg bg-slate-100 dark:bg-slate-800 shrink-0 flex items-center justify-center text-slate-400"><i class="fa-solid fa-user"></i></div>';
+        const voiceActors = Array.isArray(edge.voiceActors) ? edge.voiceActors.filter(actor => actor?.name?.full) : [];
+        const voices = voiceActors.length
+          ? voiceActors.map(actor => {
+            const language = String(actor.language || '');
+            const languageLabel = language === 'Japanese' ? 'JP' : language === 'English' ? 'EN' : language;
+            return `<span class="inline-flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-300"><span>${escapeHtml(actor.name.full)}</span>${languageLabel ? `<span class="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[9px]">${escapeHtml(languageLabel)}</span>` : ''}</span>`;
+          }).join('')
+          : '<span class="text-[10px] text-slate-500 dark:text-slate-400">Voice actor unavailable</span>';
+        return `
+          <article class="flex gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/30 p-2.5">
+            ${characterImage}
+            <div class="min-w-0 flex flex-col justify-center gap-1">
+              <h4 class="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate" title="${characterName}">${characterName}</h4>
+              <p class="text-[10px] font-mono uppercase tracking-wider text-cyan-600 dark:text-cyan-300">${characterRole}</p>
+              <div class="flex flex-col gap-0.5">${voices}</div>
+            </div>
+          </article>
+        `;
+      };
+      const characterCards = characterEdges.map(renderCharacter);
+      const characterMore = characterCards.slice(12).join('');
+      const characters = characterCards.length
+        ? `
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">${characterCards.slice(0, 12).join('')}</div>
+          ${characterMore ? `
+            <details class="mt-3 group">
+              <summary class="cursor-pointer list-none text-center text-[11px] font-mono text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-300 transition-colors">Show all ${escapeHtml(characterCards.length)} characters <span class="group-open:hidden">↓</span><span class="hidden group-open:inline">↑</span></summary>
+              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 mt-3">${characterMore}</div>
+            </details>
+          ` : ''}
+        `
+        : '<p class="text-xs text-slate-500 dark:text-slate-400">No character information listed.</p>';
       const listEntry = media.mediaListEntry || state.listEntriesByMedia[media.id];
       const entryStatus = listEntry ? escapeHtml(listEntry.status) : '';
       const format = escapeHtml(media.format || 'TV');
       const eps = escapeHtml(media.episodes ? `${media.episodes} Episodes` : 'Releasing');
       const seasonStr = escapeHtml(`${media.season || ''} ${media.seasonYear || ''}`.trim());
-      const safeId = Number(media.id) || 0;
+      const safeId = escapeHtml(Number(media.id) || 0);
 
       content.innerHTML = `
         <!-- Banner Header -->
@@ -1281,9 +1415,16 @@
             </a>
           </div>
 
-          <!-- Genres -->
-          <div class="flex flex-wrap gap-1.5">
-            ${genres}
+          <!-- Genres + Airing -->
+          <div class="grid gap-4 lg:grid-cols-2">
+            <section class="space-y-2">
+              <h3 class="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider">Genres</h3>
+              <div class="flex flex-wrap gap-1.5">${genres}</div>
+            </section>
+            <section class="space-y-2">
+              <h3 class="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider">Airing</h3>
+              ${airing}
+            </section>
           </div>
 
           <!-- Synopsis -->
@@ -1291,6 +1432,27 @@
             <h3 class="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider">Synopsis</h3>
             <p class="text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed max-h-60 overflow-y-auto custom-scrollbar pr-2">${desc}</p>
           </div>
+
+          <!-- Relations -->
+          <section class="space-y-2">
+            <h3 class="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider">Relations</h3>
+            <div class="rounded-xl border border-slate-200 dark:border-slate-800 px-3">${relations}</div>
+          </section>
+
+          <!-- Characters -->
+          <section class="space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider">Characters</h3>
+              ${characterEdges.length ? `<span class="text-[10px] font-mono text-slate-500 dark:text-slate-400">${escapeHtml(characterEdges.length)} listed</span>` : ''}
+            </div>
+            ${characters}
+          </section>
+
+          <!-- Studio -->
+          <section class="space-y-2">
+            <h3 class="text-xs font-bold font-mono text-slate-400 uppercase tracking-wider">Studio</h3>
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(studioName || '—')}</p>
+          </section>
         </div>
       `;
     } catch (err) {
@@ -2129,6 +2291,4 @@
     isStaleTab
   };
 });
-
-
 
