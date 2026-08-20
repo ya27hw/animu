@@ -145,6 +145,47 @@ def _to_clean_string(val: Any) -> str:
         return " ".join(str(v) for v in val).strip().lower()
     return str(val or "").strip().lower()
 
+def detect_censorship_status(anime_parsed_data: dict) -> tuple[bool, bool]:
+    """
+    Inspect candidate parsed data and raw title for censorship indicators.
+    Returns (is_uncensored, is_censored).
+    """
+    if not isinstance(anime_parsed_data, dict):
+        return False, False
+
+    texts = []
+    file_name = anime_parsed_data.get("file_name")
+    if file_name:
+        texts.append(str(file_name))
+
+    for key in ("other", "subtitles", "episode_title", "anime_type", "release_information"):
+        val = anime_parsed_data.get(key)
+        if isinstance(val, list):
+            texts.extend(str(v) for v in val)
+        elif val:
+            texts.append(str(val))
+
+    combined = " ".join(texts)
+
+    # Explicit uncensored indicators
+    uncensored_patterns = [
+        r'\b(uncensored|decensored|un-censored|un\s+censored|uncut)\b',
+        r'[\(\[\{]\s*(at-x|atx)\s*[\)\]\}]',
+        r'\b(at-x|atx)\b'
+    ]
+    is_uncensored = any(re.search(pat, combined, re.IGNORECASE) for pat in uncensored_patterns)
+
+    is_censored = False
+    if not is_uncensored:
+        censored_patterns = [
+            r'\b(?<!un)(?<!de)(?<!un-)(?<!de-)censored\b',
+            r'\b(tv\s*ver(sion)?|tv\s*cut|tv\s*broadcast|broadcast\s*ver(sion)?)\b',
+            r'[\(\[\{]\s*tv\s*[\)\]\}]'
+        ]
+        is_censored = any(re.search(pat, combined, re.IGNORECASE) for pat in censored_patterns)
+
+    return is_uncensored, is_censored
+
 def verify_query(
     search_query: str,
     anime_parsed_data: dict,
@@ -273,6 +314,15 @@ def verify_query(
         resolution in parsed_resolution
     )
 
+    is_uncensored, is_censored = detect_censorship_status(anime_parsed_data)
+    uncensored_bonus = 0.0
+    prefer_uncensored = getattr(config, "prefer_uncensored", True)
+    if prefer_uncensored:
+        if is_uncensored:
+            uncensored_bonus = 0.5
+        elif is_censored:
+            uncensored_bonus = -0.2
+
     if search_mode == "EPISODE":
         if not has_episodes:
             return get_result(0.0, "No episode requested")
@@ -322,7 +372,7 @@ def verify_query(
             )
         )
 
-        score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating
+        score = float(episode_match) + float(resolution_match) + float(air_date_match) + best_rating + uncensored_bonus
 
         rejection_reason = ""
         if score < SCORE_THRESHOLD:
@@ -341,7 +391,10 @@ def verify_query(
             "episode_match": episode_match,
             "resolution_match": resolution_match,
             "air_date_match": air_date_match,
-            "title_similarity": best_rating
+            "title_similarity": best_rating,
+            "is_uncensored": is_uncensored,
+            "is_censored": is_censored,
+            "uncensored_bonus": uncensored_bonus,
         }
         return get_result(score, rejection_reason, details)
 
@@ -372,7 +425,7 @@ def verify_query(
             except Exception:
                 verify_range_ok = False
 
-            score = float(verify_range_ok) + float(resolution_match) + float(air_date_match_batch) + best_rating
+            score = float(verify_range_ok) + float(resolution_match) + float(air_date_match_batch) + best_rating + uncensored_bonus
 
             rejection_reason = ""
             if score < SCORE_THRESHOLD:
@@ -389,11 +442,14 @@ def verify_query(
                 "batch_range_match": verify_range_ok,
                 "resolution_match": resolution_match,
                 "air_date_match": air_date_match_batch,
-                "title_similarity": best_rating
+                "title_similarity": best_rating,
+                "is_uncensored": is_uncensored,
+                "is_censored": is_censored,
+                "uncensored_bonus": uncensored_bonus,
             }
             return get_result(score, rejection_reason, details)
 
-        score = float(is_batch) + float(resolution_match) + float(air_date_match_batch) + best_rating
+        score = float(is_batch) + float(resolution_match) + float(air_date_match_batch) + best_rating + uncensored_bonus
         rejection_reason = ""
         if score < SCORE_THRESHOLD:
             failed_checks = []
@@ -409,7 +465,10 @@ def verify_query(
             "is_batch": is_batch,
             "resolution_match": resolution_match,
             "air_date_match": air_date_match_batch,
-            "title_similarity": best_rating
+            "title_similarity": best_rating,
+            "is_uncensored": is_uncensored,
+            "is_censored": is_censored,
+            "uncensored_bonus": uncensored_bonus,
         }
         return get_result(score, rejection_reason, details)
 

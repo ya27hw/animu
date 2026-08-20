@@ -6,7 +6,7 @@ import math
 import threading
 from typing import Optional, List, Dict, Any
 from .config import get_config
-from .utils import verify_query
+from .utils import verify_query, SCORE_THRESHOLD
 
 trace_lock = threading.Lock()
 
@@ -236,10 +236,15 @@ class NyaaClient:
             if rating > best_rating:
                 best_rating = rating
                 best_torrent = item
-                if best_rating >= 3.88:
-                    break
+                prefer_uncensored = getattr(config, "prefer_uncensored", True)
+                if prefer_uncensored:
+                    if details.get("is_uncensored") and best_rating >= 4.20:
+                        break
+                else:
+                    if best_rating >= 3.88:
+                        break
 
-        if best_rating >= 3.88 and best_torrent:
+        if best_rating >= SCORE_THRESHOLD and best_torrent:
             return best_torrent
         return None
 

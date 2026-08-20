@@ -43,6 +43,7 @@ class ProfileConfig:
     exclude_release_groups: List[str] = field(default_factory=list)
     set_completed_to_rewatching: bool = True
     air_date_threshold_hours: float = 48.0
+    prefer_uncensored: bool = True
     
     # Discord options
     discord_enable_download: bool = True
@@ -94,6 +95,7 @@ MAP_JSON_TO_ATTR = {
     "excludeReleaseGroups": "exclude_release_groups",
     "setCompletedToRewatching": "set_completed_to_rewatching",
     "airDateThresholdHours": "air_date_threshold_hours",
+    "preferUncensored": "prefer_uncensored",
     "discordEnableDownload": "discord_enable_download",
     "discordEnableFail": "discord_enable_fail",
     "discordDownloadColor": "discord_download_color",
