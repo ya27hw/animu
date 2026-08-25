@@ -1,0 +1,11 @@
+[Unit]
+Description=Animu GitHub Auto-Update Timer (15 min interval)
+After=network-online.target
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

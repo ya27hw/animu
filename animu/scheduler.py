@@ -371,15 +371,17 @@ class Scheduler:
             from .nyaa import record_failed_trace
             record_failed_trace(anime["mediaId"], anime=anime, record=record, status="NO_RESULTS")
 
-            # Send deduplicated alert
-            cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
-            alert_unresolved_anime(
-                media_id=anime["mediaId"],
-                anime_title=anime["media"]["title"]["romaji"],
-                image=cover_img,
-                reason=f"No matching torrents found on Nyaa.si (Backoff timeout {record.timeouts}/10)",
-                season_info=f"Media ID {anime['mediaId']}"
-            )
+            # Send deduplicated alert only once consecutive failure threshold is reached
+            threshold = getattr(config, "discord_fail_threshold", 7) or 7
+            if record.max_timeouts >= threshold:
+                cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
+                alert_unresolved_anime(
+                    media_id=anime["mediaId"],
+                    anime_title=anime["media"]["title"]["romaji"],
+                    image=cover_img,
+                    reason=f"No matching torrents found on Nyaa.si (Backoff timeout {record.timeouts}/10)",
+                    season_info=f"Media ID {anime['mediaId']}"
+                )
 
             interval = config.interval or 30
             total_minutes = record.timeouts * interval

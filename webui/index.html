@@ -915,6 +915,11 @@
                 </div>
                 <p class="text-[11px] text-slate-400 mt-1.5">Stored securely on the server and never returned by the API — masked here. Reveal only when you need to change it.</p>
               </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Unresolved Alert Failure Threshold</label>
+                <input type="number" name="discordFailThreshold" min="1" max="10" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" placeholder="7" />
+                <p class="text-[11px] text-slate-400 mt-1.5">Number of consecutive search failures before triggering an unresolved anime Discord notification (1–10, default 7).</p>
+              </div>
               <div class="flex justify-end pt-2">
                 <button type="button" id="btn-test-discord" class="px-4 py-2 bg-blue-500/10 hover:bg-blue-500 hover:text-white border border-blue-500/20 text-blue-500 font-semibold rounded-xl text-xs sm:text-sm transition-all duration-200 cursor-pointer">
                   <i class="fa-solid fa-paper-plane mr-2"></i>Send Test Notification

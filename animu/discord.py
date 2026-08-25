@@ -57,18 +57,42 @@ def alert_user(anime: str, image: str) -> bool:
     return send_embed(title=title, description=desc, color=color, image=image)
 
 
+import re
+
+
 # In-memory history for alert deduplication keyed by media_id
 alert_history: Dict[int, Dict[str, str]] = {}
 
 
+def _normalize_dedup_condition(reason: str, season_info: Optional[str] = None) -> str:
+    """Normalize reason and season_info into a stable deduplication key, stripping volatile retry counters."""
+    if not reason:
+        norm_reason = ""
+    else:
+        # Strip parenthesized retry/backoff/timeout counters e.g. (Backoff timeout 1/10), (timeout 1/10), (retry 2)
+        norm_reason = re.sub(
+            r'\s*\(\s*(?:backoff\s+)?(?:timeout|retry|attempt)\s+\d+(?:\s*/\s*\d+)?\s*\)',
+            '',
+            reason,
+            flags=re.IGNORECASE
+        )
+        # Strip trailing or unparenthesized backoff timeout / retry counters
+        norm_reason = re.sub(
+            r'[\s\-:]*\b(?:backoff\s+)?(?:timeout|retry|attempt)\s+\d+(?:\s*/\s*\d+)?\b',
+            '',
+            norm_reason,
+            flags=re.IGNORECASE
+        ).strip()
+    return f"{norm_reason}:{season_info or ''}"
+
+
 def sanitize_alert_text(text: str) -> str:
     """Ensure no passwords, tokens, or credentials are leaked in alert messages."""
-    import re as _re
     if not text:
         return ""
     # Redact URLs containing user/pass or tokens
-    text = _re.sub(r'https?://[^:\s]+:[^@\s]+@', 'https://***@', text)
-    text = _re.sub(r'(token|password|secret|key|bearer)=[^&\s]+', r'\1=[REDACTED]', text, flags=_re.IGNORECASE)
+    text = re.sub(r'https?://[^:\s]+:[^@\s]+@', 'https://***@', text)
+    text = re.sub(r'(token|password|secret|key|bearer)=[^&\s]+', r'\1=[REDACTED]', text, flags=re.IGNORECASE)
     return text
 
 
@@ -84,7 +108,7 @@ def alert_unresolved_anime(
     if not config.discord_enable_fail:
         return False
 
-    current_condition = f"{reason}:{season_info or ''}"
+    current_condition = _normalize_dedup_condition(reason, season_info)
     last_alert = alert_history.get(media_id)
     if last_alert and last_alert.get("condition") == current_condition:
         # Skip duplicate alert for unchanged condition

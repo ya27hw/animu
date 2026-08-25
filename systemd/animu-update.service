@@ -1,0 +1,16 @@
+[Unit]
+Description=Animu GitHub Auto-Update Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/animu
+ExecStart=/root/animu/scripts/animu-update.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

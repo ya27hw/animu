@@ -1697,6 +1697,11 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 # updated when the user types a replacement.
                 if attr in SENSITIVE_CONFIG_FIELDS and (v is None or v == ""):
                     continue
+                if attr == "discord_fail_threshold":
+                    try:
+                        v = max(1, min(10, int(v)))
+                    except (ValueError, TypeError):
+                        v = 7
                 setattr(current, attr, v)
             save_config(current)
             reload_config()

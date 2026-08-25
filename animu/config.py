@@ -55,6 +55,16 @@ class ProfileConfig:
     discord_fail_description: Optional[str] = None
     discord_username: Optional[str] = None
     discord_avatar_url: Optional[str] = None
+    discord_fail_threshold: int = 7
+
+    def __post_init__(self):
+        if self.discord_fail_threshold is None:
+            self.discord_fail_threshold = 7
+        else:
+            try:
+                self.discord_fail_threshold = max(1, min(10, int(self.discord_fail_threshold)))
+            except (ValueError, TypeError):
+                self.discord_fail_threshold = 7
 
     # Storage for fields from JSON that are not explicitly modeled
     _extra_fields: Dict[str, Any] = field(default_factory=dict, init=False, repr=False, compare=False)
@@ -105,6 +115,7 @@ MAP_JSON_TO_ATTR = {
     "discordFailDescription": "discord_fail_description",
     "discordUsername": "discord_username",
     "discordAvatarUrl": "discord_avatar_url",
+    "discordFailThreshold": "discord_fail_threshold",
 }
 
 MAP_ATTR_TO_JSON = {v: k for k, v in MAP_JSON_TO_ATTR.items()}
@@ -128,11 +139,14 @@ def get_config() -> ProfileConfig:
                 for json_key, val in raw_data.items():
                     if json_key in MAP_JSON_TO_ATTR:
                         attr_key = MAP_JSON_TO_ATTR[json_key]
-                        if attr_key in ("id", "proxy_port", "interval", "offpeak_interval") and val is not None:
+                        if attr_key in ("id", "proxy_port", "interval", "offpeak_interval", "discord_fail_threshold") and val is not None:
                             try:
                                 val = int(val)
+                                if attr_key == "discord_fail_threshold":
+                                    val = max(1, min(10, val))
                             except (ValueError, TypeError):
-                                pass
+                                if attr_key == "discord_fail_threshold":
+                                    val = 7
                         config_dict[attr_key] = val
                     else:
                         extra_fields[json_key] = val

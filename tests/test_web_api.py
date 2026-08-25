@@ -129,6 +129,44 @@ class TestWebAPI(unittest.TestCase):
             save_config(cfg)
             reload_config()
 
+    def test_api_config_exposes_and_patches_discord_fail_threshold(self):
+        """Verify GET /api/config exposes discordFailThreshold and PATCH updates/clamps it."""
+        from animu.config import get_config, save_config, reload_config
+        cfg = get_config()
+        original_thresh = cfg.discord_fail_threshold
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("GET", "/api/config")
+            res = conn.getresponse()
+            self.assertEqual(res.status, 200)
+            data = json.loads(res.read().decode("utf-8"))
+            self.assertIn("discordFailThreshold", data)
+
+            # PATCH valid threshold
+            payload = json.dumps({"discordFailThreshold": 5})
+            conn.request("PATCH", "/api/config", body=payload, headers={"Content-Type": "application/json"})
+            res_patch = conn.getresponse()
+            self.assertEqual(res_patch.status, 200)
+            self.assertEqual(get_config().discord_fail_threshold, 5)
+
+            # PATCH out-of-range (high) clamped to 10
+            payload_high = json.dumps({"discordFailThreshold": 20})
+            conn.request("PATCH", "/api/config", body=payload_high, headers={"Content-Type": "application/json"})
+            res_high = conn.getresponse()
+            self.assertEqual(res_high.status, 200)
+            self.assertEqual(get_config().discord_fail_threshold, 10)
+
+            # PATCH out-of-range (low) clamped to 1
+            payload_low = json.dumps({"discordFailThreshold": 0})
+            conn.request("PATCH", "/api/config", body=payload_low, headers={"Content-Type": "application/json"})
+            res_low = conn.getresponse()
+            self.assertEqual(res_low.status, 200)
+            self.assertEqual(get_config().discord_fail_threshold, 1)
+        finally:
+            cfg.discord_fail_threshold = original_thresh
+            save_config(cfg)
+            reload_config()
+
     def test_scheduler_does_not_mutate_shared_title(self):
         """BUG 4: scheduler handle_anime should not mutate cached title object in place."""
         from animu.scheduler import Scheduler
