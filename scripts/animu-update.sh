@@ -7,7 +7,7 @@
 #
 # Design guarantees:
 # - Exclusive non-overlapping execution via flock
-# - Refuses update if deployment working tree has uncommitted tracked changes
+# - Refuses update if deployment working tree has uncommitted tracked changes or untracked files
 # - Fetches and fast-forwards only (never non-ff, never merges/rebase)
 # - Exits 0 quietly if remote commit is unchanged
 # - Records rollback commit prior to modifying live checkout
@@ -24,7 +24,7 @@ APP_DIR="${ANIMU_DIR:-/root/animu}"
 BRANCH="${ANIMU_BRANCH:-python-rewrite}"
 REMOTE="${ANIMU_REMOTE:-origin}"
 SERVICE_NAME="${ANIMU_SERVICE:-animu.service}"
-HEALTH_URL="${ANIMU_HEALTH_URL:-http://127.0.0.1:3219/api/health}"
+HEALTH_URL="${ANIMU_HEALTH_URL:-http://127.0.0.1:3210/api/health}"
 HEALTH_TIMEOUT="${ANIMU_HEALTH_TIMEOUT:-30}"
 
 # Lock file management
@@ -150,6 +150,11 @@ main() {
   # 3. Check for dirty deployment checkout
   if ! git -C "$APP_DIR" diff --quiet || ! git -C "$APP_DIR" diff --cached --quiet; then
     log_err "Deployment checkout at $APP_DIR has uncommitted tracked changes. Refusing to update dirty repository."
+    exit 1
+  fi
+
+  if [ -n "$(git -C "$APP_DIR" status --porcelain)" ]; then
+    log_err "Deployment checkout at $APP_DIR has untracked files. Refusing to update dirty repository."
     exit 1
   fi
 

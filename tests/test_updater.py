@@ -107,6 +107,24 @@ class TestUpdater(unittest.TestCase):
         res = self._run_updater()
         self.assertEqual(res.returncode, 1)
         self.assertIn("Refusing to update dirty repository", res.stderr)
+        self.assertIn("uncommitted tracked changes", res.stderr)
+
+    def test_updater_rejects_untracked_files(self):
+        """When deployment checkout has untracked files, update is refused."""
+        with open(os.path.join(self.app_dir, "untracked_file.txt"), "w") as f:
+            f.write("untracked-content\n")
+
+        res = self._run_updater()
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Refusing to update dirty repository", res.stderr)
+        self.assertIn("untracked files", res.stderr)
+
+    def test_default_health_url_is_3210(self):
+        """Verify animu-update.sh default health URL uses port 3210."""
+        with open(self.script_path, "r") as f:
+            content = f.read()
+        self.assertIn("http://127.0.0.1:3210/api/health", content)
+        self.assertNotIn("3219", content)
 
     def test_updater_rejects_non_fast_forward(self):
         """When remote branch has diverged, non-fast-forward update is rejected."""
