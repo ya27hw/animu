@@ -1889,17 +1889,53 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self._safe_write(b"Not found")
 
-def start_server():
+DEFAULT_PORT = 3210
+
+
+def parse_port(value: Any, default: int = DEFAULT_PORT) -> int:
+    """Safely validate and convert a port value to an integer within 1-65535.
+
+    Returns the valid port integer or falls back to ``default`` with a warning.
+    """
+    if value is None:
+        return default
+    try:
+        port_int = int(str(value).strip())
+        if 1 <= port_int <= 65535:
+            return port_int
+        print(f"[WARNING] Port {value!r} out of valid range (1-65535); falling back to default {default}")
+        return default
+    except (ValueError, TypeError):
+        print(f"[WARNING] Invalid port value {value!r}; falling back to default {default}")
+        return default
+
+
+def get_server_port(explicit_port: Optional[Any] = None) -> int:
+    """Determine the web server port.
+
+    Priority:
+    1. Explicit port argument (if passed).
+    2. ANIMU_PORT environment variable.
+    3. Production default (3210).
+    """
+    if explicit_port is not None:
+        return parse_port(explicit_port, default=DEFAULT_PORT)
+    env_val = os.environ.get("ANIMU_PORT")
+    if env_val is not None and str(env_val).strip():
+        return parse_port(env_val, default=DEFAULT_PORT)
+    return DEFAULT_PORT
+
+
+def start_server(port: Optional[int] = None, host: str = "0.0.0.0"):
     """Starts the http server synchronously."""
-    port = 3210
-    host = "0.0.0.0"
+    resolved_port = get_server_port(port)
     
     # Ensure logs folder exists
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     os.makedirs(os.path.join(root_dir, 'logs'), exist_ok=True)
     
-    server = http.server.ThreadingHTTPServer((host, port), AnimuHTTPHandler)
-    print(f"Animu Web UI running at http://localhost:{port} (bind {host})")
+    server = http.server.ThreadingHTTPServer((host, resolved_port), AnimuHTTPHandler)
+    print(f"Animu Web UI running at http://localhost:{resolved_port} (bind {host})")
     # Warm the heavy AniList reads in the background so the cache is already
     # populated when the first user opens the site (see _prewarm_heavy_reads).
     try:

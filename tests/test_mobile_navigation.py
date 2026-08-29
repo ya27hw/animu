@@ -1,17 +1,59 @@
 import unittest
 import os
-import re
-import subprocess
-import json
+import threading
+import http.server
+from animu.web import AnimuHTTPHandler
+from playwright.sync_api import sync_playwright
+
 
 class TestMobileNavigation(unittest.TestCase):
-    def setUp(self):
-        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.index_path = os.path.join(self.base_dir, "webui", "index.html")
-        self.app_js_path = os.path.join(self.base_dir, "webui", "app.js")
+    @classmethod
+    def setUpClass(cls):
+        cls.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cls.index_path = os.path.join(cls.base_dir, "webui", "index.html")
+        cls.app_js_path = os.path.join(cls.base_dir, "webui", "app.js")
+
+        # Start local test HTTP server to serve real index.html and app.js
+        cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), AnimuHTTPHandler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+        # Launch real headless browser with mobile viewport
+        cls.pw = sync_playwright().start()
+        cls.browser = cls.pw.chromium.launch(headless=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, "browser"):
+            cls.browser.close()
+        if hasattr(cls, "pw"):
+            cls.pw.stop()
+        if hasattr(cls, "server"):
+            cls.server.shutdown()
+            cls.server.server_close()
+
+    def _create_mobile_page(self):
+        page = self.browser.new_page(viewport={"width": 375, "height": 667})
+        page.goto(f"http://127.0.0.1:{self.port}/")
+        page.wait_for_load_state("domcontentloaded")
+        return page
+
+    def _get_drawer_state(self, page):
+        return page.evaluate("""() => {
+            const menu = document.getElementById('mobile-menu');
+            const btn = document.getElementById('hamburger-btn');
+            const icon = btn ? btn.querySelector('i') : null;
+            return {
+                isOpen: menu ? menu.classList.contains('mobile-open') : false,
+                icon: icon ? icon.className : '',
+                ariaLabel: btn ? btn.getAttribute('aria-label') : '',
+                maxHeight: menu ? menu.style.maxHeight : ''
+            };
+        }""")
 
     def test_mobile_tab_elements_exist_in_html(self):
-        """Verify HTML contains mobile nav tabs for watching, logs, and settings."""
+        """Verify HTML contains mobile nav tabs for watching, discover, logs, and settings."""
         with open(self.index_path, "r", encoding="utf-8") as f:
             html = f.read()
 
@@ -34,196 +76,120 @@ class TestMobileNavigation(unittest.TestCase):
         self.assertIn('max-h-0', html)
 
     def test_app_js_binds_mobile_tabs(self):
-        """Verify app.js registers click listeners for mobile-nav-tab elements."""
-        with open(self.app_js_path, "r", encoding="utf-8") as f:
-            js = f.read()
+        """Verify real app.js binds mobile tabs to switch active view panels."""
+        page = self._create_mobile_page()
+        try:
+            # 1. Open mobile drawer and switch to logs tab
+            page.locator('#hamburger-btn').click()
+            page.wait_for_timeout(50)
+            page.locator('.mobile-nav-tab[data-tab="logs"]').click()
+            page.wait_for_timeout(50)
+            logs_visible = page.evaluate("() => !document.getElementById('logs-panel').classList.contains('hidden')")
+            self.assertTrue(logs_visible, "Logs panel should be visible after clicking mobile logs tab")
 
-        self.assertIn('mobileNavTabs:', js)
-        self.assertIn('DOM.mobileNavTabs.forEach', js)
-        self.assertIn('switchTab(btn.dataset.tab)', js)
+            # 2. Open mobile drawer again and switch to settings tab
+            page.locator('#hamburger-btn').click()
+            page.wait_for_timeout(50)
+            page.locator('.mobile-nav-tab[data-tab="settings"]').click()
+            page.wait_for_timeout(50)
+            settings_visible = page.evaluate("() => !document.getElementById('settings-panel').classList.contains('hidden')")
+            self.assertTrue(settings_visible, "Settings panel should be visible after clicking mobile settings tab")
+        finally:
+            page.close()
 
     def test_app_js_resets_hamburger_control_on_navigation(self):
         """Verify app.js switchTab auto-closes drawer and resets hamburger icon/state (ANIMU-UI-001)."""
-        with open(self.app_js_path, "r", encoding="utf-8") as f:
-            js = f.read()
+        page = self._create_mobile_page()
+        try:
+            # 1. Open mobile drawer
+            page.locator('#hamburger-btn').click()
+            page.wait_for_timeout(50)
+            state_opened = self._get_drawer_state(page)
+            self.assertTrue(state_opened["isOpen"])
+            self.assertEqual(state_opened["ariaLabel"], "Close menu")
+            self.assertEqual(state_opened["icon"], "fa-solid fa-xmark text-lg")
 
-        switch_tab_match = re.search(r'function switchTab\(tabName\)\s*\{(.*?)\n\s*// Trigger tab specific loader', js, re.DOTALL)
-        self.assertIsNotNone(switch_tab_match, "switchTab function block not found")
-        switch_tab_body = switch_tab_match.group(1)
+            # 2. Click mobile navigation tab to trigger tab switch
+            page.locator('.mobile-nav-tab[data-tab="watching"]').click()
+            page.wait_for_timeout(50)
+            state_closed = self._get_drawer_state(page)
 
-        self.assertIn("mobile-open", switch_tab_body)
-        self.assertIn("maxHeight = '0px'", switch_tab_body)
-        self.assertIn("fa-solid fa-bars text-lg", switch_tab_body)
-        self.assertIn("aria-label", switch_tab_body)
-        self.assertIn("Open menu", switch_tab_body)
+            # Assert drawer auto-closes and hamburger controls reset
+            self.assertFalse(state_closed["isOpen"])
+            self.assertEqual(state_closed["maxHeight"], "0px")
+            self.assertEqual(state_closed["icon"], "fa-solid fa-bars text-lg")
+            self.assertEqual(state_closed["ariaLabel"], "Open menu")
+        finally:
+            page.close()
 
     def test_tablet_mobile_drawer_open_tab_selection_closed_drawer_hamburger_lifecycle(self):
         """Regression test for tablet/mobile drawer open -> tab selection -> closed drawer -> hamburger icon/state."""
-        with open(self.app_js_path, "r", encoding="utf-8") as f:
-            js = f.read()
+        page = self._create_mobile_page()
+        try:
+            states = {}
 
-        node_script = """
-class ClassList {
-  constructor() { this.classes = new Set(); }
-  add(c) { this.classes.add(c); }
-  remove(c) { this.classes.delete(c); }
-  contains(c) { return this.classes.has(c); }
-  toggle(c, force) {
-    if (force !== undefined) {
-      if (force) this.classes.add(c); else this.classes.delete(c);
-      return force;
-    }
-    if (this.classes.has(c)) { this.classes.delete(c); return false; }
-    else { this.classes.add(c); return true; }
-  }
-}
+            # Phase 1: Initial closed state
+            states["initial"] = self._get_drawer_state(page)
 
-const DOM = {
-  mobileMenu: {
-    classList: new ClassList(),
-    style: { maxHeight: '0px' },
-    scrollHeight: 240
-  },
-  hamburgerBtn: {
-    attrs: { 'aria-label': 'Open menu' },
-    _icon: { className: 'fa-solid fa-bars text-lg' },
-    querySelector(sel) { return sel === 'i' ? this._icon : null; },
-    setAttribute(k, v) { this.attrs[k] = v; },
-    getAttribute(k) { return this.attrs[k]; }
-  },
-  navTabs: [],
-  mobileNavTabs: [],
-  viewPanels: []
-};
+            # Phase 2: User opens mobile/tablet drawer
+            page.locator('#hamburger-btn').click()
+            page.wait_for_timeout(50)
+            states["drawer_opened"] = self._get_drawer_state(page)
 
-// Hamburger Menu handler (from app.js)
-function onHamburgerClick() {
-  const menu = DOM.mobileMenu;
-  const isOpen = menu.classList.contains('mobile-open');
-  if (isOpen) {
-    menu.classList.remove('mobile-open');
-    menu.style.maxHeight = '0px';
-    DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
-    DOM.hamburgerBtn.setAttribute('aria-label', 'Open menu');
-  } else {
-    menu.classList.add('mobile-open');
-    menu.style.maxHeight = menu.scrollHeight + 'px';
-    DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-xmark text-lg';
-    DOM.hamburgerBtn.setAttribute('aria-label', 'Close menu');
-  }
-}
+            # Phase 3: User selects a tab (e.g. 'watching'), drawer auto-closes
+            page.locator('.mobile-nav-tab[data-tab="watching"]').click()
+            page.wait_for_timeout(50)
+            states["tab_selected_auto_closed"] = self._get_drawer_state(page)
 
-// switchTab handler (from app.js)
-function switchTab(tabName) {
-  if (DOM.mobileMenu && DOM.mobileMenu.classList.contains('mobile-open')) {
-    DOM.mobileMenu.classList.remove('mobile-open');
-    DOM.mobileMenu.style.maxHeight = '0px';
-    if (DOM.hamburgerBtn) {
-      const icon = DOM.hamburgerBtn.querySelector('i');
-      if (icon) icon.className = 'fa-solid fa-bars text-lg';
-      DOM.hamburgerBtn.setAttribute('aria-label', 'Open menu');
-    }
-  }
-}
+            # Phase 4: User opens drawer again
+            page.locator('#hamburger-btn').click()
+            page.wait_for_timeout(50)
+            states["drawer_reopened"] = self._get_drawer_state(page)
 
-const lifecycle = [];
+            # Phase 5: User manually closes drawer via hamburger
+            page.locator('#hamburger-btn').click()
+            page.wait_for_timeout(50)
+            states["drawer_closed_by_hamburger"] = self._get_drawer_state(page)
 
-// 1. Initial closed state
-lifecycle.push({
-  phase: 'initial',
-  isOpen: DOM.mobileMenu.classList.contains('mobile-open'),
-  icon: DOM.hamburgerBtn.querySelector('i').className,
-  ariaLabel: DOM.hamburgerBtn.getAttribute('aria-label'),
-  maxHeight: DOM.mobileMenu.style.maxHeight
-});
+            # Phase 6: Desktop navigation while closed (does not perturb state)
+            page.evaluate("() => { const b = document.querySelector('.nav-tab[data-tab=\"discover\"]'); if (b) b.click(); }")
+            page.wait_for_timeout(50)
+            states["desktop_nav_while_closed"] = self._get_drawer_state(page)
 
-// 2. User opens mobile/tablet drawer
-onHamburgerClick();
-lifecycle.push({
-  phase: 'drawer_opened',
-  isOpen: DOM.mobileMenu.classList.contains('mobile-open'),
-  icon: DOM.hamburgerBtn.querySelector('i').className,
-  ariaLabel: DOM.hamburgerBtn.getAttribute('aria-label'),
-  maxHeight: DOM.mobileMenu.style.maxHeight
-});
+            # Phase 1: Initial closed state
+            self.assertFalse(states['initial']['isOpen'])
+            self.assertEqual(states['initial']['icon'], 'fa-solid fa-bars text-lg')
+            self.assertEqual(states['initial']['ariaLabel'], 'Open menu')
+            self.assertIn(states['initial']['maxHeight'], ('0px', ''))
 
-// 3. User selects a tab (e.g. 'watching'), drawer auto-closes
-switchTab('watching');
-lifecycle.push({
-  phase: 'tab_selected_auto_closed',
-  isOpen: DOM.mobileMenu.classList.contains('mobile-open'),
-  icon: DOM.hamburgerBtn.querySelector('i').className,
-  ariaLabel: DOM.hamburgerBtn.getAttribute('aria-label'),
-  maxHeight: DOM.mobileMenu.style.maxHeight
-});
+            # Phase 2: Drawer opened
+            self.assertTrue(states['drawer_opened']['isOpen'])
+            self.assertEqual(states['drawer_opened']['icon'], 'fa-solid fa-xmark text-lg')
+            self.assertEqual(states['drawer_opened']['ariaLabel'], 'Close menu')
+            self.assertNotEqual(states['drawer_opened']['maxHeight'], '0px')
 
-// 4. User opens drawer again
-onHamburgerClick();
-lifecycle.push({
-  phase: 'drawer_reopened',
-  isOpen: DOM.mobileMenu.classList.contains('mobile-open'),
-  icon: DOM.hamburgerBtn.querySelector('i').className,
-  ariaLabel: DOM.hamburgerBtn.getAttribute('aria-label'),
-  maxHeight: DOM.mobileMenu.style.maxHeight
-});
+            # Phase 3: Tab selected -> drawer auto-closed -> hamburger reset
+            self.assertFalse(states['tab_selected_auto_closed']['isOpen'])
+            self.assertEqual(states['tab_selected_auto_closed']['icon'], 'fa-solid fa-bars text-lg')
+            self.assertEqual(states['tab_selected_auto_closed']['ariaLabel'], 'Open menu')
+            self.assertEqual(states['tab_selected_auto_closed']['maxHeight'], '0px')
 
-// 5. User manually closes drawer via hamburger
-onHamburgerClick();
-lifecycle.push({
-  phase: 'drawer_closed_by_hamburger',
-  isOpen: DOM.mobileMenu.classList.contains('mobile-open'),
-  icon: DOM.hamburgerBtn.querySelector('i').className,
-  ariaLabel: DOM.hamburgerBtn.getAttribute('aria-label'),
-  maxHeight: DOM.mobileMenu.style.maxHeight
-});
+            # Phase 4: Drawer reopened
+            self.assertTrue(states['drawer_reopened']['isOpen'])
+            self.assertEqual(states['drawer_reopened']['icon'], 'fa-solid fa-xmark text-lg')
+            self.assertEqual(states['drawer_reopened']['ariaLabel'], 'Close menu')
 
-// 6. Desktop navigation while closed (does not perturb state)
-switchTab('discover');
-lifecycle.push({
-  phase: 'desktop_nav_while_closed',
-  isOpen: DOM.mobileMenu.classList.contains('mobile-open'),
-  icon: DOM.hamburgerBtn.querySelector('i').className,
-  ariaLabel: DOM.hamburgerBtn.getAttribute('aria-label'),
-  maxHeight: DOM.mobileMenu.style.maxHeight
-});
+            # Phase 5: Closed via hamburger
+            self.assertFalse(states['drawer_closed_by_hamburger']['isOpen'])
+            self.assertEqual(states['drawer_closed_by_hamburger']['icon'], 'fa-solid fa-bars text-lg')
+            self.assertEqual(states['drawer_closed_by_hamburger']['ariaLabel'], 'Open menu')
 
-console.log(JSON.stringify(lifecycle));
-"""
-        proc = subprocess.run(['node', '-e', node_script], capture_output=True, text=True, check=True)
-        states = {item['phase']: item for item in json.loads(proc.stdout)}
-
-        # Phase 1: Initial closed state
-        self.assertFalse(states['initial']['isOpen'])
-        self.assertEqual(states['initial']['icon'], 'fa-solid fa-bars text-lg')
-        self.assertEqual(states['initial']['ariaLabel'], 'Open menu')
-        self.assertEqual(states['initial']['maxHeight'], '0px')
-
-        # Phase 2: Drawer opened
-        self.assertTrue(states['drawer_opened']['isOpen'])
-        self.assertEqual(states['drawer_opened']['icon'], 'fa-solid fa-xmark text-lg')
-        self.assertEqual(states['drawer_opened']['ariaLabel'], 'Close menu')
-        self.assertNotEqual(states['drawer_opened']['maxHeight'], '0px')
-
-        # Phase 3: Tab selected -> drawer auto-closed -> hamburger reset
-        self.assertFalse(states['tab_selected_auto_closed']['isOpen'])
-        self.assertEqual(states['tab_selected_auto_closed']['icon'], 'fa-solid fa-bars text-lg')
-        self.assertEqual(states['tab_selected_auto_closed']['ariaLabel'], 'Open menu')
-        self.assertEqual(states['tab_selected_auto_closed']['maxHeight'], '0px')
-
-        # Phase 4: Drawer reopened
-        self.assertTrue(states['drawer_reopened']['isOpen'])
-        self.assertEqual(states['drawer_reopened']['icon'], 'fa-solid fa-xmark text-lg')
-        self.assertEqual(states['drawer_reopened']['ariaLabel'], 'Close menu')
-
-        # Phase 5: Closed via hamburger
-        self.assertFalse(states['drawer_closed_by_hamburger']['isOpen'])
-        self.assertEqual(states['drawer_closed_by_hamburger']['icon'], 'fa-solid fa-bars text-lg')
-        self.assertEqual(states['drawer_closed_by_hamburger']['ariaLabel'], 'Open menu')
-
-        # Phase 6: Desktop navigation
-        self.assertFalse(states['desktop_nav_while_closed']['isOpen'])
-        self.assertEqual(states['desktop_nav_while_closed']['icon'], 'fa-solid fa-bars text-lg')
-        self.assertEqual(states['desktop_nav_while_closed']['ariaLabel'], 'Open menu')
+            # Phase 6: Desktop navigation
+            self.assertFalse(states['desktop_nav_while_closed']['isOpen'])
+            self.assertEqual(states['desktop_nav_while_closed']['icon'], 'fa-solid fa-bars text-lg')
+            self.assertEqual(states['desktop_nav_while_closed']['ariaLabel'], 'Open menu')
+        finally:
+            page.close()
 
 
 if __name__ == "__main__":

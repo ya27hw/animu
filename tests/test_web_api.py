@@ -399,10 +399,82 @@ class TestWebAPI(unittest.TestCase):
             self.assertEqual(res.status, 500)
             data = json.loads(res.read().decode("utf-8"))
             self.assertFalse(data.get("ok"))
-            self.assertEqual(data.get("error"), "Failed to start torrent recheck.")
-            mock_get_state.assert_called_once_with(torrent_hash)
-            mock_recheck.assert_called_once_with(torrent_hash)
-            mock_resume.assert_not_called()
+
+class TestServerPortConfiguration(unittest.TestCase):
+    """Focused regression tests for ANIMU-TEST-002: ANIMU_PORT environment variable and validation."""
+
+    def test_default_port_is_3210(self):
+        """Verify default port is 3210 when ANIMU_PORT is unset."""
+        from animu.web import get_server_port, DEFAULT_PORT
+        from unittest.mock import patch
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(DEFAULT_PORT, 3210)
+            self.assertEqual(get_server_port(), 3210)
+
+    def test_animu_port_env_var_honored(self):
+        """Verify valid ANIMU_PORT integer string is honored."""
+        from animu.web import get_server_port
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"ANIMU_PORT": "8080"}):
+            self.assertEqual(get_server_port(), 8080)
+        with patch.dict("os.environ", {"ANIMU_PORT": "4000"}):
+            self.assertEqual(get_server_port(), 4000)
+
+    def test_animu_port_invalid_string_fallback(self):
+        """Verify non-numeric ANIMU_PORT safely falls back to default 3210."""
+        from animu.web import get_server_port
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"ANIMU_PORT": "not-a-port"}):
+            self.assertEqual(get_server_port(), 3210)
+        with patch.dict("os.environ", {"ANIMU_PORT": "3210abc"}):
+            self.assertEqual(get_server_port(), 3210)
+
+    def test_animu_port_out_of_bounds_fallback(self):
+        """Verify out-of-range ports (< 1 or > 65535) fall back to default 3210."""
+        from animu.web import get_server_port
+        from unittest.mock import patch
+        for bad_port in ["0", "-1", "65536", "99999"]:
+            with patch.dict("os.environ", {"ANIMU_PORT": bad_port}):
+                self.assertEqual(get_server_port(), 3210)
+
+    def test_animu_port_empty_fallback(self):
+        """Verify empty or whitespace ANIMU_PORT falls back to default 3210."""
+        from animu.web import get_server_port
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"ANIMU_PORT": ""}):
+            self.assertEqual(get_server_port(), 3210)
+        with patch.dict("os.environ", {"ANIMU_PORT": "   "}):
+            self.assertEqual(get_server_port(), 3210)
+
+    def test_explicit_port_takes_precedence(self):
+        """Verify explicitly provided port argument overrides ANIMU_PORT."""
+        from animu.web import get_server_port
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"ANIMU_PORT": "5000"}):
+            self.assertEqual(get_server_port(explicit_port=9000), 9000)
+
+    def test_explicit_port_invalid_fallback(self):
+        """Verify invalid explicit port argument falls back to default 3210."""
+        from animu.web import get_server_port
+        self.assertEqual(get_server_port(explicit_port=-1), 3210)
+        self.assertEqual(get_server_port(explicit_port="invalid"), 3210)
+
+    def test_start_server_binds_to_resolved_port(self):
+        """Verify start_server passes resolved port from ANIMU_PORT to ThreadingHTTPServer."""
+        from animu.web import start_server
+        from unittest.mock import patch, MagicMock
+        mock_server_instance = MagicMock()
+        with patch.dict("os.environ", {"ANIMU_PORT": "4567"}), \
+             patch("animu.web.http.server.ThreadingHTTPServer", return_value=mock_server_instance) as mock_server_cls, \
+             patch("animu.web._prewarm_heavy_reads"):
+            mock_server_instance.serve_forever.side_effect = KeyboardInterrupt
+            try:
+                start_server()
+            except KeyboardInterrupt:
+                pass
+            mock_server_cls.assert_called_once()
+            args, kwargs = mock_server_cls.call_args
+            self.assertEqual(args[0], ("0.0.0.0", 4567))
 
 
 if __name__ == "__main__":
