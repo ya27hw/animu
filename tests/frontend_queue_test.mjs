@@ -7,8 +7,78 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const puppeteer = require('puppeteer-core');
 import { spawnSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
-const CHROME = '/home/hermes/.agent-browser/browsers/chrome-151.0.7922.76/chrome';
+function getChromeExecutable() {
+  if (process.env.ANIMU_CHROME) {
+    if (fs.existsSync(process.env.ANIMU_CHROME)) {
+      return process.env.ANIMU_CHROME;
+    }
+    throw new Error(`ANIMU_CHROME is set to '${process.env.ANIMU_CHROME}' but no executable was found at that path.`);
+  }
+
+  // 1. Check known local browser directory (~/.agent-browser/browsers)
+  const agentBrowserDir = path.join(os.homedir(), '.agent-browser', 'browsers');
+  if (fs.existsSync(agentBrowserDir)) {
+    try {
+      const entries = fs.readdirSync(agentBrowserDir).sort().reverse();
+      for (const entry of entries) {
+        const candidatePaths = [
+          path.join(agentBrowserDir, entry, 'chrome'),
+          path.join(agentBrowserDir, entry, 'chrome-linux', 'chrome'),
+          path.join(agentBrowserDir, entry, 'chromium'),
+          path.join(agentBrowserDir, entry)
+        ];
+        for (const cand of candidatePaths) {
+          if (fs.existsSync(cand) && fs.statSync(cand).isFile()) {
+            return cand;
+          }
+        }
+      }
+    } catch (e) {
+      // Fall through
+    }
+  }
+
+  // 2. Check PATH via 'which'
+  const names = ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium', 'chrome'];
+  for (const name of names) {
+    try {
+      const res = spawnSync('which', [name], { encoding: 'utf-8' });
+      if (res.status === 0 && res.stdout) {
+        const found = res.stdout.trim().split('\n')[0].trim();
+        if (found && fs.existsSync(found)) {
+          return found;
+        }
+      }
+    } catch (e) {
+      // Continue search
+    }
+  }
+
+  // 3. Check well-known standard locations
+  const standardPaths = [
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/snap/bin/chromium',
+    '/snap/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium'
+  ];
+  for (const p of standardPaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  throw new Error('No usable Chrome/Chromium executable found. Please set ANIMU_CHROME or install Chrome/Chromium.');
+}
+
+const CHROME = getChromeExecutable();
 const URL = 'http://10.0.0.165:3210/';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

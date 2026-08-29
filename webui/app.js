@@ -390,10 +390,12 @@
       menu.classList.remove('mobile-open');
       menu.style.maxHeight = '0px';
       DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-bars text-lg';
+      DOM.hamburgerBtn.setAttribute('aria-label', 'Open menu');
     } else {
       menu.classList.add('mobile-open');
       menu.style.maxHeight = menu.scrollHeight + 'px';
       DOM.hamburgerBtn.querySelector('i').className = 'fa-solid fa-xmark text-lg';
+      DOM.hamburgerBtn.setAttribute('aria-label', 'Close menu');
     }
   });
 
@@ -543,9 +545,14 @@
     });
 
     // Close mobile menu on navigate
-    if (DOM.mobileMenu.classList.contains('mobile-open')) {
+    if (DOM.mobileMenu && DOM.mobileMenu.classList.contains('mobile-open')) {
       DOM.mobileMenu.classList.remove('mobile-open');
       DOM.mobileMenu.style.maxHeight = '0px';
+      if (DOM.hamburgerBtn) {
+        const icon = DOM.hamburgerBtn.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-bars text-lg';
+        DOM.hamburgerBtn.setAttribute('aria-label', 'Open menu');
+      }
     }
 
     // Trigger tab specific loader
