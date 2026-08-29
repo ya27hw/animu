@@ -399,6 +399,10 @@ class TestWebAPI(unittest.TestCase):
             self.assertEqual(res.status, 500)
             data = json.loads(res.read().decode("utf-8"))
             self.assertFalse(data.get("ok"))
+            self.assertEqual(data.get("error"), "Failed to start torrent recheck.")
+            mock_get_state.assert_called_once_with(torrent_hash)
+            mock_recheck.assert_called_once_with(torrent_hash)
+            mock_resume.assert_not_called()
 
 class TestServerPortConfiguration(unittest.TestCase):
     """Focused regression tests for ANIMU-TEST-002: ANIMU_PORT environment variable and validation."""
