@@ -116,7 +116,9 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
             "alternativeTitle": record.alternative_title or None,
             "startingEpisode": record.starting_episode,
             "downloadedEpisodes": record.downloaded_episodes or [],
-            "timeouts": record.timeouts
+            "timeouts": record.timeouts,
+            "preferredReleaseGroup": record.preferred_release_group or None,
+            "releaseGroupMisses": record.release_group_misses
         }
     else:
         enriched["localState"] = {
@@ -124,7 +126,9 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
             "alternativeTitle": None,
             "startingEpisode": 0,
             "downloadedEpisodes": [],
-            "timeouts": 0
+            "timeouts": 0,
+            "preferredReleaseGroup": None,
+            "releaseGroupMisses": 0
         }
     return enriched
 
@@ -449,17 +453,23 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             start_ep = record.starting_episode if record else 0
             downloaded = record.downloaded_episodes if record else []
 
+            pref_group = record.preferred_release_group if record else ""
+            misses = record.release_group_misses if record else 0
+
             # Incomplete AniList records can carry a null ``media`` node
             # (e.g. an entry whose title was deleted upstream). Null-safe here
             # so one broken record never 500s the whole /api/anime response.
             media = dict(anime["media"]) if anime.get("media") else {}
             media["alternativeTitle"] = alt_title or None
             media["startingEpisode"] = start_ep
+            media["preferredReleaseGroup"] = pref_group or None
 
             merged.append({
                 "mediaId": media_id,
                 "progress": anime.get("progress", 0),
                 "downloadedEpisodes": downloaded,
+                "preferredReleaseGroup": pref_group or None,
+                "releaseGroupMisses": misses,
                 "media": media
             })
 
@@ -1730,6 +1740,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             if "startingEpisode" in body:
                 try:
                     record.starting_episode = max(0, int(body["startingEpisode"]))
+                except ValueError:
+                    pass
+            if "preferredReleaseGroup" in body:
+                record.preferred_release_group = str(body["preferredReleaseGroup"] or "").strip()
+            if "releaseGroupMisses" in body:
+                try:
+                    record.release_group_misses = max(0, int(body["releaseGroupMisses"]))
                 except ValueError:
                     pass
             if body.get("resetDownloadedEpisodes"):

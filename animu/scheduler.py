@@ -249,7 +249,9 @@ class Scheduler:
             start_episode=start_episode,
             end_episode=end_episode,
             starting_episode=starting_episode,
-            downloaded_episodes=record.downloaded_episodes
+            downloaded_episodes=record.downloaded_episodes,
+            preferred_release_group=record.preferred_release_group,
+            release_group_misses=record.release_group_misses
         )
 
         primary_seed_count = 0
@@ -328,7 +330,9 @@ class Scheduler:
                         end_episode=end_episode,
                         starting_episode=starting_episode + combo["episode_offset"],
                         downloaded_episodes=record.downloaded_episodes,
-                        alt_anime_title=combo["title"]
+                        alt_anime_title=combo["title"],
+                        preferred_release_group=record.preferred_release_group,
+                        release_group_misses=record.release_group_misses
                     )
                     seed_count = sum(safe_int(t.get("nyaa:seeders", 0)) for t in result) if result else 0
                     if seed_count > best_seed_count:
@@ -355,6 +359,25 @@ class Scheduler:
                     end_episode = anime["media"].get("episodes") or 0
 
         if primary_torrent:
+            from .release_groups import get_group_tier
+            for tor in primary_torrent:
+                chosen_grp = tor.get("release_group")
+                chosen_score = tor.get("group_score")
+                tor_pref = tor.get("preferred_release_group")
+                tor_misses = tor.get("release_group_misses", 0)
+                switched = bool(tor.get("preference_switched"))
+                tier = get_group_tier(chosen_grp)
+                prev_pref = record.preferred_release_group or "None"
+                print(
+                    f"[RELEASE_GROUP] {alternative_title}: chosen={chosen_grp} "
+                    f"(tier {tier}, score {chosen_score}), previous={prev_pref}, "
+                    f"preferred={tor_pref}, switched={switched}"
+                )
+                if tor_pref is not None:
+                    record.preferred_release_group = tor_pref
+                    record.release_group_misses = tor_misses
+
+            db.upsert(anime["mediaId"], record)
             newly_downloaded = self.download_torrents(anime, record, primary_torrent)
             if newly_downloaded:
                 self.sync_anime_rewatching_status(anime, record)

@@ -344,6 +344,7 @@
     configForm: document.getElementById('profile-config-form'),
     btnSubmitConfig: document.getElementById('btn-submit-config'),
     excludeReleaseGroupsInput: document.getElementById('excludeReleaseGroupsInput'),
+    releaseGroupTierOverridesInput: document.getElementById('releaseGroupTierOverridesInput'),
     btnTestQbit: document.getElementById('btn-test-qbit'),
     btnTestProxy: document.getElementById('btn-test-proxy'),
     btnTestDiscord: document.getElementById('btn-test-discord'),
@@ -2261,6 +2262,9 @@
       if (input) {
         if (input.type === 'checkbox') input.checked = Boolean(cfg[key]);
         else if (Array.isArray(cfg[key])) input.value = cfg[key].join(', ');
+        else if (typeof cfg[key] === 'object' && cfg[key] !== null) {
+          input.value = Object.entries(cfg[key]).map(([k, v]) => `${k}=${v}`).join(', ');
+        }
         else input.value = cfg[key] ?? '';
       }
     });
@@ -2278,9 +2282,23 @@
       if (key === 'excludeReleaseGroups') {
         payload[key] = String(val).split(',').map(s => s.trim()).filter(Boolean);
       }
+      else if (key === 'releaseGroupTierOverrides') {
+        const overrides = {};
+        String(val).split(',').forEach(item => {
+          const parts = item.split('=');
+          if (parts.length === 2 && parts[0].trim()) {
+            overrides[parts[0].trim()] = parts[1].trim();
+          }
+        });
+        payload[key] = overrides;
+      }
       else if (input && input.type === 'checkbox') payload[key] = input.checked;
       else if (input && input.type === 'number') payload[key] = Number(val);
       else payload[key] = val;
+    });
+
+    DOM.configForm.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      if (cb.name) payload[cb.name] = cb.checked;
     });
 
     setBtnLoading(DOM.btnSubmitConfig, true, '<i class="fa-solid fa-spinner fa-spin"></i> Hotloading...');

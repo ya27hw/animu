@@ -44,6 +44,10 @@ class ProfileConfig:
     set_completed_to_rewatching: bool = True
     air_date_threshold_hours: float = 48.0
     prefer_uncensored: bool = True
+    prefer_release_group: bool = True
+    release_group_upgrade_margin: float = 0.0
+    release_group_downgrade_after_misses: int = 0
+    release_group_tier_overrides: Dict[str, Any] = field(default_factory=dict)
     
     # Discord options
     discord_enable_download: bool = True
@@ -106,6 +110,10 @@ MAP_JSON_TO_ATTR = {
     "setCompletedToRewatching": "set_completed_to_rewatching",
     "airDateThresholdHours": "air_date_threshold_hours",
     "preferUncensored": "prefer_uncensored",
+    "preferReleaseGroup": "prefer_release_group",
+    "releaseGroupUpgradeMargin": "release_group_upgrade_margin",
+    "releaseGroupDowngradeAfterMisses": "release_group_downgrade_after_misses",
+    "releaseGroupTierOverrides": "release_group_tier_overrides",
     "discordEnableDownload": "discord_enable_download",
     "discordEnableFail": "discord_enable_fail",
     "discordDownloadColor": "discord_download_color",
@@ -147,6 +155,29 @@ def get_config() -> ProfileConfig:
                             except (ValueError, TypeError):
                                 if attr_key == "discord_fail_threshold":
                                     val = 7
+                        elif attr_key == "release_group_downgrade_after_misses" and val is not None:
+                            try:
+                                val = max(0, int(val))
+                            except (ValueError, TypeError):
+                                val = 0
+                        elif attr_key == "release_group_upgrade_margin" and val is not None:
+                            try:
+                                val = float(val)
+                            except (ValueError, TypeError):
+                                val = 0.0
+                        elif attr_key == "prefer_release_group" and val is not None:
+                            val = bool(val)
+                        elif attr_key == "release_group_tier_overrides" and val is not None:
+                            if isinstance(val, str):
+                                ov = {}
+                                for pair in val.split(','):
+                                    if '=' in pair:
+                                        k, v = pair.split('=', 1)
+                                        if k.strip():
+                                            ov[k.strip()] = v.strip()
+                                val = ov
+                            elif not isinstance(val, dict):
+                                val = {}
                         config_dict[attr_key] = val
                     else:
                         extra_fields[json_key] = val

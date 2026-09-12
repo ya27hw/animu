@@ -10,6 +10,8 @@ class OfflineAnime:
     timeouts: int = 0
     max_timeouts: int = 0
     pending_rewatching_update: bool = False
+    preferred_release_group: str = ""
+    release_group_misses: int = 0
 
     def set_timeout_until(self, time_seconds: float, interval_minutes: int = 30) -> None:
         """Sets a timeout until the next episode is aired."""

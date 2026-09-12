@@ -23,6 +23,7 @@ class Database:
         self.local_db_path = os.path.join(root_dir, "logs", "offline_db.json")
         self.local_cache: Dict[str, Dict[str, Any]] = {}
         self.local_cache_valid = False
+        self._pb_schema_fields: Optional[set] = None
         self._load_local_cache()
 
     def _load_local_cache(self):
@@ -86,6 +87,29 @@ class Database:
             print(f"PocketBase HTTP request error: {e}")
             raise
 
+    def probe_pb_schema(self, force: bool = False) -> set:
+        """Queries PocketBase for the anime collection schema and caches supported field names."""
+        with self._lock:
+            if self._pb_schema_fields is not None and not force:
+                return self._pb_schema_fields
+
+            try:
+                resp = self._request("GET", f"/api/collections/{ANIME_COLLECTION}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    fields = set()
+                    schema_list = data.get("schema") or data.get("fields") or []
+                    if isinstance(schema_list, list):
+                        for item in schema_list:
+                            if isinstance(item, dict) and "name" in item:
+                                fields.add(item["name"])
+                    self._pb_schema_fields = fields
+                    return self._pb_schema_fields
+            except Exception as e:
+                print(f"[PB_SCHEMA_WARNING] Schema probe failed, defaulting to basic fields: {e}")
+
+            return self._pb_schema_fields if self._pb_schema_fields is not None else set()
+
     def _to_offline_anime(self, rec: Dict[str, Any]) -> OfflineAnime:
         """Convert a raw DB/cache dict into an OfflineAnime model."""
         return OfflineAnime(
@@ -95,7 +119,9 @@ class Database:
             alternative_title=rec.get("alternative_title", ""),
             timeouts=rec.get("timeouts", 0),
             max_timeouts=rec.get("max_timeouts", 0),
-            pending_rewatching_update=rec.get("pending_rewatching_update", False)
+            pending_rewatching_update=rec.get("pending_rewatching_update", False),
+            preferred_release_group=rec.get("preferred_release_group", ""),
+            release_group_misses=rec.get("release_group_misses", 0)
         )
 
     def get(self, media_id: int) -> Optional[OfflineAnime]:
@@ -119,6 +145,11 @@ class Database:
                         if cached and cached.get("_unsynced"):
                             return self._to_offline_anime(cached)
                         if cached:
+                            # Retain local group memory if PB does not store them
+                            if "preferred_release_group" not in record and "preferred_release_group" in cached:
+                                record["preferred_release_group"] = cached["preferred_release_group"]
+                            if "release_group_misses" not in record and "release_group_misses" in cached:
+                                record["release_group_misses"] = cached["release_group_misses"]
                             # Keep local progress if it is richer; adopt PB id.
                             if len(cached.get("downloaded_episodes", [])) > len(record.get("downloaded_episodes", [])):
                                 if "id" in record:
@@ -158,6 +189,8 @@ class Database:
                 "timeouts": anime_data.timeouts,
                 "max_timeouts": anime_data.max_timeouts,
                 "pending_rewatching_update": anime_data.pending_rewatching_update,
+                "preferred_release_group": anime_data.preferred_release_group,
+                "release_group_misses": anime_data.release_group_misses,
             }
             # Retain PocketBase internal ID if it exists locally
             if "id" in cached_record:
@@ -184,6 +217,13 @@ class Database:
 
             payload = {k: v for k, v in cached.items() if k not in ("_unsynced", "_pending_delete", "collectionId", "collectionName", "id", "created", "updated")}
 
+            # PocketBase schema-probe: only include group-memory fields if supported
+            supported_fields = self.probe_pb_schema()
+            if "preferred_release_group" not in supported_fields:
+                payload.pop("preferred_release_group", None)
+            if "release_group_misses" not in supported_fields:
+                payload.pop("release_group_misses", None)
+
             # Check if record already exists on PB
             resp = self._request("GET", f"/api/collections/{ANIME_COLLECTION}/records", params={"filter": f"media_id={media_id}"})
             existing_record = None
@@ -196,12 +236,19 @@ class Database:
                 rec_id = existing_record["id"]
                 patch_resp = self._request("PATCH", f"/api/collections/{ANIME_COLLECTION}/records/{rec_id}", json=payload)
                 patch_resp.raise_for_status()
-                # Update local cache with verified PB fields
-                self.local_cache[media_id_str] = patch_resp.json()
+                res_data = patch_resp.json()
+                if "preferred_release_group" not in supported_fields:
+                    res_data["preferred_release_group"] = cached.get("preferred_release_group", "")
+                    res_data["release_group_misses"] = cached.get("release_group_misses", 0)
+                self.local_cache[media_id_str] = res_data
             else:
                 post_resp = self._request("POST", f"/api/collections/{ANIME_COLLECTION}/records", json=payload)
                 post_resp.raise_for_status()
-                self.local_cache[media_id_str] = post_resp.json()
+                res_data = post_resp.json()
+                if "preferred_release_group" not in supported_fields:
+                    res_data["preferred_release_group"] = cached.get("preferred_release_group", "")
+                    res_data["release_group_misses"] = cached.get("release_group_misses", 0)
+                self.local_cache[media_id_str] = res_data
 
             # Clear unsynced flag
             self.local_cache[media_id_str].pop("_unsynced", None)
@@ -242,6 +289,10 @@ class Database:
                             # Take whichever has more downloaded episodes (progress
                             # is never silently downgraded), and keep the PB id.
                             if len(rec.get("downloaded_episodes", [])) >= len(cached.get("downloaded_episodes", [])):
+                                if "preferred_release_group" not in rec and "preferred_release_group" in cached:
+                                    rec["preferred_release_group"] = cached["preferred_release_group"]
+                                if "release_group_misses" not in rec and "release_group_misses" in cached:
+                                    rec["release_group_misses"] = cached["release_group_misses"]
                                 merged[mid_str] = rec
                             else:
                                 if "id" in rec:

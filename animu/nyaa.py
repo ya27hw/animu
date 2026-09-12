@@ -6,7 +6,8 @@ import math
 import threading
 from typing import Optional, List, Dict, Any
 from .config import get_config
-from .utils import verify_query, SCORE_THRESHOLD
+from .utils import verify_query, SCORE_THRESHOLD, detect_censorship_status
+from .release_groups import detect_release_group, get_group_score, select_best_candidate
 
 trace_lock = threading.Lock()
 
@@ -170,13 +171,14 @@ class NyaaClient:
         ignore_airdate_checks: bool,
         starting_episode: int = 0,
         *episodes: int,
-        verbose_trace: Optional[list] = None
+        verbose_trace: Optional[list] = None,
+        preferred_release_group: Optional[str] = None,
+        release_group_misses: int = 0
     ) -> Optional[Dict[str, Any]]:
         """Grades torrents from Nyaa and selects the best candidate matching criteria."""
         config = get_config()
-        best_rating = -1.0
-        best_torrent = None
         episode_num = episodes[0] if episodes and search_mode == "EPISODE" else None
+        candidates_pool = []
 
         for item in items:
             try:
@@ -186,7 +188,7 @@ class NyaaClient:
 
             title = item["title"]
             pub_date = item["pubDate"]
-            parsed_data = anitopy.parse(title)
+            parsed_data = anitopy.parse(title) or {}
 
             res_mode = "0" if use_alt_url else config.resolution
 
@@ -233,20 +235,35 @@ class NyaaClient:
                     "title_similarity": details.get("title_similarity", 0.0)
                 })
 
-            if rating > best_rating:
-                best_rating = rating
-                best_torrent = item
-                prefer_uncensored = getattr(config, "prefer_uncensored", True)
-                if prefer_uncensored:
-                    if details.get("is_uncensored") and best_rating >= 4.20:
-                        break
-                else:
-                    if best_rating >= 3.88:
-                        break
+            group = detect_release_group(title, parsed=parsed_data)
+            tier_overrides = getattr(config, "release_group_tier_overrides", None)
+            group_score = get_group_score(group, tier_overrides)
+            uncen, cen = detect_censorship_status(parsed_data)
+            censorship_class = 2 if uncen else (0 if cen else 1)
 
-        if best_rating >= SCORE_THRESHOLD and best_torrent:
-            return best_torrent
-        return None
+            candidates_pool.append({
+                "item": item,
+                "title": title,
+                "rating": rating,
+                "details": details,
+                "seeders": seeders,
+                "release_group": group,
+                "group_score": group_score,
+                "censorship_class": censorship_class
+            })
+
+        return select_best_candidate(
+            candidates=candidates_pool,
+            preferred_release_group=preferred_release_group,
+            release_group_misses=release_group_misses,
+            prefer_uncensored=getattr(config, "prefer_uncensored", True),
+            prefer_release_group=getattr(config, "prefer_release_group", True),
+            upgrade_margin=getattr(config, "release_group_upgrade_margin", 0.0),
+            downgrade_after_misses=getattr(config, "release_group_downgrade_after_misses", 0),
+            tier_overrides=getattr(config, "release_group_tier_overrides", None),
+            exclude_groups=config.exclude_release_groups,
+            score_threshold=SCORE_THRESHOLD
+        )
 
     def get_torrents(
         self,
@@ -255,7 +272,9 @@ class NyaaClient:
         end_episode: int,
         starting_episode: int,
         downloaded_episodes: List[int],
-        alt_anime_title: Optional[str] = None
+        alt_anime_title: Optional[str] = None,
+        preferred_release_group: Optional[str] = None,
+        release_group_misses: int = 0
     ) -> Optional[List[Dict[str, Any]]]:
         """Fetch matching torrents from Nyaa for batch or individual episodes."""
         config = get_config()
@@ -282,6 +301,9 @@ class NyaaClient:
                 for node in air_dates.get("nodes", [])
             ]}
 
+        current_preferred = preferred_release_group
+        current_misses = release_group_misses
+
         status = anime["media"].get("status")
         search_mode = "BATCH" if status == "FINISHED" and start_episode == 0 and not downloaded_episodes else "EPISODE"
 
@@ -298,7 +320,9 @@ class NyaaClient:
                     ignore_airdate_checks,
                     start_episode,
                     end_episode,
-                    verbose_trace=trace_candidates
+                    verbose_trace=trace_candidates,
+                    preferred_release_group=current_preferred,
+                    release_group_misses=current_misses
                 )
                 trace_status = "SUCCESS" if best else "NO_MATCH"
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], anime_title, trace_status, trace_candidates)
@@ -325,11 +349,15 @@ class NyaaClient:
                     ignore_airdate_checks,
                     starting_episode,
                     release_episode,
-                    verbose_trace=trace_candidates
+                    verbose_trace=trace_candidates,
+                    preferred_release_group=current_preferred,
+                    release_group_misses=current_misses
                 )
                 trace_status = "SUCCESS" if best else "NO_MATCH"
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], query_str, trace_status, trace_candidates)
                 if best:
+                    current_preferred = best.get("preferred_release_group", current_preferred)
+                    current_misses = best.get("release_group_misses", current_misses)
                     torrent_copy = dict(best)
                     torrent_copy["episode"] = episode
                     found_torrents.append(torrent_copy)
@@ -397,6 +425,9 @@ class NyaaClient:
                     "title_similarity": details.get("title_similarity", 0.0)
                 }
                 cand["parsedTitle"] = parsed.get("anime_title")
+                group = detect_release_group(item["title"], parsed=parsed)
+                cand["release_group"] = group
+                cand["group_score"] = get_group_score(group, getattr(config, "release_group_tier_overrides", None))
                 candidates.append(cand)
 
         # Sort by score desc, then seeders desc safely

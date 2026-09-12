@@ -1012,6 +1012,10 @@
                   <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Excluded Release Groups (CSV)</label>
                   <input type="text" id="excludeReleaseGroupsInput" name="excludeReleaseGroups" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" placeholder="e.g. SubsPlease, Erai-raws" />
                 </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Release Group Tier Overrides (Group=Tier/Score, CSV)</label>
+                  <input type="text" id="releaseGroupTierOverridesInput" name="releaseGroupTierOverrides" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm font-medium focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all duration-200" placeholder="e.g. ToonsHub=S, Judas=B" />
+                </div>
                 <div class="flex items-center gap-6 pt-2">
                   <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
                     <input type="checkbox" name="useProxy" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
@@ -1020,6 +1024,10 @@
                   <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
                     <input type="checkbox" name="setCompletedToRewatching" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
                     Set Finished to Rewatching
+                  </label>
+                  <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+                    <input type="checkbox" name="preferReleaseGroup" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+                    Prefer Release Group
                   </label>
                 </div>
               </div>
