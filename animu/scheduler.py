@@ -13,6 +13,7 @@ from .discord import alert_user, alert_unresolved_anime, clear_alert_history, se
 from .utils import fix_anime_season, count_past_relations, get_explicit_season
 from .history import history_manager
 from .ignored import ignored_manager
+from .airschedule import aired_episodes
 from . import readiness
 
 class Scheduler:
@@ -207,12 +208,7 @@ class Scheduler:
 
         start_episode = anime["progress"]
 
-        # NextAiringEpisode can be null if the anime is finished
-        next_ep = anime["media"].get("nextAiringEpisode")
-        if next_ep:
-            end_episode = next_ep["episode"] - 1
-        else:
-            end_episode = anime["media"].get("episodes") or 0
+        end_episode = aired_episodes(anime)
 
         if end_episode <= start_episode:
             return
@@ -470,11 +466,7 @@ class Scheduler:
                     continue
 
                 # Compute airing status
-                next_ep = anime["media"].get("nextAiringEpisode")
-                if next_ep:
-                    airing_episodes = next_ep["episode"] - 1
-                else:
-                    airing_episodes = anime["media"].get("episodes") or 0
+                airing_episodes = aired_episodes(anime)
 
                 if airing_episodes == 0:
                     continue
