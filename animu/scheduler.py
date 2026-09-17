@@ -13,17 +13,33 @@ from .discord import alert_user, alert_unresolved_anime, clear_alert_history, se
 from .utils import fix_anime_season, count_past_relations, get_explicit_season
 from .history import history_manager
 from .ignored import ignored_manager
+from .airschedule import aired_episodes
 from . import readiness
 
 class Scheduler:
     def __init__(self):
         self.is_running = False
 
+    def get_cycle_interval(self, now: time.struct_time | None = None) -> int:
+        """Return the effective cycle interval in minutes based on peak/off-peak."""
+        current = now or time.localtime()
+        hour = current.tm_hour
+        is_peak = (hour >= 12 or hour <= 4)
+        config = get_config()
+        interval = config.interval if is_peak else config.offpeak_interval
+        return interval or 30
+
+    def get_cycle_interval_seconds(self, now: time.struct_time | None = None) -> int:
+        """Return the effective cycle interval in seconds."""
+        return self.get_cycle_interval(now) * 60
+
     def initialize(self) -> None:
         """Mark scheduler initialization without performing network work."""
+        readiness.reconcile_threshold(self.get_cycle_interval_seconds())
         readiness.mark_scheduler_initialized()
 
     def _run_cycle(self) -> None:
+        readiness.reconcile_threshold(self.get_cycle_interval_seconds())
         readiness.mark_cycle_started()
         try:
             self.check()
@@ -192,12 +208,7 @@ class Scheduler:
 
         start_episode = anime["progress"]
 
-        # NextAiringEpisode can be null if the anime is finished
-        next_ep = anime["media"].get("nextAiringEpisode")
-        if next_ep:
-            end_episode = next_ep["episode"] - 1
-        else:
-            end_episode = anime["media"].get("episodes") or 0
+        end_episode = aired_episodes(anime)
 
         if end_episode <= start_episode:
             return
@@ -249,9 +260,7 @@ class Scheduler:
             start_episode=start_episode,
             end_episode=end_episode,
             starting_episode=starting_episode,
-            downloaded_episodes=record.downloaded_episodes,
-            preferred_release_group=record.preferred_release_group,
-            release_group_misses=record.release_group_misses
+            downloaded_episodes=record.downloaded_episodes
         )
 
         primary_seed_count = 0
@@ -330,9 +339,7 @@ class Scheduler:
                         end_episode=end_episode,
                         starting_episode=starting_episode + combo["episode_offset"],
                         downloaded_episodes=record.downloaded_episodes,
-                        alt_anime_title=combo["title"],
-                        preferred_release_group=record.preferred_release_group,
-                        release_group_misses=record.release_group_misses
+                        alt_anime_title=combo["title"]
                     )
                     seed_count = sum(safe_int(t.get("nyaa:seeders", 0)) for t in result) if result else 0
                     if seed_count > best_seed_count:
@@ -359,25 +366,6 @@ class Scheduler:
                     end_episode = anime["media"].get("episodes") or 0
 
         if primary_torrent:
-            from .release_groups import get_group_tier
-            for tor in primary_torrent:
-                chosen_grp = tor.get("release_group")
-                chosen_score = tor.get("group_score")
-                tor_pref = tor.get("preferred_release_group")
-                tor_misses = tor.get("release_group_misses", 0)
-                switched = bool(tor.get("preference_switched"))
-                tier = get_group_tier(chosen_grp)
-                prev_pref = record.preferred_release_group or "None"
-                print(
-                    f"[RELEASE_GROUP] {alternative_title}: chosen={chosen_grp} "
-                    f"(tier {tier}, score {chosen_score}), previous={prev_pref}, "
-                    f"preferred={tor_pref}, switched={switched}"
-                )
-                if tor_pref is not None:
-                    record.preferred_release_group = tor_pref
-                    record.release_group_misses = tor_misses
-
-            db.upsert(anime["mediaId"], record)
             newly_downloaded = self.download_torrents(anime, record, primary_torrent)
             if newly_downloaded:
                 self.sync_anime_rewatching_status(anime, record)
@@ -394,17 +382,15 @@ class Scheduler:
             from .nyaa import record_failed_trace
             record_failed_trace(anime["mediaId"], anime=anime, record=record, status="NO_RESULTS")
 
-            # Send deduplicated alert only once consecutive failure threshold is reached
-            threshold = getattr(config, "discord_fail_threshold", 7) or 7
-            if record.max_timeouts >= threshold:
-                cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
-                alert_unresolved_anime(
-                    media_id=anime["mediaId"],
-                    anime_title=anime["media"]["title"]["romaji"],
-                    image=cover_img,
-                    reason=f"No matching torrents found on Nyaa.si (Backoff timeout {record.timeouts}/10)",
-                    season_info=f"Media ID {anime['mediaId']}"
-                )
+            # Send deduplicated alert
+            cover_img = anime.get("media", {}).get("coverImage", {}).get("extraLarge") or ""
+            alert_unresolved_anime(
+                media_id=anime["mediaId"],
+                anime_title=anime["media"]["title"]["romaji"],
+                image=cover_img,
+                reason=f"No matching torrents found on Nyaa.si (Backoff timeout {record.timeouts}/10)",
+                season_info=f"Media ID {anime['mediaId']}"
+            )
 
             interval = config.interval or 30
             total_minutes = record.timeouts * interval
@@ -480,11 +466,7 @@ class Scheduler:
                     continue
 
                 # Compute airing status
-                next_ep = anime["media"].get("nextAiringEpisode")
-                if next_ep:
-                    airing_episodes = next_ep["episode"] - 1
-                else:
-                    airing_episodes = anime["media"].get("episodes") or 0
+                airing_episodes = aired_episodes(anime)
 
                 if airing_episodes == 0:
                     continue
@@ -523,11 +505,8 @@ class Scheduler:
         try:
             while True:
                 now = time.localtime()
-                hour = now.tm_hour
-                is_peak = (hour >= 12 or hour <= 4)
-                config = get_config()
-                interval = config.interval if is_peak else config.offpeak_interval
-                interval = interval or 30
+                interval = self.get_cycle_interval(now)
+                readiness.reconcile_threshold(interval * 60)
 
                 if now.tm_min % interval == 0 and now.tm_min != last_run_min and not self.is_running:
                     last_run_min = now.tm_min

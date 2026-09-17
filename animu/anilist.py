@@ -5,6 +5,7 @@ import time
 from typing import Optional, List, Dict, Any, Callable, Tuple
 from .config import get_config
 from .anilist_auth import execute_graphql
+from .airschedule import record_from_media_list
 
 # ---------------------------------------------------------------------------
 # TTL Cache — a simple in-memory cache with time-to-live for discovery feeds
@@ -248,6 +249,23 @@ def _cached_persistent(ttl: int = 300, stale_while_revalidate: bool = True):
     return decorator
 
 
+def _record_air_schedule(func: Callable) -> Callable:
+    """Decorator to record air schedule on genuine network fetches."""
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        if result is not None:
+            try:
+                record_from_media_list(result)
+            except Exception as e:
+                print(f"[ERROR] Failed to record air schedule: {e}")
+        return result
+
+    return wrapper
+
+
 # PerPage constant — AniList API maximum is 50
 PAGE_PER_PAGE = 50
 
@@ -313,6 +331,7 @@ class AnilistClient:
         return None
 
     @_cached_persistent(ttl=120, stale_while_revalidate=True)
+    @_record_air_schedule
     def get_anime_user_list(self) -> Optional[List[Dict[str, Any]]]:
         """Fetch user's current watching list with detailed anime info. Returns None on network/GraphQL error."""
         query = """
