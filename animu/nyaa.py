@@ -6,7 +6,7 @@ import math
 import threading
 from typing import Optional, List, Dict, Any
 from .config import get_config
-from .utils import verify_query, SCORE_THRESHOLD, detect_censorship_status
+from .utils import verify_query, SCORE_THRESHOLD, detect_censorship_status, fix_anime_season, get_explicit_season
 from .release_groups import detect_release_group, get_group_score, select_best_candidate
 
 trace_lock = threading.Lock()
@@ -265,6 +265,39 @@ class NyaaClient:
             score_threshold=SCORE_THRESHOLD
         )
 
+    def _is_season_1(self, anime: Dict[str, Any], anime_title: str) -> bool:
+        """Determine if an anime is Season 1 (not a multi-season show)."""
+        if anime.get("season_count", 1) > 1 or anime.get("seasonCount", 1) > 1:
+            return False
+        media = anime.get("media") or {}
+        if isinstance(media, dict):
+            if media.get("season_count", 1) > 1 or media.get("seasonCount", 1) > 1:
+                return False
+            title_info = media.get("title") or {}
+            if isinstance(title_info, dict):
+                for lang in ("romaji", "english"):
+                    t = title_info.get(lang)
+                    if t and isinstance(t, str):
+                        exp = get_explicit_season(t)
+                        if exp is not None and exp > 1:
+                            return False
+                        if fix_anime_season(t).get("seasonCount", 1) > 1:
+                            return False
+            relations = media.get("relations")
+            if isinstance(relations, dict):
+                for edge in relations.get("edges") or []:
+                    if isinstance(edge, dict) and edge.get("relationType") == "PREQUEL":
+                        return False
+
+        if anime_title and isinstance(anime_title, str):
+            exp = get_explicit_season(anime_title)
+            if exp is not None and exp > 1:
+                return False
+            if fix_anime_season(anime_title).get("seasonCount", 1) > 1:
+                return False
+
+        return True
+
     def get_torrents(
         self,
         anime: Dict[str, Any],
@@ -333,10 +366,14 @@ class NyaaClient:
             search_mode = "EPISODE"
 
         found_torrents = []
+        is_s1 = self._is_season_1(anime, anime_title)
         for episode in episode_list:
             release_episode = episode + (starting_episode if starting_episode > 0 else 0)
-            formatted_ep = f"{release_episode:02d}"
-            query_str = f'{anime_title} "{formatted_ep}"'
+            if release_episode == 1 and is_s1:
+                query_str = f"{anime_title} S01E01"
+            else:
+                formatted_ep = f"{release_episode:02d}"
+                query_str = f'{anime_title} "{formatted_ep}"'
             rss_res = self.fetch_rss_feed(query_str, search_url, enable_proxy)
             trace_candidates = []
             if rss_res["status"] == 200 and rss_res["data"]:
