@@ -625,7 +625,8 @@ def test_pb_schema_probe_sends_when_supported(tmp_path):
 # 13. Monkeypatched scheduler pass asserting persisted preferred group
 # ---------------------------------------------------------------------------
 
-def test_scheduler_persists_preferred_release_group(tmp_path):
+def test_scheduler_does_not_adopt_release_group_while_rollback_stands(tmp_path):
+    """Release-group adoption in the scheduler is deliberately disabled by the 2026-09-16 production rollback."""
     scheduler = Scheduler()
     anime_entry = {
         "mediaId": 12345,
@@ -661,7 +662,7 @@ def test_scheduler_persists_preferred_release_group(tmp_path):
 
         scheduler.handle_anime(anime_entry, record)
 
-        assert record.preferred_release_group == "ToonsHub"
+        assert record.preferred_release_group == ""
         assert record.release_group_misses == 0
         assert 1 in record.downloaded_episodes
         assert mock_upsert.called
