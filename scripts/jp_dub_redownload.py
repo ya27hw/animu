@@ -52,10 +52,13 @@ from animu.release_tracks import (                       # noqa: E402
     detect_subtitle_language,
 )
 
-# qBittorrent stores the RENAMED display name ("<title> - <episode>"), not the Nyaa
-# release name; see QbitClient.add_torrent's ``rename`` argument. This token matches
-# that display form (and tolerates "Ep 5", "E05", "S01E05" spellings).
-EPISODE_TOKEN_TEMPLATE = r'(?:S\d{1,2}E|E|Ep\s*|-\s*)0*{ep}(?!\d)'
+def _episode_token_re(episode):
+    """Regex matching an episode number in a qBittorrent display name or release name.
+
+    Percent-formatting is used deliberately: the pattern contains ``{1,2}`` quantifiers,
+    which ``str.format`` would try to interpret as a field name.
+    """
+    return re.compile(r'(?:S\d{1,2}E|E|Ep\s*|-\s*)0*%d(?!\d)' % episode, re.IGNORECASE)
 
 
 def _use_proxy(media_id):
@@ -123,7 +126,7 @@ def _match_torrents(torrents, save_title, release_title, episode):
     if len(exact) > 1:
         return [], "ambiguous", f"{len(exact)} torrents named {target!r}"
 
-    token = re.compile(EPISODE_TOKEN_TEMPLATE.format(ep=episode), re.IGNORECASE)
+    token = _episode_token_re(episode)
     wanted_path = save_title.strip().lower()
     candidates = [
         t for t in torrents
@@ -160,7 +163,7 @@ def _candidate_episode_matches(title, episode):
         # anitopy found an episode number and it is a different one: reject, even
         # if a loose regex would have matched something else in the name.
         return False
-    token = re.compile(EPISODE_TOKEN_TEMPLATE.format(ep=episode), re.IGNORECASE)
+    token = _episode_token_re(episode)
     return bool(token.search(title))
 
 

@@ -352,4 +352,24 @@ def test_format_report_renders_a_replacement_without_crashing():
     assert "ep   5" in text
 
 
+def test_torrent_fallback_matches_on_save_path_and_episode_token():
+    """The fallback must work when the display name is not exactly '<title> - <ep>'."""
+    script = _import_script()
+    torrents = [{"name": "[ToonsHub] Tomb Raider King S01E05 1080p CR WEB-DL (Dogulwang, Multi-Subs)",
+                 "hash": "a" * 40, "save_path": "/storage/media/anime/Tomb Raider King",
+                 "state": "uploading", "size": 1, "category": "animu"}]
+    matches, status, reason = script._match_torrents(torrents, "Tomb Raider King", "rel", 5)
+    assert status == "ok"
+    assert matches[0]["hash"] == "a" * 40
 
+    misses, status_missing, _ = script._match_torrents(torrents, "Tomb Raider King", "rel", 9)
+    assert status_missing == "missing"
+    assert misses == []
+
+
+def test_episode_token_regex_handles_scene_spellings():
+    script = _import_script()
+    assert script._episode_token_re(5).search("Show S01E05 1080p") is not None
+    assert script._episode_token_re(5).search("Tomb Raider King - 05 (MultiSub)") is not None
+    assert script._episode_token_re(5).search("Show Ep 05") is not None
+    assert script._episode_token_re(5).search("Show S01E10 1080p") is None
