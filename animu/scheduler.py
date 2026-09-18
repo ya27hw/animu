@@ -274,8 +274,6 @@ class Scheduler:
             end_episode=end_episode,
             starting_episode=starting_episode,
             downloaded_episodes=record.downloaded_episodes,
-            preferred_release_group=record.preferred_release_group,
-            release_group_misses=record.release_group_misses,
             **search_kwargs,
         )
 
