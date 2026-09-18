@@ -13,6 +13,7 @@ from .discord import alert_user, alert_unresolved_anime, clear_alert_history, se
 from .utils import fix_anime_season, count_past_relations, get_explicit_season
 from .history import history_manager
 from .ignored import ignored_manager
+from .prefs import get_requirements, prefers_japanese_dub
 from .airschedule import aired_episodes
 from . import readiness
 
@@ -185,6 +186,18 @@ class Scheduler:
         original_romaji = anime["media"]["title"]["romaji"]
         alternative_title = record.alternative_title or original_romaji
 
+        # Per-anime release requirements (Japanese audio / English subtitles).
+        # Resolved once per anime and applied to every search this method makes,
+        # so the whole point of the store is not lost in the alt-title fallback.
+        _requirements = get_requirements(anime["mediaId"])
+        search_kwargs = {
+            "prefer_japanese_dub": prefers_japanese_dub(anime["mediaId"]),
+            "require_japanese_audio": _requirements["require_japanese_audio"],
+            "require_english_subs": _requirements["require_english_subs"],
+        }
+        if any(search_kwargs.values()):
+            print(f"[AUDIO] {alternative_title}: release requirements {search_kwargs}")
+
         # Stored alternative titles sometimes drop the season marker (e.g.
         # "Mairimashita! Iruma-kun" for the 4th season). Season-conflict
         # verification then assumes Season 1 and rejects every later-season
@@ -260,7 +273,10 @@ class Scheduler:
             start_episode=start_episode,
             end_episode=end_episode,
             starting_episode=starting_episode,
-            downloaded_episodes=record.downloaded_episodes
+            downloaded_episodes=record.downloaded_episodes,
+            preferred_release_group=record.preferred_release_group,
+            release_group_misses=record.release_group_misses,
+            **search_kwargs,
         )
 
         primary_seed_count = 0
@@ -339,7 +355,8 @@ class Scheduler:
                         end_episode=end_episode,
                         starting_episode=starting_episode + combo["episode_offset"],
                         downloaded_episodes=record.downloaded_episodes,
-                        alt_anime_title=combo["title"]
+                        alt_anime_title=combo["title"],
+                        **search_kwargs,
                     )
                     seed_count = sum(safe_int(t.get("nyaa:seeders", 0)) for t in result) if result else 0
                     if seed_count > best_seed_count:

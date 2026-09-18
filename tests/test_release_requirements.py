@@ -359,5 +359,92 @@ def test_get_torrents_logs_when_requirements_cannot_be_met(capsys):
     assert "no release satisfying" in capsys.readouterr().out
 
 
+# ---------------------------------------------------------------------------
+# Scheduler: the per-anime store must reach every search call
+# ---------------------------------------------------------------------------
+
+def test_scheduler_passes_requirements_from_store(monkeypatch):
+    from animu import scheduler as scheduler_module
+    from animu.models import OfflineAnime
+    from animu.prefs import release_prefs
+    from animu.scheduler import Scheduler
+
+    release_prefs.set(184356, require_japanese_audio=True, require_english_subs=True)
+    captured = {}
+
+    def fake_get_torrents(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    # Stub everything that would otherwise leave the process: the air schedule,
+    # the qBittorrent batch probe, the database and the network.
+    monkeypatch.setattr(scheduler_module.nyaa, "get_torrents", fake_get_torrents)
+    monkeypatch.setattr(scheduler_module, "aired_episodes", lambda anime: 1)
+    monkeypatch.setattr(scheduler_module, "count_past_relations",
+                        lambda *a, **k: {"episodeOffset": 0, "seasonCount": 1})
+    monkeypatch.setattr(scheduler_module.qbit, "check_episodes_in_batch", lambda *a, **k: [])
+    monkeypatch.setattr(scheduler_module.db, "upsert", lambda *a, **k: None)
+
+    anime = {
+        "mediaId": 184356,
+        "progress": 0,
+        "media": {
+            "title": {"romaji": "Dogul Wang", "english": "Tomb Raider King"},
+            "status": "RELEASING",
+            "nextAiringEpisode": {"episode": 2},
+            "coverImage": {"extraLarge": "http://example.com/i.jpg"},
+            "episodes": 12,
+        },
+    }
+    record = OfflineAnime(media_id=184356, alternative_title="Tomb Raider King")
+
+    try:
+        Scheduler().handle_anime(anime, record)
+    finally:
+        release_prefs.delete(184356)
+
+    # The primary search is the one that matters: it must carry the per-anime
+    # requirements read from the store, and the preference that goes with them.
+    assert captured.get("require_japanese_audio") is True
+    assert captured.get("require_english_subs") is True
+    assert captured.get("prefer_japanese_dub") is True
 
 
+def test_scheduler_without_enrolment_passes_no_requirements(monkeypatch):
+    from animu import scheduler as scheduler_module
+    from animu.models import OfflineAnime
+    from animu.scheduler import Scheduler
+
+    cfg = get_config()
+    monkeypatch.setattr(cfg, "prefer_japanese_dub", False)
+    monkeypatch.setattr(cfg, "require_english_subs", False)
+
+    captured = {}
+
+    def fake_get_torrents(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(scheduler_module.nyaa, "get_torrents", fake_get_torrents)
+    monkeypatch.setattr(scheduler_module, "aired_episodes", lambda anime: 1)
+    monkeypatch.setattr(scheduler_module, "count_past_relations",
+                        lambda *a, **k: {"episodeOffset": 0, "seasonCount": 1})
+    monkeypatch.setattr(scheduler_module.qbit, "check_episodes_in_batch", lambda *a, **k: [])
+    monkeypatch.setattr(scheduler_module.db, "upsert", lambda *a, **k: None)
+
+    anime = {
+        "mediaId": 111222,
+        "progress": 0,
+        "media": {
+            "title": {"romaji": "Some Other Show"},
+            "status": "RELEASING",
+            "nextAiringEpisode": {"episode": 2},
+            "coverImage": {"extraLarge": "http://example.com/i.jpg"},
+            "episodes": 12,
+        },
+    }
+    Scheduler().handle_anime(anime, OfflineAnime(media_id=111222))
+
+    assert captured.get("require_japanese_audio") is False
+    assert captured.get("require_english_subs") is False
+    assert captured.get("prefer_japanese_dub") is False
