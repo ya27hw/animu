@@ -180,8 +180,13 @@ def build_report(media_id, apply=False, titles=None, enroll=False):
     if not titles:
         raise SystemExit(f"No tracking title for media id {media_id}; pass --title")
 
+    if enroll:
+        # Enrol first: a single `--enroll --apply` run must apply the requirements it
+        # just stored, otherwise the flag is only effective on the next invocation.
+        release_prefs.set(media_id, require_japanese_audio=True, require_english_subs=True)
+
     requirements = get_requirements(media_id)
-    require_jpn = True
+    require_jpn = requirements["require_japanese_audio"]
     require_subs = requirements["require_english_subs"]
 
     torrents = qbit.list_torrents()
@@ -195,14 +200,10 @@ def build_report(media_id, apply=False, titles=None, enroll=False):
         "apply": bool(apply),
         "entries": [],
         "applied": [],
-        "enrolled": False,
+        "enrolled": bool(enroll),
     }
 
-    if enroll:
-        release_prefs.set(media_id, require_japanese_audio=True, require_english_subs=True)
-        report["enrolled"] = True
-
-    for episode in by_episode:
+    for episode in sorted(by_episode):
         entry = by_episode[episode]
         release_title = str(entry.get("title") or "")
         audio_rank, audio_label = detect_audio_language(release_title)
@@ -297,7 +298,7 @@ def main():
         # Diagnostic: qBittorrent holds renamed display names, so this is how you see
         # what the matcher will actually be comparing against.
         for torrent in qbit.list_torrents():
-            print(f"  {torrent.get('hash')}  {torrent.get('state'):<12} "
+            print(f"  {torrent.get('hash')}  {str(torrent.get('state') or ''):<12} "
                   f"{torrent.get('save_path')}  {torrent.get('name')}")
         return
 
