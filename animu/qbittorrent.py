@@ -439,6 +439,33 @@ class QbitClient:
             print(f"Failed to fetch qBittorrent active downloads: {e}")
         return []
 
+    def list_torrents(self, category: str = "animu", limit: int = 1000) -> list:
+        """Return the raw qBittorrent queue for a category (any state).
+
+        Unlike ``get_active_downloads`` this keeps completed/seeding torrents, and
+        it returns every entry rather than the first ten: the re-download
+        remediation needs the release name and hash of torrents that finished
+        long ago.
+        """
+        if not self._ensure_auth():
+            return []
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
+        try:
+            resp = self.client.get(
+                info_url,
+                params={"filter": "all", "category": category, "sort": "added_on",
+                        "reverse": "true", "limit": limit},
+                headers={"Cookie": f"SID={self.sid}"}
+            )
+            if resp.status_code == 200:
+                return resp.json() or []
+            print(f"qBittorrent torrent list returned HTTP {resp.status_code}")
+        except Exception as exc:
+            print(f"Failed to fetch qBittorrent torrent list: {exc}")
+        return []
+
     @staticmethod
     def classify_state(state: str) -> tuple:
         """Normalize a qBittorrent ``state`` string into (kind, label).

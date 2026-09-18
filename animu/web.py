@@ -20,6 +20,7 @@ from .database import db
 from .models import OfflineAnime
 from .history import history_manager
 from .ignored import ignored_manager
+from .prefs import release_prefs
 from . import readiness
 
 # Cache-busting version for the SPA assets. NPM's global assets.conf caches
@@ -118,7 +119,9 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
             "downloadedEpisodes": record.downloaded_episodes or [],
             "timeouts": record.timeouts,
             "preferredReleaseGroup": record.preferred_release_group or None,
-            "releaseGroupMisses": record.release_group_misses
+            "releaseGroupMisses": record.release_group_misses,
+            "requireJapaneseAudio": bool(release_prefs.get(media_id).get("require_japanese_audio")),
+            "requireEnglishSubs": bool(release_prefs.get(media_id).get("require_english_subs")),
         }
     else:
         enriched["localState"] = {
@@ -128,7 +131,9 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
             "downloadedEpisodes": [],
             "timeouts": 0,
             "preferredReleaseGroup": None,
-            "releaseGroupMisses": 0
+            "releaseGroupMisses": 0,
+            "requireJapaneseAudio": False,
+            "requireEnglishSubs": False,
         }
     return enriched
 
@@ -455,6 +460,8 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
             pref_group = record.preferred_release_group if record else ""
             misses = record.release_group_misses if record else 0
+            req_jpn = bool(release_prefs.get(media_id).get("require_japanese_audio"))
+            req_subs = bool(release_prefs.get(media_id).get("require_english_subs"))
 
             # Incomplete AniList records can carry a null ``media`` node
             # (e.g. an entry whose title was deleted upstream). Null-safe here
@@ -463,15 +470,20 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             media["alternativeTitle"] = alt_title or None
             media["startingEpisode"] = start_ep
             media["preferredReleaseGroup"] = pref_group or None
+            media["requireJapaneseAudio"] = req_jpn
+            media["requireEnglishSubs"] = req_subs
 
-            merged.append({
+            entry = {
                 "mediaId": media_id,
                 "progress": anime.get("progress", 0),
                 "downloadedEpisodes": downloaded,
                 "preferredReleaseGroup": pref_group or None,
                 "releaseGroupMisses": misses,
                 "media": media
-            })
+            }
+            entry["requireJapaneseAudio"] = req_jpn
+            entry["requireEnglishSubs"] = req_subs
+            merged.append(entry)
 
         # Sort Romaji titles (A-Z first, then others)
         def get_sort_key(item):
@@ -483,6 +495,61 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             
         merged.sort(key=get_sort_key)
         return merged
+
+    def build_raw_search_payload(self, query: str, use_alt_url: bool) -> dict:
+        """Build the title-only Nyaa search payload (with track classification)."""
+        candidates = nyaa.search_raw_title_candidates(query, use_alt_url)
+        results = [{
+            "title": c["title"],
+            "link": c["link"],
+            "seeders": c["nyaa:seeders"],
+            "size": c["nyaa:size"],
+            "pubDate": c["pubDate"],
+            "score": None,
+            "audioRank": c.get("audio_rank"),
+            "audioLabel": c.get("audio_label"),
+            "subtitleRank": c.get("subtitle_rank"),
+            "subtitleLabel": c.get("subtitle_label"),
+        } for c in candidates[:25]]
+        return {
+            "title": query,
+            "episode": None,
+            "useAltUrl": use_alt_url,
+            "count": len(candidates),
+            "results": results,
+        }
+
+    def build_episode_search_payload(self, anime: dict, episode, starting_episode: int,
+                                     alt_title, media_id: int) -> dict:
+        """Build the episode/title Nyaa search payload (with track classification)."""
+        if episode is not None:
+            candidates = nyaa.search_episode_candidates(
+                anime, int(episode), starting_episode, alt_title
+            )
+        else:
+            candidates = nyaa.search_title_candidates(anime, starting_episode, alt_title)
+
+        results = [{
+            "title": c["title"],
+            "link": c["link"],
+            "seeders": c["nyaa:seeders"],
+            "size": c["nyaa:size"],
+            "pubDate": c["pubDate"],
+            "score": round(c["score"], 3) if c.get("score") is not None else None,
+            "details": c.get("details"),
+            "audioRank": c.get("audio_rank"),
+            "audioLabel": c.get("audio_label"),
+            "subtitleRank": c.get("subtitle_rank"),
+            "subtitleLabel": c.get("subtitle_label"),
+        } for c in candidates[:25]]
+
+        return {
+            "mediaId": media_id,
+            "episode": episode,
+            "title": anime["media"].get("alternativeTitle") or anime["media"]["title"]["romaji"],
+            "count": len(candidates),
+            "results": results,
+        }
 
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
@@ -1417,23 +1484,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "Query is required"})
                 return
 
-            candidates = nyaa.search_raw_title_candidates(query, use_alt_url)
-            results = [{
-                "title": c["title"],
-                "link": c["link"],
-                "seeders": c["nyaa:seeders"],
-                "size": c["nyaa:size"],
-                "pubDate": c["pubDate"],
-                "score": None
-            } for c in candidates[:25]]
-            
-            self.send_json(200, {
-                "title": query,
-                "episode": None,
-                "useAltUrl": use_alt_url,
-                "count": len(candidates),
-                "results": results
-            })
+            self.send_json(200, self.build_raw_search_payload(query, use_alt_url))
             
         elif path == "/api/nyaa-download":
             body = self.read_json_body()
@@ -1476,31 +1527,12 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             
             if episode is not None:
                 try:
-                    episode_val = int(episode)
-                    candidates = nyaa.search_episode_candidates(anime, episode_val, starting_episode, alt_title)
+                    int(episode)
                 except ValueError:
                     self.send_json(400, {"error": "Invalid episode value"})
                     return
-            else:
-                candidates = nyaa.search_title_candidates(anime, starting_episode, alt_title)
-                
-            results = [{
-                "title": c["title"],
-                "link": c["link"],
-                "seeders": c["nyaa:seeders"],
-                "size": c["nyaa:size"],
-                "pubDate": c["pubDate"],
-                "score": round(c["score"], 3) if c["score"] is not None else None,
-                "details": c.get("details")
-            } for c in candidates[:25]]
-            
-            self.send_json(200, {
-                "mediaId": media_id,
-                "episode": episode,
-                "title": anime["media"]["alternativeTitle"] or anime["media"]["title"]["romaji"],
-                "count": len(candidates),
-                "results": results
-            })
+
+            self.send_json(200, self.build_episode_search_payload(anime, episode, starting_episode, alt_title, media_id))
 
         elif re.match(r'^/api/anime/(\d+)/nyaa-download$', path):
             media_id = int(re.match(r'^/api/anime/(\d+)/nyaa-download$', path).group(1))
@@ -1744,6 +1776,12 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     pass
             if "preferredReleaseGroup" in body:
                 record.preferred_release_group = str(body["preferredReleaseGroup"] or "").strip()
+            if "requireJapaneseAudio" in body or "requireEnglishSubs" in body:
+                release_prefs.set(
+                    media_id,
+                    require_japanese_audio=body.get("requireJapaneseAudio"),
+                    require_english_subs=body.get("requireEnglishSubs"),
+                )
             if "releaseGroupMisses" in body:
                 try:
                     record.release_group_misses = max(0, int(body["releaseGroupMisses"]))
