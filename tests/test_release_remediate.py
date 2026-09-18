@@ -41,3 +41,167 @@ def test_list_torrents_handles_failure():
     client = QbitClient()
     client._ensure_auth = lambda: False
     assert client.list_torrents() == []
+
+
+import json
+from unittest.mock import patch
+
+from animu import prefs as prefs_module
+from animu.release_tracks import (
+    AUDIO_JPN_EXPLICIT,
+    AUDIO_OTHER,
+    LABEL_JPN,
+    LABEL_UNKNOWN,
+    LABEL_SUB_ENG,
+    SUB_ENG_DECLARED,
+    SUB_UNKNOWN,
+)
+from animu.models import OfflineAnime
+
+JPN = "[ToonsHub] Tomb Raider King S01E05 1080p CR WEB-DL AAC2.0 H.264 (Dogulwang, Multi-Subs, Japanese Dub)"
+OLD = "[ToonsHub] Tomb Raider King S01E05 1080p BILI WEB-DL AAC2.0 H.265 (Dogulwang, Multi-Subs)"
+OK_EP3 = "[ToonsHub] Tomb Raider King S01E03 1080p BILI WEB-DL AAC2.0 H.265 (Dogul Wang, Multi-Subs, Japanese Dub)"
+
+
+def _history(entries):
+    return [
+        {"id": str(i), "title": t, "anime_title": "Tomb Raider King", "episode": ep,
+         "link": f"https://nyaa.si/download/{i}.torrent", "size": "1G", "seeders": "10",
+         "added_at": f"2026-09-17T0{i}:00:00+00:00"}
+        for i, (t, ep) in enumerate(entries)
+    ]
+
+
+def _import_script():
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path("scripts/jp_dub_redownload.py")
+    spec = importlib.util.spec_from_file_location("jp_dub_redownload", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_dry_run_makes_no_mutations(tmp_path):
+    script = _import_script()
+    # qBittorrent holds the RENAMED display name ("<title> - <episode>"), not the Nyaa
+    # release name; the release name survives only in history.json.
+    torrents = [
+        {"name": "Tomb Raider King - 5", "hash": "b" * 40,
+         "save_path": "/storage/media/anime/Tomb Raider King",
+         "state": "uploading", "size": 1, "category": "animu"},
+        {"name": "Tomb Raider King - 3", "hash": "c" * 40,
+         "save_path": "/storage/media/anime/Tomb Raider King",
+         "state": "uploading", "size": 1, "category": "animu"},
+    ]
+    with patch.object(script.qbit, "list_torrents", return_value=torrents), \
+         patch.object(script.qbit, "delete_torrent_by_hash") as mock_delete, \
+         patch.object(script.qbit, "add_check_torrent") as mock_add, \
+         patch.object(script.history_manager, "get_all",
+                      return_value=_history([(OLD, 5), (OK_EP3, 3)])), \
+         patch.object(script.db, "get", return_value=OfflineAnime(media_id=184356,
+                                                                 alternative_title="Tomb Raider King")), \
+         patch.object(script.nyaa, "search_raw_title_candidates", return_value=[{
+             "title": JPN, "link": "https://nyaa.si/download/99.torrent",
+             "nyaa:seeders": "89", "nyaa:size": "1.3 GiB", "pubDate": "d",
+             "audio_rank": AUDIO_JPN_EXPLICIT, "audio_label": LABEL_JPN,
+             "subtitle_rank": SUB_ENG_DECLARED, "subtitle_label": LABEL_SUB_ENG}]):
+        report = script.build_report(184356, apply=False)
+
+    mock_delete.assert_not_called()
+    mock_add.assert_not_called()
+    assert report["entries"][0]["episode"] == 5
+    assert report["entries"][0]["action"] == "replace"
+    assert report["entries"][0]["replacement"]["title"] == JPN
+    assert report["entries"][1]["action"] == "keep"
+    assert report["entries"][0]["torrent"] == "Tomb Raider King - 5"
+
+
+def test_apply_adds_before_deleting_and_reports(tmp_path):
+    script = _import_script()
+    torrents = [{"name": "Tomb Raider King - 5", "hash": "b" * 40,
+                 "save_path": "/storage/media/anime/Tomb Raider King", "state": "uploading",
+                 "size": 1, "category": "animu"}]
+    order = []
+    with patch.object(script.qbit, "list_torrents", return_value=torrents), \
+         patch.object(script.qbit, "add_check_torrent",
+                      side_effect=lambda *a, **k: order.append("add") or True), \
+         patch.object(script.qbit, "delete_torrent_by_hash",
+                      side_effect=lambda *a, **k: order.append("delete") or True), \
+         patch.object(script.history_manager, "get_all", return_value=_history([(OLD, 5)])), \
+         patch.object(script.history_manager, "add_entry"), \
+         patch.object(script.db, "get", return_value=OfflineAnime(media_id=184356,
+                                                                 alternative_title="Tomb Raider King")), \
+         patch.object(script.nyaa, "search_raw_title_candidates", return_value=[{
+             "title": JPN, "link": "https://nyaa.si/download/99.torrent",
+             "nyaa:seeders": "89", "nyaa:size": "1.3 GiB", "pubDate": "d",
+             "audio_rank": AUDIO_JPN_EXPLICIT, "audio_label": LABEL_JPN,
+             "subtitle_rank": SUB_ENG_DECLARED, "subtitle_label": LABEL_SUB_ENG}]):
+        report = script.build_report(184356, apply=True)
+
+    # The replacement must be added before the wrong release is deleted, so a failed
+    # add never leaves the episode with no file at all.
+    assert order == ["add", "delete"]
+    assert report["applied"] == [5]
+
+
+def test_ambiguous_torrent_match_is_reported_not_deleted():
+    script = _import_script()
+    # A duplicated add: two torrents carry the same display name, so the match is
+    # ambiguous and nothing may be deleted.
+    torrents = [
+        {"name": "Tomb Raider King - 5", "hash": "b" * 40,
+         "save_path": "/storage/media/anime/Tomb Raider King", "state": "uploading",
+         "size": 1, "category": "animu"},
+        {"name": "Tomb Raider King - 5", "hash": "d" * 40,
+         "save_path": "/storage/media/anime/Tomb Raider King", "state": "uploading",
+         "size": 1, "category": "animu"},
+    ]
+    with patch.object(script.qbit, "list_torrents", return_value=torrents), \
+         patch.object(script.qbit, "delete_torrent_by_hash") as mock_delete, \
+         patch.object(script.qbit, "add_check_torrent") as mock_add, \
+         patch.object(script.history_manager, "get_all", return_value=_history([(OLD, 5)])), \
+         patch.object(script.db, "get", return_value=OfflineAnime(media_id=184356,
+                                                                 alternative_title="Tomb Raider King")), \
+         patch.object(script.nyaa, "search_raw_title_candidates", return_value=[{
+             "title": JPN, "link": "l", "nyaa:seeders": "89", "nyaa:size": "1.3 GiB",
+             "pubDate": "d", "audio_rank": AUDIO_JPN_EXPLICIT, "audio_label": LABEL_JPN,
+             "subtitle_rank": SUB_ENG_DECLARED, "subtitle_label": LABEL_SUB_ENG}]):
+        report = script.build_report(184356, apply=True)
+
+    mock_delete.assert_not_called()
+    mock_add.assert_not_called()
+    assert report["entries"][0]["action"] == "ambiguous"
+    assert "2 torrents" in report["entries"][0]["reason"]
+
+
+def test_no_replacement_found_keeps_current_release():
+    script = _import_script()
+    torrents = [{"name": "Tomb Raider King - 5", "hash": "b" * 40,
+                 "save_path": "/storage/media/anime/Tomb Raider King", "state": "uploading",
+                 "size": 1, "category": "animu"}]
+    with patch.object(script.qbit, "list_torrents", return_value=torrents), \
+         patch.object(script.qbit, "delete_torrent_by_hash") as mock_delete, \
+         patch.object(script.qbit, "add_check_torrent") as mock_add, \
+         patch.object(script.history_manager, "get_all", return_value=_history([(OLD, 5)])), \
+         patch.object(script.db, "get", return_value=OfflineAnime(media_id=184356,
+                                                                 alternative_title="Tomb Raider King")), \
+         patch.object(script.nyaa, "search_raw_title_candidates", return_value=[]):
+        report = script.build_report(184356, apply=True)
+
+    mock_delete.assert_not_called()
+    mock_add.assert_not_called()
+    assert report["entries"][0]["action"] == "no_replacement"
+
+
+def test_enroll_sets_both_requirements(tmp_path, monkeypatch):
+    script = _import_script()
+    monkeypatch.setattr(prefs_module.release_prefs, "path", str(tmp_path / "prefs.json"))
+    monkeypatch.setattr(script, "release_prefs", prefs_module.release_prefs, raising=False)
+    prefs_module.release_prefs.items = {}
+    prefs_module.release_prefs.set(184356, require_japanese_audio=True, require_english_subs=True)
+    assert prefs_module.release_prefs.get(184356) == {
+        "require_japanese_audio": True, "require_english_subs": True}
+    prefs_module.release_prefs.delete(184356)
+
