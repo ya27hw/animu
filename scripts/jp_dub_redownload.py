@@ -35,6 +35,8 @@ import os
 import re
 import sys
 
+import anitopy
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from animu.config import get_config                      # noqa: E402
@@ -139,14 +141,40 @@ def _match_torrents(torrents, save_title, release_title, episode):
     )
 
 
+def _candidate_episode_matches(title, episode):
+    """True when a Nyaa release name is the requested episode.
+
+    anitopy's ``episode_number`` is authoritative in most cases; the scene-token
+    regex is the fallback for naming styles anitopy cannot parse.
+    """
+    parsed = anitopy.parse(title) or {}
+    raw_episode = parsed.get("episode_number")
+    if raw_episode is not None:
+        values = raw_episode if isinstance(raw_episode, list) else [raw_episode]
+        for value in values:
+            try:
+                if int(float(value)) == episode:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        # anitopy found an episode number and it is a different one: reject, even
+        # if a loose regex would have matched something else in the name.
+        return False
+    token = re.compile(EPISODE_TOKEN_TEMPLATE.format(ep=episode), re.IGNORECASE)
+    return bool(token.search(title))
+
+
 def _find_replacement(titles, episode, require_japanese_audio, require_english_subs):
     """Best Nyaa release for one episode satisfying the requirements."""
+    config = get_config()
     query_title = titles[0]
     query = f'{query_title} S01E01' if episode == 1 else f'{query_title} "{episode:02d}"'
     candidates = nyaa.search_raw_title_candidates(query, False)
     qualified = []
     for item in candidates:
         title = item.get("title") or ""
+        if not _candidate_episode_matches(title, episode):
+            continue
         audio_rank, audio_label = detect_audio_language(title)
         sub_rank, sub_label = detect_subtitle_language(title)
         if require_japanese_audio and audio_rank < AUDIO_MULTI:
@@ -169,7 +197,12 @@ def _find_replacement(titles, episode, require_japanese_audio, require_english_s
         })
     if not qualified:
         return None
-    qualified.sort(key=lambda c: (-c["audio_rank"], -c["seeders"]))
+    target_resolution = str(getattr(config, "resolution", "") or "").strip()
+    qualified.sort(key=lambda c: (
+        -c["audio_rank"],
+        0 if (target_resolution and target_resolution in c["title"]) else 1,
+        -c["seeders"],
+    ))
     return qualified[0]
 
 
@@ -279,6 +312,29 @@ def build_report(media_id, apply=False, titles=None, enroll=False):
     return report
 
 
+def format_report(report):
+    """Render a build_report result as the human-readable dry-run output."""
+    lines = []
+    mode = "APPLY" if report["apply"] else "DRY RUN"
+    lines.append(f"[{mode}] media {report['mediaId']} titles={report['titles']} "
+                 f"requireJapaneseAudio={report['requireJapaneseAudio']} "
+                 f"requireEnglishSubs={report['requireEnglishSubs']}")
+    if report["enrolled"]:
+        lines.append("  enrolled: require_japanese_audio=True require_english_subs=True")
+    for row in report["entries"]:
+        lines.append(f"  ep {row['episode']:>3} {row['action']:<14} {row['audioLabel']:<34} "
+                     f"{row['subtitleLabel']:<18} {row['current'][:70]}")
+        replacement = row.get("replacement")
+        if replacement:
+            lines.append(f"        -> {replacement['audio_label']} / "
+                         f"{replacement['subtitle_label']}: {replacement['title'][:80]}")
+        if row.get("reason"):
+            lines.append(f"        reason: {row['reason']}")
+    if report["apply"]:
+        lines.append(f"  applied replacements for episodes: {report['applied']}")
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -308,22 +364,7 @@ def main():
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return
 
-    mode = "APPLY" if report["apply"] else "DRY RUN"
-    print(f"[{mode}] media {report['mediaId']} titles={report['titles']} "
-          f"requireJapaneseAudio={report['requireJapaneseAudio']} "
-          f"requireEnglishSubs={report['requireEnglishSubs']}")
-    if report["enrolled"]:
-        print("  enrolled: require_japanese_audio=True require_english_subs=True")
-    for row in report["entries"]:
-        print(f"  ep {row['episode']:>3} {row['action']:<14} {row['audioLabel']:<34} "
-              f"{row['subtitleLabel']:<18} {row['current'][:70]}")
-        if row.get("replacement"):
-            print(f"        -> {row['replacement']['audioLabel']} / "
-                  f"{row['replacement']['subtitleLabel']}: {row['replacement']['title'][:80]}")
-        if row.get("reason"):
-            print(f"        reason: {row['reason']}")
-    if report["apply"]:
-        print(f"  applied replacements for episodes: {report['applied']}")
+    print(format_report(report))
 
 
 if __name__ == "__main__":

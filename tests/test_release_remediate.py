@@ -283,3 +283,73 @@ def test_enroll_applies_in_the_same_run():
     assert report["applied"] == [5]
 
 
+def test_replacement_ignores_a_higher_seeded_release_of_another_episode():
+    """The ep-11 release must never be chosen when the request is for episode 8."""
+    script = _import_script()
+    from animu.models import OfflineAnime
+    from animu.prefs import release_prefs
+
+    ep8 = "[ToonsHub] Tomb Raider King S01E08 1080p CR WEB-DL AAC2.0 H.264 (Dogulwang, Multi-Subs, Japanese Dub)"
+    ep11_higher_seed = ("[ToonsHub] Tomb Raider King S01E11 1080p CR WEB-DL AAC2.0 H.264 "
+                        "(Dogulwang, Multi-Subs, Japanese Dub)")
+    pool = [
+        {"title": ep11_higher_seed, "link": "http://x/11.torrent", "nyaa:seeders": "9000",
+         "nyaa:size": "1G", "pubDate": "d"},
+        {"title": ep8, "link": "http://x/08.torrent", "nyaa:seeders": "5",
+         "nyaa:size": "1G", "pubDate": "d"},
+    ]
+    release_prefs.set(184356, require_japanese_audio=True, require_english_subs=True)
+    try:
+        with patch.object(script.nyaa, "search_raw_title_candidates", return_value=pool):
+            found = script._find_replacement(["Tomb Raider King"], 8, True, True)
+    finally:
+        release_prefs.delete(184356)
+
+    assert found is not None
+    assert found["title"] == ep8
+
+
+def test_candidate_episode_matching():
+    script = _import_script()
+    ep8 = "[ToonsHub] Tomb Raider King S01E08 1080p CR WEB-DL (Dogulwang, Multi-Subs, Japanese Dub)"
+    ep11 = "[ToonsHub] Tomb Raider King S01E11 1080p CR WEB-DL (Dogulwang, Multi-Subs, Japanese Dub)"
+    dash8 = "Tomb Raider King (Dogulwang) - 08 (MultiSub) x265 10bit 1080p.mkv"
+    assert script._candidate_episode_matches(ep8, 8) is True
+    assert script._candidate_episode_matches(ep11, 8) is False
+    assert script._candidate_episode_matches(dash8, 8) is True
+    assert script._candidate_episode_matches(dash8, 10) is False
+
+
+def test_format_report_renders_a_replacement_without_crashing():
+    script = _import_script()
+    report = {
+        "mediaId": 184356,
+        "titles": ["Tomb Raider King"],
+        "requireJapaneseAudio": True,
+        "requireEnglishSubs": True,
+        "apply": False,
+        "enrolled": False,
+        "applied": [],
+        "entries": [{
+            "episode": 5,
+            "current": OLD,
+            "audioRank": 0,
+            "audioLabel": LABEL_UNKNOWN,
+            "subtitleRank": SUB_ENG_DECLARED,
+            "subtitleLabel": LABEL_SUB_ENG,
+            "action": "replace",
+            "torrent": "Tomb Raider King - 5",
+            "replacement": {
+                "title": JPN, "link": "l", "seeders": 89, "size": "1G",
+                "audio_rank": AUDIO_JPN_EXPLICIT, "audio_label": LABEL_JPN,
+                "subtitle_rank": SUB_ENG_DECLARED, "subtitle_label": LABEL_SUB_ENG,
+            },
+        }],
+    }
+    text = script.format_report(report)
+    assert "[DRY RUN]" in text
+    assert "Japanese Dub" in text and "English Subs" in text
+    assert "ep   5" in text
+
+
+
