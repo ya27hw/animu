@@ -28,7 +28,9 @@
     activeMediaDetail: null,
     activeListEditorMedia: null,
     listEntriesByMedia: {},
-    listEntriesLoaded: false
+    listEntriesLoaded: false,
+    nyaaMediaId: null,
+    nyaaEpisode: null
   };
 
   // Real current AniList season (WINTER Jan-Mar, SPRING Apr-Jun, SUMMER Jul-Sep,
@@ -67,6 +69,18 @@
       '"': '&quot;',
       "'": '&#39;'
     }[char]));
+  }
+
+  function trackBadge(label, rank, tone) {
+    if (!label) return '';
+    const cls = tone === 'audio'
+      ? (rank === 2 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
+        : rank === 1 ? 'bg-sky-500/15 border-sky-500/30 text-sky-500'
+        : 'bg-slate-500/15 border-slate-500/30 text-slate-400')
+      : (rank === 2 ? 'bg-violet-500/15 border-violet-500/30 text-violet-400'
+        : rank === 0 ? 'bg-amber-500/15 border-amber-500/30 text-amber-500'
+        : 'bg-slate-500/15 border-slate-500/30 text-slate-400');
+    return `<span class="px-2 py-0.5 rounded-md border text-[10px] font-bold ${cls}">${label}</span>`;
   }
 
   // Toast Notifier
@@ -335,6 +349,9 @@
     editMediaId: document.getElementById('edit-media-id'),
     editAltTitle: document.getElementById('edit-alt-title'),
     editStartEp: document.getElementById('edit-start-ep'),
+    editRequireJpn: document.getElementById('edit-require-jpn'),
+    editRequireSubs: document.getElementById('edit-require-subs'),
+    nyaaEpisodeInput: document.getElementById('nyaa-episode-input'),
     btnResetDownloads: document.getElementById('btn-reset-downloads'),
     btnSaveSettings: document.getElementById('btn-save-settings'),
     themeToggle: document.getElementById('theme-toggle'),
@@ -2837,6 +2854,8 @@
     DOM.editMediaId.value = mediaId;
     DOM.editAltTitle.value = anime.media.alternativeTitle || '';
     DOM.editStartEp.value = anime.media.startingEpisode || 0;
+    DOM.editRequireJpn.checked = Boolean(anime.media.requireJapaneseAudio);
+    DOM.editRequireSubs.checked = Boolean(anime.media.requireEnglishSubs);
 
     openModal(DOM.settingsDialog);
   };
@@ -2850,7 +2869,12 @@
 
     setBtnLoading(DOM.btnSaveSettings, true, '<i class="fa-solid fa-spinner fa-spin"></i> Saving...');
     try {
-      await API.saveAnime(mediaId, { alternativeTitle, startingEpisode });
+      await API.saveAnime(mediaId, {
+        alternativeTitle,
+        startingEpisode,
+        requireJapaneseAudio: DOM.editRequireJpn.checked,
+        requireEnglishSubs: DOM.editRequireSubs.checked,
+      });
       showToast('Anime overrides saved successfully.');
       closeModal(DOM.settingsDialog);
       loadWatching();
@@ -2882,13 +2906,16 @@
   // ==========================================
   // OVERLAY DIALOG 2: NYAA EPISODE SEARCH
   // ==========================================
-  window.openNyaaDialog = async function(mediaId) {
-    const anime = state.animeList.find(x => x.mediaId === mediaId);
+  window.openNyaaDialog = async function(mediaId, episode) {
+    const ep = Number.isInteger(episode) && episode > 0 ? episode : null;
+    state.nyaaMediaId = mediaId;
+    state.nyaaEpisode = ep;
+    if (DOM.nyaaEpisodeInput) DOM.nyaaEpisodeInput.value = ep ?? '';
     openModal(DOM.nyaaDialog);
     DOM.nyaaList.innerHTML = '<div class="py-12 text-center text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-violet-500"></i><p>Querying Nyaa.si index...</p></div>';
 
     try {
-      const data = await API.searchNyaa(mediaId);
+      const data = await API.searchNyaa(mediaId, ep ?? undefined);
       if (!data.results || data.results.length === 0) {
         DOM.nyaaList.innerHTML = '<div class="py-12 text-center text-slate-400 text-sm">No torrent candidates found.</div>';
         return;
@@ -2898,13 +2925,15 @@
         <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-4 text-xs">
           <div class="space-y-1">
             <h4 class="font-['Outfit'] font-bold text-slate-800 dark:text-slate-200 line-clamp-1">${c.title}</h4>
-            <div class="flex items-center gap-3 text-slate-400 font-semibold">
+            <div class="flex items-center gap-3 text-slate-400 font-semibold flex-wrap">
+              ${trackBadge(c.audioLabel, c.audioRank, 'audio')}
+              ${trackBadge(c.subtitleLabel, c.subtitleRank, 'subs')}
               <span class="text-emerald-400"><i class="fa-solid fa-seedling mr-1"></i>${c.seeders} seeders</span>
               <span>${c.size}</span>
               <span>${c.pubDate}</span>
             </div>
           </div>
-          <button onclick="downloadTorrent('${mediaId}', '${encodeURIComponent(c.link)}')" class="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold shrink-0 transition-all">
+          <button data-torrent-link="${encodeURIComponent(c.link)}" class="nyaa-download-btn px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold shrink-0 transition-all">
             Download
           </button>
         </div>
@@ -2915,16 +2944,29 @@
     }
   };
 
-  window.downloadTorrent = async function(mediaId, encodedLink) {
+  DOM.nyaaList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.nyaa-download-btn');
+    if (!btn) return;
+    const link = decodeURIComponent(btn.dataset.torrentLink || '');
+    if (!link || state.nyaaMediaId == null) return;
     try {
-      const link = decodeURIComponent(encodedLink);
-      await API.downloadNyaa(mediaId, link);
+      await API.downloadNyaa(state.nyaaMediaId, link, state.nyaaEpisode ?? undefined);
       showToast('Torrent added to qBittorrent!');
       closeModal(DOM.nyaaDialog);
-    } catch (e) {
-      showToast(e.message, 'error');
+      loadWatching();
+    } catch (err) {
+      showToast(err.message, 'error');
     }
-  };
+  });
+
+  document.getElementById('nyaa-episode-search-btn')?.addEventListener('click', () => {
+    const ep = parseInt(DOM.nyaaEpisodeInput?.value, 10);
+    if (!Number.isInteger(ep) || ep < 1) {
+      showToast('Enter a valid episode number first.', 'error');
+      return;
+    }
+    window.openNyaaDialog(state.nyaaMediaId, ep);
+  });
 
 
   // ==========================================

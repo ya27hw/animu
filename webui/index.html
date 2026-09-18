@@ -1029,6 +1029,14 @@
                     <input type="checkbox" name="preferReleaseGroup" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
                     Prefer Release Group
                   </label>
+                  <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+                    <input type="checkbox" name="preferJapaneseDub" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+                    Prefer Japanese Dub
+                  </label>
+                  <label class="relative flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+                    <input type="checkbox" name="requireEnglishSubs" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+                    Require English Subs
+                  </label>
                 </div>
               </div>
             </div>
@@ -1213,6 +1221,19 @@
             <p class="text-xs text-slate-400 mt-2">Adjust index mapping if Nyaa continues numbering from past seasons (e.g., ep 25 instead of 1).</p>
           </div>
 
+          <div class="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Release requirements</p>
+            <label class="flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+              <input type="checkbox" id="edit-require-jpn" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+              Require Japanese-dub release
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer select-none text-sm font-semibold">
+              <input type="checkbox" id="edit-require-subs" class="w-4.5 h-4.5 accent-violet-600 rounded cursor-pointer" />
+              Require English subtitles
+            </label>
+            <p class="text-xs text-slate-400">When set, an episode is only downloaded from a release that satisfies both. Episodes with no such release stay undownloaded and are reported in the Logs tab.</p>
+          </div>
+
         </form>
       </div>
 
@@ -1238,6 +1259,15 @@
         <button class="dialog-close text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg transition-colors cursor-pointer" data-close>
           <i class="fa-solid fa-xmark"></i>
         </button>
+      </div>
+
+      <div class="px-6 pt-4 pb-2 flex items-center gap-3">
+        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider" for="nyaa-episode-input">Episode</label>
+        <input type="number" id="nyaa-episode-input" min="1" step="1" placeholder="all"
+               class="w-24 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:border-violet-500" />
+        <button id="nyaa-episode-search-btn" type="button"
+                class="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition-all">Search episode</button>
+        <span class="text-[11px] text-slate-400">Target one episode to replace a wrong-dub file.</span>
       </div>
 
       <div class="p-6 overflow-y-auto flex-grow">
