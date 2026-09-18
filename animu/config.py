@@ -23,7 +23,6 @@ class ProfileConfig:
     # Token issuance timestamp (epoch seconds) for 1-year expiry tracking
     anilist_token_issued_at: Optional[int] = None
     id: Optional[int] = None
-    media_id: Optional[int] = None
     resolution: str = "1080"
     root_dir: str = "/storage/media/anime"
     alt_root_dir: str = "/storage/media/homework"

@@ -77,8 +77,8 @@ def test_prefs_corrupt_file_is_not_fatal(tmp_path):
 def test_global_config_flags_exist_and_default_off():
     from animu.config import MAP_ATTR_TO_JSON, MAP_JSON_TO_ATTR, ProfileConfig
 
-    assert ProfileConfig(media_id=1).prefer_japanese_dub is False
-    assert ProfileConfig(media_id=1).require_english_subs is False
+    assert ProfileConfig().prefer_japanese_dub is False
+    assert ProfileConfig().require_english_subs is False
     assert MAP_JSON_TO_ATTR["preferJapaneseDub"] == "prefer_japanese_dub"
     assert MAP_JSON_TO_ATTR["requireEnglishSubs"] == "require_english_subs"
     assert MAP_ATTR_TO_JSON["prefer_japanese_dub"] == "preferJapaneseDub"
@@ -248,6 +248,116 @@ def test_candidates_without_the_new_keys_still_selectable():
     old_style = {"title": "x", "rating": 4.0, "seeders": 10, "release_group": None,
                  "group_score": 45.0, "censorship_class": 1, "item": {"title": "x"}, "details": {}}
     assert select_best_candidate([old_style], prefer_japanese_dub=True)["title"] == "x"
+
+
+# ---------------------------------------------------------------------------
+# NyaaClient end-to-end on a real episode-11 pool (fixtures, no network)
+# ---------------------------------------------------------------------------
+
+import unittest.mock as mock
+from animu.nyaa import NyaaClient
+
+
+EP11_POOL = [
+    (TRK_RAZE_EP11, 17), (TRK_BILI_EP11, 83), (TRK_DOOMDOS_EP11, 20),
+    (TRK_ANOZU_EP11, 103), (TRK_KOR_EP11, 59), (TRK_JPN_EP11, 89),
+    (TRK_VARYG_EP11, 78), (TRK_DUAL_EP11, 55),
+]
+
+
+def _pool_items():
+    return [
+        {"title": t, "link": f"http://nyaa.si/download/{i}.torrent",
+         "pubDate": "Sat, 04 Oct 2025 10:00:00 GMT", "nyaa:seeders": str(s)}
+        for i, (t, s) in enumerate(EP11_POOL)
+    ]
+
+
+def test_get_best_torrent_prefers_japanese_dub_when_enabled():
+    cfg = get_config()
+    cfg.resolution = "1080"
+    cfg.prefer_release_group = False
+    client = NyaaClient()
+    try:
+        before = client.get_best_torrent(
+            _pool_items(), 'Tomb Raider King "11"', "EPISODE", False, {"nodes": []}, True, 0, 11
+        )
+        assert before["title"] == TRK_ANOZU_EP11     # live-reproduced wrong-language pick
+        assert before["audio_rank"] == AUDIO_OTHER
+
+        after = client.get_best_torrent(
+            _pool_items(), 'Tomb Raider King "11"', "EPISODE", False, {"nodes": []}, True, 0, 11,
+            prefer_japanese_dub=True,
+        )
+        assert after["title"] == TRK_JPN_EP11
+        assert after["audio_rank"] == AUDIO_JPN_EXPLICIT
+        assert after["audio_label"] == LABEL_JPN
+        assert after["subtitle_rank"] == SUB_ENG_DECLARED
+    finally:
+        cfg.prefer_japanese_dub = False
+
+
+def test_get_best_torrent_honours_hard_requirements():
+    cfg = get_config()
+    cfg.resolution = "1080"
+    cfg.prefer_release_group = False
+    client = NyaaClient()
+    strict = client.get_best_torrent(
+        _pool_items(), 'Tomb Raider King "11"', "EPISODE", False, {"nodes": []}, True, 0, 11,
+        prefer_japanese_dub=True, require_japanese_audio=True, require_english_subs=True,
+    )
+    assert strict["title"] == TRK_JPN_EP11
+    # The Doomdos upload has no subtitle tag, so it can never satisfy the requirement.
+    doomed = [i for i in _pool_items() if "Doomdos" in i["title"]]
+    assert client.get_best_torrent(
+        doomed, 'Tomb Raider King "11"', "EPISODE", False, {"nodes": []}, True, 0, 11,
+        require_english_subs=True,
+    ) is None
+
+
+def test_search_episode_candidates_labelled_and_unfiltered():
+    cfg = get_config()
+    cfg.resolution = "1080"
+    cfg.prefer_japanese_dub = True
+    cfg.use_proxy = False
+    client = NyaaClient()
+    try:
+        # Both the RSS fetch and the AniList schedule must be stubbed, or the test
+        # reaches the network.
+        with mock.patch.object(NyaaClient, "fetch_rss_feed",
+                               return_value={"status": 200, "message": "ok", "data": _pool_items()}), \
+             mock.patch.object(NyaaClient, "get_episode_air_dates", return_value={"nodes": []}):
+            cands = client.search_episode_candidates(
+                {"mediaId": 1, "media": {"title": {"romaji": "Tomb Raider King"}, "genres": []}},
+                11, 0, None
+            )
+        jpn = [c for c in cands if c["audio_rank"] == AUDIO_JPN_EXPLICIT]
+        assert jpn and jpn[0]["audio_label"] == LABEL_JPN
+        assert all("audio_rank" in c and "audio_label" in c for c in cands)
+        assert all("subtitle_rank" in c and "subtitle_label" in c for c in cands)
+        # The manual picker must NOT filter: every qualifying candidate is returned.
+        assert len(cands) == 8
+    finally:
+        cfg.prefer_japanese_dub = False
+
+
+def test_get_torrents_logs_when_requirements_cannot_be_met(capsys):
+    client = NyaaClient()
+    anime = {
+        "mediaId": 184356,
+        "media": {"title": {"romaji": "Tomb Raider King"}, "status": "RELEASING", "genres": []},
+    }
+    with mock.patch.object(NyaaClient, "fetch_rss_feed",
+                           return_value={"status": 200, "message": "ok",
+                                         "data": [i for i in _pool_items() if "Doomdos" in i["title"]]}), \
+         mock.patch.object(NyaaClient, "get_episode_air_dates", return_value={"nodes": []}):
+        result = client.get_torrents(
+            anime, 10, 11, 0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], None, None, 0,
+            require_japanese_audio=True, require_english_subs=True,
+        )
+    assert result is None
+    assert "no release satisfying" in capsys.readouterr().out
+
 
 
 
