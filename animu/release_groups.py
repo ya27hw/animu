@@ -1,5 +1,6 @@
 import re
 from typing import Optional, List, Dict, Any, Tuple
+from .release_tracks import AUDIO_MULTI, AUDIO_OTHER, LABEL_UNKNOWN, SUB_ENG_DECLARED
 
 # (canonical_name, score, scope, confidence, evidence_note)
 RELEASE_GROUP_TABLE = [
@@ -263,6 +264,10 @@ def select_best_candidate(
     preferred_release_group: Optional[str] = None,
     release_group_misses: int = 0,
     prefer_uncensored: bool = True,
+    prefer_japanese_dub: bool = False,
+    require_japanese_audio: bool = False,
+    require_english_subs: bool = False,
+    subtitle_rank_key: str = "subtitle_rank",
     prefer_release_group: bool = True,
     upgrade_margin: float = 0.0,
     downgrade_after_misses: int = 0,
@@ -273,8 +278,10 @@ def select_best_candidate(
     """
     Selects the best torrent candidate following normative precedence:
     1. Hard gates (SCORE_THRESHOLD, seeders > 0, exclusion, rejection reasons).
-    2. Censorship class (uncensored > neutral > censored) when prefer_uncensored is on.
-    3. Release-group preference:
+    2. Hard requirements (require_japanese_audio, require_english_subs) -> may return None.
+    3. Audio class (explicit Japanese dub > multi/dual audio) when prefer_japanese_dub.
+    4. Censorship class (uncensored > neutral > censored) when prefer_uncensored.
+    5. Release-group preference:
        - Upgrades if a qualifying candidate strictly exceeds stored tier score + upgrade_margin.
        - Uses preferred group if qualifying release exists.
        - Fallback to highest tier candidate without forgetting stored preference (unless downgrade threshold reached).
@@ -304,7 +311,34 @@ def select_best_candidate(
     if not qualifying:
         return None
 
-    # 2. Censorship class
+    # 2. Hard release requirements (per-anime opt-in, or the global English-subs flag).
+    #    A requirement that nothing satisfies returns None on purpose: the episode
+    #    then stays undownloaded and is reported, instead of silently falling back
+    #    to a release in the wrong language. That is the owner's explicit choice.
+    if require_japanese_audio:
+        qualifying = [c for c in qualifying if c.get("audio_rank", AUDIO_OTHER) >= AUDIO_MULTI]
+        if not qualifying:
+            return None
+
+    if require_english_subs:
+        qualifying = [c for c in qualifying
+                      if c.get(subtitle_rank_key, SUB_ENG_DECLARED) >= SUB_ENG_DECLARED]
+        if not qualifying:
+            return None
+
+    # 3. Soft audio preference. Applied before censorship and release-group tier
+    #    because the owner's priority is one audio language across the library; a
+    #    seeder-count tie-break is what produced a mixed-dub library.
+    #    Only filters when some candidate actually declares a Japanese track, so a
+    #    show with no JPN release keeps its previous behaviour exactly.
+    if prefer_japanese_dub:
+        max_audio = max(c.get("audio_rank", AUDIO_OTHER) for c in qualifying)
+        if max_audio > AUDIO_OTHER:
+            qualifying = [c for c in qualifying if c.get("audio_rank", AUDIO_OTHER) == max_audio]
+            if not qualifying:
+                return None
+
+    # 4. Censorship class
     if prefer_uncensored:
         max_class = max(c.get("censorship_class", 1) for c in qualifying)
         qualifying = [c for c in qualifying if c.get("censorship_class", 1) == max_class]
@@ -312,18 +346,23 @@ def select_best_candidate(
     if not qualifying:
         return None
 
-    # 3. Release group preference disabled -> pure rating + seeders
+    # 5. Release group preference disabled -> pure rating + seeders
     if not prefer_release_group:
         best_cand = max(qualifying, key=lambda c: (c.get("rating", 0.0), c.get("seeders", 0)))
-        res = dict(best_cand["item"])
-        res["release_group"] = best_cand.get("release_group")
-        res["group_score"] = best_cand.get("group_score", UNKNOWN_GROUP_SCORE)
+        chosen = best_cand
+        res = dict(chosen["item"])
+        res["release_group"] = chosen.get("release_group")
+        res["group_score"] = chosen.get("group_score", UNKNOWN_GROUP_SCORE)
+        res["audio_rank"] = chosen.get("audio_rank", AUDIO_OTHER)
+        res["audio_label"] = chosen.get("audio_label", LABEL_UNKNOWN)
+        res["subtitle_rank"] = chosen.get(subtitle_rank_key, SUB_ENG_DECLARED)
+        res["subtitle_label"] = chosen.get("subtitle_label", "")
         res["preferred_release_group"] = preferred_release_group or ""
         res["release_group_misses"] = release_group_misses
         res["preference_switched"] = False
         return res
 
-    # 3. Release group preference enabled
+    # 5. Release group preference enabled
     best_overall = max(qualifying, key=lambda c: (c.get("group_score", UNKNOWN_GROUP_SCORE), c.get("rating", 0.0), c.get("seeders", 0)))
     current_pref = normalize_group_name(preferred_release_group) if preferred_release_group else ""
 
@@ -381,6 +420,10 @@ def select_best_candidate(
     res = dict(chosen["item"])
     res["release_group"] = chosen.get("release_group")
     res["group_score"] = chosen.get("group_score", UNKNOWN_GROUP_SCORE)
+    res["audio_rank"] = chosen.get("audio_rank", AUDIO_OTHER)
+    res["audio_label"] = chosen.get("audio_label", LABEL_UNKNOWN)
+    res["subtitle_rank"] = chosen.get(subtitle_rank_key, SUB_ENG_DECLARED)
+    res["subtitle_label"] = chosen.get("subtitle_label", "")
     res["preferred_release_group"] = new_pref
     res["release_group_misses"] = new_misses
     res["preference_switched"] = switched

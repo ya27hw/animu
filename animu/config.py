@@ -23,6 +23,7 @@ class ProfileConfig:
     # Token issuance timestamp (epoch seconds) for 1-year expiry tracking
     anilist_token_issued_at: Optional[int] = None
     id: Optional[int] = None
+    media_id: Optional[int] = None
     resolution: str = "1080"
     root_dir: str = "/storage/media/anime"
     alt_root_dir: str = "/storage/media/homework"
@@ -44,6 +45,8 @@ class ProfileConfig:
     set_completed_to_rewatching: bool = True
     air_date_threshold_hours: float = 48.0
     prefer_uncensored: bool = True
+    prefer_japanese_dub: bool = False
+    require_english_subs: bool = False
     prefer_release_group: bool = True
     release_group_upgrade_margin: float = 0.0
     release_group_downgrade_after_misses: int = 0
@@ -110,6 +113,8 @@ MAP_JSON_TO_ATTR = {
     "setCompletedToRewatching": "set_completed_to_rewatching",
     "airDateThresholdHours": "air_date_threshold_hours",
     "preferUncensored": "prefer_uncensored",
+    "preferJapaneseDub": "prefer_japanese_dub",
+    "requireEnglishSubs": "require_english_subs",
     "preferReleaseGroup": "prefer_release_group",
     "releaseGroupUpgradeMargin": "release_group_upgrade_margin",
     "releaseGroupDowngradeAfterMisses": "release_group_downgrade_after_misses",
@@ -167,6 +172,11 @@ def get_config() -> ProfileConfig:
                                 val = 0.0
                         elif attr_key == "prefer_release_group" and val is not None:
                             val = bool(val)
+                        elif attr_key in ("prefer_japanese_dub", "require_english_subs") and val is not None:
+                            if isinstance(val, str):
+                                val = val.strip().lower() not in ("", "false", "0", "no", "off")
+                            else:
+                                val = bool(val)
                         elif attr_key == "release_group_tier_overrides" and val is not None:
                             if isinstance(val, str):
                                 ov = {}

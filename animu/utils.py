@@ -3,6 +3,7 @@ import email.utils
 import time
 from typing import List, Dict, Any, Optional
 from .config import get_config
+from .release_tracks import is_japanese_dub
 
 # Torrent verification score threshold (title similarity + episode/resolution/air-date
 # match bonuses must reach this to be accepted).
@@ -216,7 +217,14 @@ def verify_query(
     if group in exclude_groups:
         return get_result(0.0, f"Excluded release group ({group})")
     if "dub" in subtitles:
-        return get_result(0.0, "Dubbed audio tracks")
+        # anitopy collapses any bracketed "... Dub" tag to the bare word "Dub", so
+        # an explicit "[Japanese Dub]" release was rejected here alongside the
+        # English dubs this rule exists for. Only the language check can tell them
+        # apart, and only when the owner asked for Japanese audio.
+        raw_title = _to_clean_string(anime_parsed_data.get("file_name"))
+        if not (getattr(config, "prefer_japanese_dub", False)
+                and is_japanese_dub(raw_title, anime_parsed_data)):
+            return get_result(0.0, "Dubbed audio tracks")
 
     try:
         parsed_date = email.utils.parsedate_to_datetime(nyaa_pub_date)
