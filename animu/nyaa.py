@@ -8,6 +8,12 @@ from typing import Optional, List, Dict, Any
 from .config import get_config
 from .utils import verify_query, SCORE_THRESHOLD, detect_censorship_status, fix_anime_season, get_explicit_season
 from .release_groups import detect_release_group, get_group_score, select_best_candidate
+from .release_tracks import (
+    AUDIO_OTHER,
+    SUB_ENG_DECLARED,
+    detect_audio_language,
+    detect_subtitle_language,
+)
 
 trace_lock = threading.Lock()
 
@@ -173,7 +179,10 @@ class NyaaClient:
         *episodes: int,
         verbose_trace: Optional[list] = None,
         preferred_release_group: Optional[str] = None,
-        release_group_misses: int = 0
+        release_group_misses: int = 0,
+        prefer_japanese_dub: bool = False,
+        require_japanese_audio: bool = False,
+        require_english_subs: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Grades torrents from Nyaa and selects the best candidate matching criteria."""
         config = get_config()
@@ -221,6 +230,15 @@ class NyaaClient:
                 verbose=True
             )
 
+            group = detect_release_group(title, parsed=parsed_data)
+            tier_overrides = getattr(config, "release_group_tier_overrides", None)
+            group_score = get_group_score(group, tier_overrides)
+            uncen, cen = detect_censorship_status(parsed_data)
+            censorship_class = 2 if uncen else (0 if cen else 1)
+
+            audio_rank, audio_label = detect_audio_language(title, parsed_data)
+            subtitle_rank, subtitle_label = detect_subtitle_language(title, parsed_data)
+
             if verbose_trace is not None:
                 verbose_trace.append({
                     "title": title,
@@ -232,14 +250,10 @@ class NyaaClient:
                     "episode_match": details.get("episode_match"),
                     "resolution_match": details.get("resolution_match"),
                     "air_date_match": details.get("air_date_match"),
-                    "title_similarity": details.get("title_similarity", 0.0)
+                    "title_similarity": details.get("title_similarity", 0.0),
+                    "audio_label": audio_label,
+                    "subtitle_label": subtitle_label,
                 })
-
-            group = detect_release_group(title, parsed=parsed_data)
-            tier_overrides = getattr(config, "release_group_tier_overrides", None)
-            group_score = get_group_score(group, tier_overrides)
-            uncen, cen = detect_censorship_status(parsed_data)
-            censorship_class = 2 if uncen else (0 if cen else 1)
 
             candidates_pool.append({
                 "item": item,
@@ -249,10 +263,14 @@ class NyaaClient:
                 "seeders": seeders,
                 "release_group": group,
                 "group_score": group_score,
-                "censorship_class": censorship_class
+                "censorship_class": censorship_class,
+                "audio_rank": audio_rank,
+                "audio_label": audio_label,
+                "subtitle_rank": subtitle_rank,
+                "subtitle_label": subtitle_label,
             })
 
-        return select_best_candidate(
+        best = select_best_candidate(
             candidates=candidates_pool,
             preferred_release_group=preferred_release_group,
             release_group_misses=release_group_misses,
@@ -262,8 +280,17 @@ class NyaaClient:
             downgrade_after_misses=getattr(config, "release_group_downgrade_after_misses", 0),
             tier_overrides=getattr(config, "release_group_tier_overrides", None),
             exclude_groups=config.exclude_release_groups,
-            score_threshold=SCORE_THRESHOLD
+            score_threshold=SCORE_THRESHOLD,
+            prefer_japanese_dub=prefer_japanese_dub,
+            require_japanese_audio=require_japanese_audio,
+            require_english_subs=require_english_subs,
         )
+
+        if best is not None and (prefer_japanese_dub or require_japanese_audio or require_english_subs):
+            print(f"[AUDIO] {best['title']} -> {best.get('audio_label', '')} / "
+                  f"{best.get('subtitle_label', '')}")
+
+        return best
 
     def _is_season_1(self, anime: Dict[str, Any], anime_title: str) -> bool:
         """Determine if an anime is Season 1 (not a multi-season show)."""
@@ -307,7 +334,10 @@ class NyaaClient:
         downloaded_episodes: List[int],
         alt_anime_title: Optional[str] = None,
         preferred_release_group: Optional[str] = None,
-        release_group_misses: int = 0
+        release_group_misses: int = 0,
+        prefer_japanese_dub: bool = False,
+        require_japanese_audio: bool = False,
+        require_english_subs: bool = False,
     ) -> Optional[List[Dict[str, Any]]]:
         """Fetch matching torrents from Nyaa for batch or individual episodes."""
         config = get_config()
@@ -355,7 +385,10 @@ class NyaaClient:
                     end_episode,
                     verbose_trace=trace_candidates,
                     preferred_release_group=current_preferred,
-                    release_group_misses=current_misses
+                    release_group_misses=current_misses,
+                    prefer_japanese_dub=prefer_japanese_dub,
+                    require_japanese_audio=require_japanese_audio,
+                    require_english_subs=require_english_subs,
                 )
                 trace_status = "SUCCESS" if best else "NO_MATCH"
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], anime_title, trace_status, trace_candidates)
@@ -388,10 +421,18 @@ class NyaaClient:
                     release_episode,
                     verbose_trace=trace_candidates,
                     preferred_release_group=current_preferred,
-                    release_group_misses=current_misses
+                    release_group_misses=current_misses,
+                    prefer_japanese_dub=prefer_japanese_dub,
+                    require_japanese_audio=require_japanese_audio,
+                    require_english_subs=require_english_subs,
                 )
                 trace_status = "SUCCESS" if best else "NO_MATCH"
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], query_str, trace_status, trace_candidates)
+                if best is None and (require_japanese_audio or require_english_subs):
+                    print(f"[AUDIO] no release satisfying the required audio/subtitle constraints for "
+                          f"{anime_title} episode {release_episode} "
+                          f"(require_japanese_audio={require_japanese_audio}, "
+                          f"require_english_subs={require_english_subs})")
                 if best:
                     current_preferred = best.get("preferred_release_group", current_preferred)
                     current_misses = best.get("release_group_misses", current_misses)
@@ -465,11 +506,28 @@ class NyaaClient:
                 group = detect_release_group(item["title"], parsed=parsed)
                 cand["release_group"] = group
                 cand["group_score"] = get_group_score(group, getattr(config, "release_group_tier_overrides", None))
+                cand["audio_rank"], cand["audio_label"] = detect_audio_language(item["title"], parsed)
+                cand["subtitle_rank"], cand["subtitle_label"] = detect_subtitle_language(item["title"], parsed)
                 candidates.append(cand)
 
         # Sort by score desc, then seeders desc safely
         candidates.sort(key=lambda x: (-x["score"], -safe_int(x.get("nyaa:seeders", 0))))
         return candidates
+
+    def annotate_tracks(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Attach audio + subtitle classes and labels to raw candidate dicts."""
+        annotated = []
+        for item in items:
+            cand = dict(item)
+            parsed = anitopy.parse(cand.get("title", "")) or {}
+            cand["audio_rank"], cand["audio_label"] = detect_audio_language(
+                cand.get("title", ""), parsed
+            )
+            cand["subtitle_rank"], cand["subtitle_label"] = detect_subtitle_language(
+                cand.get("title", ""), parsed
+            )
+            annotated.append(cand)
+        return annotated
 
     def search_title_candidates(
         self,
@@ -486,11 +544,11 @@ class NyaaClient:
         if rss_res["status"] != 200 or not rss_res["data"]:
             return []
 
-        return [{
+        return self.annotate_tracks([{
             **item,
             "score": 0.0,
             "parsedTitle": None
-        } for item in rss_res["data"]]
+        } for item in rss_res["data"]])
 
     def search_raw_title_candidates(self, anime_title: str, use_alt_url: bool) -> List[Dict[str, Any]]:
         """Retrieve raw unsorted search listings from Nyaa (for manual web search)."""
@@ -505,7 +563,7 @@ class NyaaClient:
         rss_res = self.fetch_rss_feed(query, search_url, enable_proxy)
         if rss_res["status"] != 200 or not rss_res["data"]:
             return []
-        return rss_res["data"]
+        return self.annotate_tracks(rss_res["data"])
 
 
 # Global variables to track search traces for debugging
