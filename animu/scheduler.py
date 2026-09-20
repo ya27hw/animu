@@ -375,10 +375,7 @@ class Scheduler:
                 # Recalculate range based on the new starting episode
                 starting_episode = best_combo["episode_offset"]
                 start_episode = anime["progress"]
-                if next_ep:
-                    end_episode = next_ep["episode"] - 1
-                else:
-                    end_episode = anime["media"].get("episodes") or 0
+                end_episode = aired_episodes(anime)
 
         if primary_torrent:
             newly_downloaded = self.download_torrents(anime, record, primary_torrent)
