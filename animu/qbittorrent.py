@@ -2,6 +2,7 @@ import httpx
 import time
 import re
 import posixpath
+import hashlib
 from typing import Optional, Any
 from .config import get_config
 
@@ -17,12 +18,151 @@ def _format_body_snippet(resp: Any) -> str:
     return text[:200].replace("\r", "").replace("\n", " ")
 
 
+def _bencode_decode(data: bytes) -> Any:
+    """Decode bencoded bytes into python objects (bytes, int, list, dict)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("Bencoded data must be bytes")
+    idx = 0
+    length = len(data)
+
+    def decode() -> Any:
+        nonlocal idx
+        if idx >= length:
+            raise ValueError("Unexpected EOF while decoding bencode")
+        b = data[idx:idx + 1]
+        if b == b"i":
+            idx += 1
+            end = data.find(b"e", idx)
+            if end == -1:
+                raise ValueError("Unterminated integer in bencode")
+            num_str = data[idx:end]
+            if not num_str:
+                raise ValueError("Empty integer in bencode")
+            if num_str == b"-0":
+                raise ValueError("Negative zero is invalid in bencode")
+            if len(num_str) > 1 and num_str.startswith(b"0"):
+                raise ValueError("Leading zeros invalid in bencode")
+            if len(num_str) > 2 and num_str.startswith(b"-0"):
+                raise ValueError("Leading zeros in negative integer invalid in bencode")
+            val = int(num_str)
+            idx = end + 1
+            return val
+        elif b == b"l":
+            idx += 1
+            items = []
+            while idx < length and data[idx:idx + 1] != b"e":
+                items.append(decode())
+            if idx >= length:
+                raise ValueError("Unterminated list in bencode")
+            idx += 1
+            return items
+        elif b == b"d":
+            idx += 1
+            d = {}
+            while idx < length and data[idx:idx + 1] != b"e":
+                k = decode()
+                if not isinstance(k, bytes):
+                    raise ValueError("Dictionary key must be bytes")
+                v = decode()
+                d[k] = v
+            if idx >= length:
+                raise ValueError("Unterminated dict in bencode")
+            idx += 1
+            return d
+        elif b.isdigit():
+            colon = data.find(b":", idx)
+            if colon == -1:
+                raise ValueError("Unterminated string length in bencode")
+            slen_str = data[idx:colon]
+            if len(slen_str) > 1 and slen_str.startswith(b"0"):
+                raise ValueError("Leading zeros in string length invalid")
+            slen = int(slen_str)
+            idx = colon + 1
+            if idx + slen > length:
+                raise ValueError("String data out of bounds in bencode")
+            val = data[idx:idx + slen]
+            idx += slen
+            return val
+        else:
+            raise ValueError(f"Invalid bencode prefix: {b!r}")
+
+    return decode()
+
+
+def _bencode_encode(obj: Any) -> bytes:
+    """Encode python objects canonically into bencoded bytes."""
+    if isinstance(obj, int) and not isinstance(obj, bool):
+        return b"i" + str(obj).encode("ascii") + b"e"
+    elif isinstance(obj, bytes):
+        return str(len(obj)).encode("ascii") + b":" + obj
+    elif isinstance(obj, str):
+        b = obj.encode("utf-8")
+        return str(len(b)).encode("ascii") + b":" + b
+    elif isinstance(obj, (list, tuple)):
+        return b"l" + b"".join(_bencode_encode(x) for x in obj) + b"e"
+    elif isinstance(obj, dict):
+        def _get_bytes_key(k: Any) -> bytes:
+            if isinstance(k, bytes):
+                return k
+            if isinstance(k, str):
+                return k.encode("utf-8")
+            raise TypeError(f"Dictionary key must be bytes or str, got {type(k)}")
+
+        sorted_items = sorted(obj.items(), key=lambda it: _get_bytes_key(it[0]))
+        parts = [b"d"]
+        for k, v in sorted_items:
+            k_bytes = _get_bytes_key(k)
+            parts.append(str(len(k_bytes)).encode("ascii") + b":" + k_bytes)
+            parts.append(_bencode_encode(v))
+        parts.append(b"e")
+        return b"".join(parts)
+    else:
+        raise TypeError(f"Unsupported type for bencode: {type(obj)}")
+
+
+def compute_info_hash(data: bytes) -> str:
+    """Compute the SHA-1 info hash of a .torrent file's bytes.
+
+    Bencode-decodes the payload, canonically re-encodes the info dictionary,
+    and returns hashlib.sha1 hex digest in lowercase.
+    """
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("Torrent data must be bytes")
+    if not data or not data.startswith(b"d"):
+        raise ValueError("Invalid torrent bytes: payload must be a bencoded dictionary starting with b'd'")
+
+    try:
+        decoded = _bencode_decode(data)
+    except Exception as exc:
+        raise ValueError(f"Failed to decode bencoded torrent: {exc}") from exc
+
+    if not isinstance(decoded, dict):
+        raise ValueError("Torrent payload root is not a dictionary")
+
+    info = decoded.get(b"info")
+    if info is None:
+        info = decoded.get("info")
+    if info is None or not isinstance(info, dict):
+        raise ValueError("Torrent payload missing 'info' dictionary")
+
+    canonical_info = _bencode_encode(info)
+    return hashlib.sha1(canonical_info).hexdigest().lower()
+
+
+calculate_info_hash = compute_info_hash
+torrent_info_hash = compute_info_hash
+
+
 class QbitClient:
+    compute_info_hash = staticmethod(compute_info_hash)
+    calculate_info_hash = staticmethod(compute_info_hash)
+
     def __init__(self):
         self.sid: Optional[str] = None
         self.expires: float = 0.0
         self.last_auth_status: int = 0
         self.last_add_error: str = ""
+        self.last_add_was_duplicate: bool = False
         # verify=False is critical to bypass self-signed SSL errors (a major Node.js issue)
         self.client = httpx.Client(verify=False, timeout=15)
 
@@ -160,6 +300,103 @@ class QbitClient:
         except Exception as e:
             return False, str(e)
 
+    def check_hash_exists(self, torrent_hash: str) -> Optional[dict]:
+        """Check if a torrent with the given info hash exists in qBittorrent exactly.
+
+        Queries POST /api/v2/torrents/info with form data {"hashes": torrent_hash}.
+        Returns the matching torrent dict if found, else None.
+        """
+        if not self._ensure_auth():
+            return None
+        config = get_config()
+        base_url = (config.qbit_url or "http://localhost:8080").rstrip("/")
+        info_url = f"{base_url}/api/v2/torrents/info"
+        th = (torrent_hash or "").strip().lower()
+        if not th:
+            return None
+
+        try:
+            resp = self._authenticated_request(
+                "check_hash_exists",
+                "POST",
+                info_url,
+                data={"hashes": th},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+            )
+            if resp is not None and getattr(resp, "status_code", 0) == 200:
+                torrents = resp.json() if callable(getattr(resp, "json", None)) else []
+                if isinstance(torrents, list) and torrents:
+                    for t in torrents:
+                        if (t.get("hash") or "").lower() == th:
+                            return t
+                    if len(torrents) == 1 and not torrents[0].get("hash"):
+                        return torrents[0]
+        except Exception as e:
+            print(f"Error checking hash existence: {e}")
+        return None
+
+    def get_all_torrents(self, category: str = "animu") -> list:
+        """Return the full torrent list for a category by paginating POST /api/v2/torrents/info.
+
+        Uses limit and offset with page size 1000. Stops when a page returns fewer rows than 1000,
+        with a hard cap of 20 pages. Detects infinite loops if qBittorrent ignores offset
+        (page identical to the previous one) and stops.
+        """
+        if not self._ensure_auth():
+            return []
+
+        config = get_config()
+        base_url = (config.qbit_url or "http://localhost:8080").rstrip("/")
+        info_url = f"{base_url}/api/v2/torrents/info"
+        page_size = 1000
+        max_pages = 20
+        all_torrents = []
+        prev_page = None
+
+        for page_idx in range(max_pages):
+            offset = page_idx * page_size
+            payload = {
+                "category": category,
+                "sort": "added_on",
+                "reverse": "true",
+                "limit": page_size,
+                "offset": offset,
+            }
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            try:
+                resp = self._authenticated_request(
+                    "info",
+                    "POST",
+                    info_url,
+                    data=payload,
+                    headers=headers,
+                    is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+                )
+                if resp is None or getattr(resp, "status_code", 0) != 200:
+                    break
+                page = resp.json() if callable(getattr(resp, "json", None)) else []
+                if not isinstance(page, list):
+                    break
+            except Exception as exc:
+                print(f"Failed to fetch paginated torrents (page {page_idx}): {exc}")
+                break
+
+            if not page:
+                break
+
+            if prev_page is not None and page == prev_page:
+                print(f"[QBIT] pagination detected duplicate page at offset {offset}, stopping")
+                break
+
+            all_torrents.extend(page)
+            prev_page = page
+
+            if len(page) < page_size:
+                break
+
+        return all_torrents
+
     def add_check_torrent(
         self,
         link: str,
@@ -179,6 +416,10 @@ class QbitClient:
                 print(f"Attempt {attempt}: Failed to send add command to qBittorrent for: {display_title}")
                 time.sleep(1.5)
                 continue
+
+            if self.last_add_was_duplicate:
+                print(f"Torrent {display_title} verified as duplicate in qBittorrent.")
+                return True
 
             print(f"Sent Add Request to qBittorrent: {display_title}. Verifying...")
             
@@ -213,8 +454,22 @@ class QbitClient:
 
     def add_torrent_file(self, auth_url: str, link: str, save_path: str, rename: str, use_proxy: bool) -> bool:
         """Download the .torrent file and upload it to qBittorrent (used when proxy is active)."""
+        self.last_add_was_duplicate = False
         try:
             torrent_bytes = self.download_torrent_file(link, use_proxy)
+            size = len(torrent_bytes)
+            looks_like_torrent = torrent_bytes.startswith(b"d") and b"announce" in torrent_bytes
+            print(f'[QBIT] fetched payload size={size} looks_like_torrent={looks_like_torrent}')
+            if not looks_like_torrent:
+                self.last_add_error = f"Fetched payload does not look like a torrent (size={size})"
+                return False
+
+            try:
+                info_hash = compute_info_hash(torrent_bytes)
+            except Exception as exc:
+                info_hash = None
+                print(f"[QBIT] could not compute info hash from torrent payload: {exc}")
+
             torrent_filename = f"{self.safe_torrent_filename(rename)}.torrent"
 
             files = {
@@ -239,7 +494,20 @@ class QbitClient:
             text = getattr(resp, "text", "") if resp is not None else ""
             if resp is not None and status == 200 and text == "Ok.":
                 self.last_add_error = ""
+                self.last_add_was_duplicate = False
                 return True
+
+            # If the POST came back with a non-accepted response (e.g. Fails.),
+            # query qBittorrent for it: if the hash exists, it is a duplicate => success.
+            if info_hash:
+                existing = self.check_hash_exists(info_hash)
+                if existing is not None:
+                    t_name = existing.get("name") or rename
+                    print(f'[QBIT] add duplicate hash={info_hash} name="{t_name}"')
+                    self.last_add_was_duplicate = True
+                    self.last_add_error = ""
+                    return True
+
             if resp is not None:
                 body_snippet = _format_body_snippet(resp).strip()
                 self.last_add_error = f"HTTP {status}: {body_snippet}"
@@ -265,6 +533,7 @@ class QbitClient:
         (e.g. Oman ISP block via ddos-guard CDN), so the torrent would silently never
         appear. By fetching in Python we control the download and can use the proxy.
         """
+        self.last_add_was_duplicate = False
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
         add_url = f"{base_url.rstrip('/')}/api/v2/torrents/add"
@@ -291,29 +560,10 @@ class QbitClient:
         vs the stored 'Iruma-kun 4 - 4'). Only counts torrents with
         progress > 0 so stale missingFiles entries are ignored.
         """
-        config = get_config()
-        base_url = config.qbit_url or "http://localhost:8080"
-        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
-
         if not self._ensure_auth():
             return False
 
         try:
-            payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            resp = self._authenticated_request(
-                "info",
-                "POST",
-                info_url,
-                data=payload,
-                headers=headers,
-                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
-            )
-            if resp is None or getattr(resp, "status_code", 0) != 200:
-                return False
-
             # Distinctive title tokens with season markers removed
             title_norm = re.sub(r"\bs\d+\b", "", title.lower())
             title_norm = re.sub(r"[\W_]+", " ", title_norm).strip()
@@ -322,7 +572,7 @@ class QbitClient:
                 return False
 
             ep_pattern = re.compile(r"(?:^|[^\w])(?:e(?:p)?\s*)?0*%d(?:$|[^\w])" % episode, re.IGNORECASE)
-            torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
+            torrents = self.get_all_torrents()
             for t in torrents:
                 if t.get("progress", 0) <= 0:
                     continue
@@ -345,28 +595,10 @@ class QbitClient:
         in the file list are returned, so partially- or wrongly-matched batches
         are never falsely credited.
         """
-        config = get_config()
-        base_url = config.qbit_url or "http://localhost:8080"
-        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
         if not self._ensure_auth():
             return []
 
         try:
-            payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            resp = self._authenticated_request(
-                "info",
-                "POST",
-                info_url,
-                data=payload,
-                headers=headers,
-                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
-            )
-            if resp is None or getattr(resp, "status_code", 0) != 200:
-                return []
-
             title_norm = re.sub(r"\bs\d+\b", "", title.lower())
             title_norm = re.sub(r"[\W_]+", " ", title_norm).strip()
             tokens = [w for w in title_norm.split() if len(w) > 3]
@@ -375,9 +607,11 @@ class QbitClient:
 
             target = set(episodes)
             found: set = set()
+            config = get_config()
+            base_url = config.qbit_url or "http://localhost:8080"
             files_url = f"{base_url.rstrip('/')}/api/v2/torrents/files"
 
-            torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
+            torrents = self.get_all_torrents()
             for t in torrents:
                 if t.get("progress", 0) < 1:
                     continue
@@ -438,73 +672,40 @@ class QbitClient:
 
     def check_torrent(self, name: str) -> bool:
         """Check if a torrent matching the given name or title exists in qBittorrent."""
-        config = get_config()
-        base_url = config.qbit_url or "http://localhost:8080"
-        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
-
         if not self._ensure_auth():
             return False
 
         try:
-            payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            resp = self._authenticated_request(
-                "info",
-                "POST",
-                info_url,
-                data=payload,
-                headers=headers,
-                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
-            )
-            if resp is not None and getattr(resp, "status_code", 0) == 200:
-                torrents = resp.json() if callable(getattr(resp, "json", None)) else None
-                if not torrents:
-                    return False
-                target_clean = name.lower().strip()
-                for t in torrents:
-                    t_name = (t.get("name") or "").lower().strip()
-                    # Exact match, or our expected name is contained in the torrent name
-                    # (e.g. rename "Mushoku Tensei S3 - 4" found inside qBittorrent name)
-                    if t_name == target_clean or target_clean in t_name:
-                        return True
-                    # save_path fallback: the title folder should be in the save path
-                    save_path = (t.get("save_path") or "").lower()
-                    if target_clean in save_path:
-                        return True
+            torrents = self.get_all_torrents()
+            if not torrents:
+                return False
+            target_clean = name.lower().strip()
+            for t in torrents:
+                t_name = (t.get("name") or "").lower().strip()
+                # Exact match, or our expected name is contained in the torrent name
+                # (e.g. rename "Mushoku Tensei S3 - 4" found inside qBittorrent name)
+                if t_name == target_clean or target_clean in t_name:
+                    return True
+                # save_path fallback: the title folder should be in the save path
+                save_path = (t.get("save_path") or "").lower()
+                if target_clean in save_path:
+                    return True
         except Exception as e:
             print(f"Error checking torrent: {e}")
         return False
 
     def delete_torrent(self, name: str) -> bool:
         """Deletes a torrent matching the given name."""
-        config = get_config()
-        base_url = config.qbit_url or "http://localhost:8080"
-        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
-        delete_url = f"{base_url.rstrip('/')}/api/v2/torrents/delete"
-
         if not self._ensure_auth():
             return False
 
+        config = get_config()
+        base_url = config.qbit_url or "http://localhost:8080"
+        delete_url = f"{base_url.rstrip('/')}/api/v2/torrents/delete"
+
         try:
             # Query torrent list to find hash
-            payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-            resp = self._authenticated_request(
-                "info",
-                "POST",
-                info_url,
-                data=payload,
-                headers=headers,
-                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
-            )
-            if resp is None or getattr(resp, "status_code", 0) != 200:
-                return False
-
-            torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
+            torrents = self.get_all_torrents()
             target_torrent = None
             for torrent in torrents:
                 if torrent.get("name") == name:
@@ -536,45 +737,34 @@ class QbitClient:
         qBittorrent's ``state`` strings are verbose and internal-looking
         (``stoppedDL``, ``forcedUP``, ``metaDL`` …). The UI needs to show the
         *true* state of each torrent — stopped, errored, complete, seeding,
-        downloading, etc. — so we fetch the full queue (``filter=all``,
-        newest first, capped at 50 for filtering) and classify each entry.
+        downloading, etc. — so we fetch the full queue and classify each entry.
 
         Completed/seeding torrents (``complete``/``seeding`` kinds) are
         excluded from the returned list — the Watching-tab queue only shows
         work still in progress or needing attention (downloading, stalled,
-        queued, stopped, paused, checking, error).
+        queued, stopped, paused, checking, error). Returns at most 50 items so
+        the UI payload stays small.
         """
         if not self._ensure_auth():
             return []
-        config = get_config()
-        base_url = config.qbit_url or "http://localhost:8080"
-        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
         try:
-            resp = self._authenticated_request(
-                "info",
-                "GET",
-                info_url,
-                params={"filter": "all", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 50},
-                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
-            )
-            if resp is not None and getattr(resp, "status_code", 0) == 200:
-                torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
-                enriched = []
-                for t in torrents:
-                    item = dict(t)
-                    kind, label = self.classify_state(item.get("state", ""))
-                    # Skip finished torrents — they're not "active downloads".
-                    if kind in ("complete", "seeding"):
-                        continue
-                    item["statusKind"] = kind
-                    item["statusLabel"] = label
-                    enriched.append(item)
-                    if len(enriched) >= 10:
-                        break
-                return enriched
+            torrents = self.get_all_torrents()
+            enriched = []
+            for t in torrents:
+                item = dict(t)
+                kind, label = self.classify_state(item.get("state", ""))
+                # Skip finished torrents — they're not "active downloads".
+                if kind in ("complete", "seeding"):
+                    continue
+                item["statusKind"] = kind
+                item["statusLabel"] = label
+                enriched.append(item)
+                if len(enriched) >= 50:
+                    break
+            return enriched
         except Exception as e:
             print(f"Failed to fetch qBittorrent active downloads: {e}")
-        return []
+            return []
 
     def list_torrents(self, category: str = "animu", limit: int = 1000) -> list:
         """Return the raw qBittorrent queue for a category (any state).
@@ -694,10 +884,18 @@ class QbitClient:
         """Fetch current qBittorrent state string for a torrent by hash."""
         if not self._ensure_auth():
             return None
-        config = get_config()
-        base_url = config.qbit_url or "http://localhost:8080"
-        info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
+        th = (torrent_hash or "").strip().lower()
+        if not th:
+            return None
         try:
+            for t in self.get_all_torrents():
+                if (t.get("hash") or "").lower() == th:
+                    return t.get("state")
+
+            # Fallback to direct hash query if not found in paginated category list
+            config = get_config()
+            base_url = config.qbit_url or "http://localhost:8080"
+            info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
             resp = self._authenticated_request(
                 "get_torrent_state",
                 "GET",
@@ -735,7 +933,7 @@ class QbitClient:
             print(f"Failed to delete torrent {torrent_hash}: {e}")
             return False
 
-    def diagnose(self) -> dict:
+    def diagnose(self, torrent_hash: Optional[str] = None) -> dict:
         """Run a read-only diagnostic check against qBittorrent."""
         config = get_config()
         base_url = (config.qbit_url or "http://localhost:8080").rstrip("/")
@@ -776,7 +974,7 @@ class QbitClient:
             info_status = 0
             torrent_count = 0
 
-        return {
+        result = {
             "login": bool(login),
             "auth_status": int(auth_status),
             "version": str(version),
@@ -784,5 +982,45 @@ class QbitClient:
             "torrent_count": int(torrent_count),
             "last_add_error": str(self.last_add_error or ""),
         }
+
+        if torrent_hash is not None and str(torrent_hash).strip():
+            th = str(torrent_hash).strip()
+            exists = False
+            state = ""
+            name = ""
+            progress = 0.0
+
+            if re.fullmatch(r"[0-9a-fA-F]{40}", th):
+                th_lower = th.lower()
+                try:
+                    h_headers = dict(headers)
+                    h_headers["Content-Type"] = "application/x-www-form-urlencoded"
+                    resp_h = self.client.post(info_url, data={"hashes": th_lower}, headers=h_headers)
+                    if getattr(resp_h, "status_code", 0) in (404, 405):
+                        resp_h = self.client.get(info_url, params={"hashes": th_lower}, headers=headers)
+                    if getattr(resp_h, "status_code", 0) == 200:
+                        matching = resp_h.json() if callable(getattr(resp_h, "json", None)) else []
+                        if isinstance(matching, list) and matching:
+                            for m in matching:
+                                if (m.get("hash") or "").lower() == th_lower:
+                                    exists = True
+                                    state = str(m.get("state") or "")
+                                    name = str(m.get("name") or "")
+                                    progress = float(m.get("progress", 0.0))
+                                    break
+                            if not exists and len(matching) == 1 and not matching[0].get("hash"):
+                                exists = True
+                                state = str(matching[0].get("state") or "")
+                                name = str(matching[0].get("name") or "")
+                                progress = float(matching[0].get("progress", 0.0))
+                except Exception as e:
+                    print(f"Error querying hash in diagnose: {e}")
+
+            result["exists"] = bool(exists)
+            result["state"] = str(state)
+            result["name"] = str(name)
+            result["progress"] = progress
+
+        return result
 
 qbit = QbitClient()

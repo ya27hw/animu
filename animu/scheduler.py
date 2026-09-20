@@ -53,6 +53,7 @@ class Scheduler:
     def download_torrents(self, anime: Dict[str, Any], record: OfflineAnime, torrents: List[Dict[str, Any]]) -> Optional[List[int]]:
         """Download torrents via qBittorrent, send success embeds and save to DB."""
         newly_downloaded = []
+        fresh_torrents = []
         use_proxy_download = nyaa.should_use_proxy_download(anime)
         romaji_title = anime["media"]["title"]["romaji"]
 
@@ -92,6 +93,15 @@ class Scheduler:
                 alert_user(romaji_title, anime["media"]["coverImage"]["extraLarge"])
                 return None
 
+            if getattr(qbit, "last_add_was_duplicate", False):
+                if episode is not None:
+                    newly_downloaded.append(episode)
+                else:
+                    total_episodes = anime["media"].get("episodes") or 1
+                    newly_downloaded.extend(range(1, total_episodes + 1))
+                print(f"Already present in qBittorrent: {title} - {episode}")
+                continue
+
             if episode is not None:
                 newly_downloaded.append(episode)
             else:
@@ -99,6 +109,7 @@ class Scheduler:
                 total_episodes = anime["media"].get("episodes") or 1
                 newly_downloaded.extend(range(1, total_episodes + 1))
 
+            fresh_torrents.append(torrent)
             print(f"Downloading: {title} (Episode: {episode})")
 
             # Record history entry
@@ -120,6 +131,9 @@ class Scheduler:
         record.reset_timeout()
         db.upsert(anime["mediaId"], record)
 
+        if not fresh_torrents:
+            return newly_downloaded
+
         # Calculate discord embed details
         cover_color_str = anime["media"]["coverImage"].get("color")
         color = 0x0997e3
@@ -130,8 +144,8 @@ class Scheduler:
                 pass
 
         episodes_str = ", ".join(map(str, newly_downloaded))
-        sizes_str = ", ".join(t.get("nyaa:size", "Unknown") for t in torrents)
-        seeders_str = ", ".join(t.get("nyaa:seeders", "0") for t in torrents)
+        sizes_str = ", ".join(t.get("nyaa:size", "Unknown") for t in fresh_torrents)
+        seeders_str = ", ".join(t.get("nyaa:seeders", "0") for t in fresh_torrents)
 
         send_anime_downloaded_hook(
             f"**{romaji_title}** is downloading!",
@@ -141,7 +155,7 @@ class Scheduler:
             {"name": "Episode(s)", "value": episodes_str},
             {"name": "Size", "value": sizes_str},
             {"name": "Seeders", "value": seeders_str},
-            {"name": "Title", "value": torrents[0]["title"]}
+            {"name": "Title", "value": fresh_torrents[0]["title"]}
         )
 
         return newly_downloaded

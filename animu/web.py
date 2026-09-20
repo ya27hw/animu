@@ -1076,7 +1076,9 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/qbit/diagnose":
             try:
-                data = qbit.diagnose()
+                params = urllib.parse.parse_qs(url.query)
+                hash_param = params.get("hash", [None])[0]
+                data = qbit.diagnose(torrent_hash=hash_param)
                 self.send_json(200, data)
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
