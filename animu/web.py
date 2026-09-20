@@ -1074,6 +1074,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
 
+        elif path == "/api/qbit/diagnose":
+            try:
+                data = qbit.diagnose()
+                self.send_json(200, data)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
         elif path == "/api/search-debug":
             try:
                 from .nyaa import get_failed_traces_snapshot
@@ -1498,7 +1505,10 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
             success = qbit.add_check_torrent(link, title, None, use_alt_url)
             if not success:
-                self.send_json(500, {"error": "qBittorrent rejected the torrent"})
+                self.send_json(500, {
+                    "error": "qBittorrent rejected the torrent",
+                    "detail": qbit.last_add_error or "",
+                })
                 return
                 
             history_manager.add_entry(
@@ -1555,7 +1565,10 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             
             success = qbit.add_check_torrent(link, save_title, episode, use_proxy_download)
             if not success:
-                self.send_json(500, {"error": "qBittorrent rejected the download request"})
+                self.send_json(500, {
+                    "error": "qBittorrent rejected the download request",
+                    "detail": qbit.last_add_error or "",
+                })
                 return
                 
             cover_img = anime["media"].get("coverImage", {}).get("extraLarge") or anime["media"].get("coverImage", {}).get("medium")

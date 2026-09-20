@@ -2,13 +2,27 @@ import httpx
 import time
 import re
 import posixpath
-from typing import Optional
+from typing import Optional, Any
 from .config import get_config
+
+def _format_body_snippet(resp: Any) -> str:
+    text = getattr(resp, "text", "")
+    if callable(text):
+        try:
+            text = text()
+        except Exception:
+            text = ""
+    if not isinstance(text, str):
+        text = str(text)
+    return text[:200].replace("\r", "").replace("\n", " ")
+
 
 class QbitClient:
     def __init__(self):
         self.sid: Optional[str] = None
         self.expires: float = 0.0
+        self.last_auth_status: int = 0
+        self.last_add_error: str = ""
         # verify=False is critical to bypass self-signed SSL errors (a major Node.js issue)
         self.client = httpx.Client(verify=False, timeout=15)
 
@@ -24,26 +38,96 @@ class QbitClient:
                 data={"username": config.username, "password": config.password},
                 headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
-            if resp.status_code == 200 and resp.text.strip().startswith("Ok"):
+            status = getattr(resp, "status_code", 0)
+            text = getattr(resp, "text", "")
+            self.last_auth_status = status
+            if status == 200 and str(text).strip().startswith("Ok"):
                 # httpx manages cookies automatically, but we also save the SID explicitly
-                sid = self.client.cookies.get("SID")
+                sid = getattr(self.client, "cookies", {}).get("SID") if hasattr(self.client, "cookies") else None
                 if not sid:
-                    set_cookie = resp.headers.get("set-cookie", "")
+                    headers = getattr(resp, "headers", {})
+                    set_cookie = headers.get("set-cookie", "") if hasattr(headers, "get") else ""
                     match = re.search(r'SID=([^;]+)', set_cookie)
                     if match:
                         sid = match.group(1)
-                        self.client.cookies.set("SID", sid)
+                        if hasattr(self.client, "cookies") and hasattr(self.client.cookies, "set"):
+                            self.client.cookies.set("SID", sid)
                 if sid:
                     self.sid = sid
                     self.expires = time.time() + 3000
                     return True
                 else:
+                    body_snippet = _format_body_snippet(resp)
+                    print(f'[QBIT] login HTTP {status} body="{body_snippet}"')
                     print("Authentication successful but SID cookie not found in response.")
             else:
-                print(f"Authentication failed: HTTP {resp.status_code} - {resp.text}")
+                body_snippet = _format_body_snippet(resp)
+                print(f'[QBIT] login HTTP {status} body="{body_snippet}"')
+                print(f"Authentication failed: HTTP {status} - {text}")
         except Exception as e:
+            self.last_auth_status = 0
             print(f"Error during qBittorrent authentication: {e}")
         return False
+
+    def _authenticated_request(
+        self,
+        op: str,
+        method: str,
+        url: str,
+        is_accepted=None,
+        headers: Optional[dict] = None,
+        **kwargs
+    ) -> Any:
+        """Perform an authenticated request with 401/403 session-recovery retry and non-accepted response logging."""
+        req_headers = dict(headers or {})
+        if self.sid:
+            req_headers["Cookie"] = f"SID={self.sid}"
+
+        def _do_call(h):
+            m = method.upper()
+            if m == "GET" and hasattr(self.client, "get"):
+                return self.client.get(url, headers=h, **kwargs)
+            elif m == "POST" and hasattr(self.client, "post"):
+                return self.client.post(url, headers=h, **kwargs)
+            else:
+                return self.client.request(method, url, headers=h, **kwargs)
+
+        resp = _do_call(req_headers)
+        status = getattr(resp, "status_code", 0)
+
+        if status in (401, 403):
+            body_snippet = _format_body_snippet(resp)
+            print(f'[QBIT] {op} HTTP {status} body="{body_snippet}"')
+
+            self.sid = None
+            self.expires = 0.0
+            try:
+                if hasattr(self.client, "cookies") and hasattr(self.client.cookies, "delete"):
+                    self.client.cookies.delete("SID")
+            except Exception:
+                pass
+
+            reauth_success = self._authenticate()
+            if reauth_success:
+                if self.sid:
+                    req_headers["Cookie"] = f"SID={self.sid}"
+                elif "Cookie" in req_headers:
+                    del req_headers["Cookie"]
+
+                retry_resp = _do_call(req_headers)
+                retry_status = getattr(retry_resp, "status_code", 0)
+                retry_snippet = _format_body_snippet(retry_resp)
+                print(f'[QBIT] {op} retry HTTP {retry_status} body="{retry_snippet}"')
+                return retry_resp
+            else:
+                print(f'[QBIT] {op} retry failed: re-authentication failed')
+                return resp
+
+        if is_accepted is not None and not is_accepted(resp):
+            body_snippet = _format_body_snippet(resp)
+            print(f'[QBIT] {op} HTTP {status} body="{body_snippet}"')
+
+        return resp
 
     def _ensure_auth(self) -> bool:
         """Ensure the client has a valid, unexpired session ID."""
@@ -106,6 +190,8 @@ class QbitClient:
                     return True
                     
             print(f"Attempt {attempt}: Torrent {display_title} was not verified in qBittorrent torrent list.")
+            if not self.last_add_error:
+                self.last_add_error = f"Torrent {display_title} was not verified in qBittorrent torrent list"
 
         return False
 
@@ -141,10 +227,27 @@ class QbitClient:
                 "category": "animu"
             }
 
-            headers = {"Cookie": f"SID={self.sid}"}
-            resp = self.client.post(auth_url, data=data, files=files, headers=headers)
-            return resp.status_code == 200 and resp.text == "Ok."
+            resp = self._authenticated_request(
+                "add",
+                "POST",
+                auth_url,
+                data=data,
+                files=files,
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200 and getattr(r, "text", "") == "Ok.",
+            )
+            status = getattr(resp, "status_code", 0) if resp is not None else 0
+            text = getattr(resp, "text", "") if resp is not None else ""
+            if resp is not None and status == 200 and text == "Ok.":
+                self.last_add_error = ""
+                return True
+            if resp is not None:
+                body_snippet = _format_body_snippet(resp).strip()
+                self.last_add_error = f"HTTP {status}: {body_snippet}"
+            elif not self.last_add_error:
+                self.last_add_error = "Failed to communicate with qBittorrent"
+            return False
         except Exception as e:
+            self.last_add_error = str(e)
             print(f"Failed to add torrent file: {e}")
             return False
 
@@ -168,6 +271,7 @@ class QbitClient:
 
         if not self._ensure_auth():
             print("Failed to authenticate with qBittorrent.")
+            self.last_add_error = "Failed to authenticate with qBittorrent"
             return False
 
         rename = f"{title} - {episode}" if episode is not None else title
@@ -198,10 +302,16 @@ class QbitClient:
             payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": f"SID={self.sid}"
             }
-            resp = self.client.post(info_url, data=payload, headers=headers)
-            if resp.status_code != 200:
+            resp = self._authenticated_request(
+                "info",
+                "POST",
+                info_url,
+                data=payload,
+                headers=headers,
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+            )
+            if resp is None or getattr(resp, "status_code", 0) != 200:
                 return False
 
             # Distinctive title tokens with season markers removed
@@ -212,7 +322,8 @@ class QbitClient:
                 return False
 
             ep_pattern = re.compile(r"(?:^|[^\w])(?:e(?:p)?\s*)?0*%d(?:$|[^\w])" % episode, re.IGNORECASE)
-            for t in resp.json() or []:
+            torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
+            for t in torrents:
                 if t.get("progress", 0) <= 0:
                     continue
                 t_name = (t.get("name") or "").lower()
@@ -244,10 +355,16 @@ class QbitClient:
             payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": f"SID={self.sid}"
             }
-            resp = self.client.post(info_url, data=payload, headers=headers)
-            if resp.status_code != 200:
+            resp = self._authenticated_request(
+                "info",
+                "POST",
+                info_url,
+                data=payload,
+                headers=headers,
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+            )
+            if resp is None or getattr(resp, "status_code", 0) != 200:
                 return []
 
             title_norm = re.sub(r"\bs\d+\b", "", title.lower())
@@ -260,17 +377,26 @@ class QbitClient:
             found: set = set()
             files_url = f"{base_url.rstrip('/')}/api/v2/torrents/files"
 
-            for t in resp.json() or []:
+            torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
+            for t in torrents:
                 if t.get("progress", 0) < 1:
                     continue
                 t_name = (t.get("name") or "").lower()
                 save_path = (t.get("save_path") or "").lower()
                 if not (all(tok in t_name for tok in tokens) or all(tok in save_path for tok in tokens)):
                     continue
-                fr = self.client.post(files_url, data={"hash": t.get("hash")}, headers=headers)
-                if fr.status_code != 200:
+                fr = self._authenticated_request(
+                    "info",
+                    "POST",
+                    files_url,
+                    data={"hash": t.get("hash")},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+                )
+                if fr is None or getattr(fr, "status_code", 0) != 200:
                     continue
-                for f in fr.json() or []:
+                files_list = (fr.json() if callable(getattr(fr, "json", None)) else []) or []
+                for f in files_list:
                     parsed = self._parse_episode_from_filename(f.get("name") or "", season)
                     if parsed is not None and parsed in target:
                         found.add(parsed)
@@ -323,11 +449,17 @@ class QbitClient:
             payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": f"SID={self.sid}"
             }
-            resp = self.client.post(info_url, data=payload, headers=headers)
-            if resp.status_code == 200:
-                torrents = resp.json()
+            resp = self._authenticated_request(
+                "info",
+                "POST",
+                info_url,
+                data=payload,
+                headers=headers,
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+            )
+            if resp is not None and getattr(resp, "status_code", 0) == 200:
+                torrents = resp.json() if callable(getattr(resp, "json", None)) else None
                 if not torrents:
                     return False
                 target_clean = name.lower().strip()
@@ -360,13 +492,19 @@ class QbitClient:
             payload = {"sort": "added_on", "limit": 250, "reverse": "true", "category": "animu"}
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": f"SID={self.sid}"
             }
-            resp = self.client.post(info_url, data=payload, headers=headers)
-            if resp.status_code != 200:
+            resp = self._authenticated_request(
+                "info",
+                "POST",
+                info_url,
+                data=payload,
+                headers=headers,
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+            )
+            if resp is None or getattr(resp, "status_code", 0) != 200:
                 return False
 
-            torrents = resp.json()
+            torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
             target_torrent = None
             for torrent in torrents:
                 if torrent.get("name") == name:
@@ -378,15 +516,15 @@ class QbitClient:
                 return False
 
             torrent_hash = target_torrent["hash"]
-            del_resp = self.client.post(
+            del_resp = self._authenticated_request(
+                "delete",
+                "POST",
                 delete_url,
                 data={"hashes": torrent_hash},
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Cookie": f"SID={self.sid}"
-                }
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200 and getattr(r, "text", "") == "Ok.",
             )
-            return del_resp.status_code == 200 and del_resp.text == "Ok."
+            return del_resp is not None and getattr(del_resp, "status_code", 0) == 200 and getattr(del_resp, "text", "") == "Ok."
         except Exception as e:
             print(f"Error deleting torrent: {e}")
             return False
@@ -412,16 +550,15 @@ class QbitClient:
         base_url = config.qbit_url or "http://localhost:8080"
         info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
         try:
-            headers = {
-                "Cookie": f"SID={self.sid}"
-            }
-            resp = self.client.get(
+            resp = self._authenticated_request(
+                "info",
+                "GET",
                 info_url,
                 params={"filter": "all", "category": "animu", "sort": "added_on", "reverse": "true", "limit": 50},
-                headers=headers
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
             )
-            if resp.status_code == 200:
-                torrents = resp.json() or []
+            if resp is not None and getattr(resp, "status_code", 0) == 200:
+                torrents = (resp.json() if callable(getattr(resp, "json", None)) else []) or []
                 enriched = []
                 for t in torrents:
                     item = dict(t)
@@ -453,15 +590,18 @@ class QbitClient:
         base_url = config.qbit_url or "http://localhost:8080"
         info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
         try:
-            resp = self.client.get(
+            resp = self._authenticated_request(
+                "info",
+                "GET",
                 info_url,
                 params={"filter": "all", "category": category, "sort": "added_on",
                         "reverse": "true", "limit": limit},
-                headers={"Cookie": f"SID={self.sid}"}
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
             )
-            if resp.status_code == 200:
-                return resp.json() or []
-            print(f"qBittorrent torrent list returned HTTP {resp.status_code}")
+            if resp is not None and getattr(resp, "status_code", 0) == 200:
+                return (resp.json() if callable(getattr(resp, "json", None)) else []) or []
+            if resp is not None:
+                print(f"qBittorrent torrent list returned HTTP {getattr(resp, 'status_code', 0)}")
         except Exception as exc:
             print(f"Failed to fetch qBittorrent torrent list: {exc}")
         return []
@@ -511,12 +651,15 @@ class QbitClient:
         if not self._ensure_auth():
             return False
         try:
-            resp = self.client.post(
+            resp = self._authenticated_request(
+                "resume",
+                "POST",
                 resume_url,
                 data={"hashes": torrent_hash},
-                headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"SID={self.sid}"}
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200 and getattr(r, "text", "") == "Ok.",
             )
-            return resp.status_code == 200 and resp.text == "Ok."
+            return resp is not None and getattr(resp, "status_code", 0) == 200 and getattr(resp, "text", "") == "Ok."
         except Exception as e:
             print(f"Failed to resume torrent {torrent_hash}: {e}")
             return False
@@ -534,12 +677,15 @@ class QbitClient:
         if not self._ensure_auth():
             return False
         try:
-            resp = self.client.post(
+            resp = self._authenticated_request(
+                "recheck",
+                "POST",
                 recheck_url,
                 data={"hashes": torrent_hash},
-                headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"SID={self.sid}"}
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
             )
-            return resp.status_code == 200
+            return resp is not None and getattr(resp, "status_code", 0) == 200
         except Exception as e:
             print(f"Failed to recheck torrent {torrent_hash}: {e}")
             return False
@@ -552,14 +698,15 @@ class QbitClient:
         base_url = config.qbit_url or "http://localhost:8080"
         info_url = f"{base_url.rstrip('/')}/api/v2/torrents/info"
         try:
-            headers = {"Cookie": f"SID={self.sid}"}
-            resp = self.client.get(
+            resp = self._authenticated_request(
+                "get_torrent_state",
+                "GET",
                 info_url,
                 params={"hashes": torrent_hash},
-                headers=headers
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
             )
-            if resp.status_code == 200:
-                data = resp.json()
+            if resp is not None and getattr(resp, "status_code", 0) == 200:
+                data = resp.json() if callable(getattr(resp, "json", None)) else None
                 if isinstance(data, list) and len(data) > 0:
                     return data[0].get("state")
         except Exception as e:
@@ -575,14 +722,67 @@ class QbitClient:
         if not self._ensure_auth():
             return False
         try:
-            resp = self.client.post(
+            resp = self._authenticated_request(
+                "delete",
+                "POST",
                 delete_url,
                 data={"hashes": torrent_hash, "deleteFiles": "true" if delete_files else "false"},
-                headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": f"SID={self.sid}"}
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                is_accepted=lambda r: getattr(r, "status_code", 0) == 200 and getattr(r, "text", "") == "Ok.",
             )
-            return resp.status_code == 200 and resp.text == "Ok."
+            return resp is not None and getattr(resp, "status_code", 0) == 200 and getattr(resp, "text", "") == "Ok."
         except Exception as e:
             print(f"Failed to delete torrent {torrent_hash}: {e}")
             return False
+
+    def diagnose(self) -> dict:
+        """Run a read-only diagnostic check against qBittorrent."""
+        config = get_config()
+        base_url = (config.qbit_url or "http://localhost:8080").rstrip("/")
+        version_url = f"{base_url}/api/v2/app/version"
+        info_url = f"{base_url}/api/v2/torrents/info"
+
+        login = False
+        auth_status = 0
+        try:
+            login = self._authenticate()
+            auth_status = getattr(self, "last_auth_status", 200 if login else 0)
+        except Exception:
+            login = False
+            auth_status = 0
+
+        version = ""
+        info_status = 0
+        torrent_count = 0
+
+        headers = {}
+        if self.sid:
+            headers["Cookie"] = f"SID={self.sid}"
+
+        try:
+            resp_v = self.client.get(version_url, headers=headers)
+            if getattr(resp_v, "status_code", 0) == 200:
+                version = getattr(resp_v, "text", "").strip()
+        except Exception:
+            version = ""
+
+        try:
+            resp_i = self.client.get(info_url, params={"category": "animu"}, headers=headers)
+            info_status = getattr(resp_i, "status_code", 0)
+            if info_status == 200:
+                torrents = resp_i.json() if callable(getattr(resp_i, "json", None)) else []
+                torrent_count = len(torrents or [])
+        except Exception:
+            info_status = 0
+            torrent_count = 0
+
+        return {
+            "login": bool(login),
+            "auth_status": int(auth_status),
+            "version": str(version),
+            "info_status": int(info_status),
+            "torrent_count": int(torrent_count),
+            "last_add_error": str(self.last_add_error or ""),
+        }
 
 qbit = QbitClient()
