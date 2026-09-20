@@ -498,15 +498,35 @@ class QbitClient:
                 return True
 
             # If the POST came back with a non-accepted response (e.g. Fails.),
-            # query qBittorrent for it: if the hash exists, it is a duplicate => success.
+            # query qBittorrent for it: if the hash exists, verify payload is present.
             if info_hash:
                 existing = self.check_hash_exists(info_hash)
                 if existing is not None:
-                    t_name = existing.get("name") or rename
-                    print(f'[QBIT] add duplicate hash={info_hash} name="{t_name}"')
-                    self.last_add_was_duplicate = True
-                    self.last_add_error = ""
-                    return True
+                    progress = existing.get("progress")
+                    try:
+                        progress_val = float(progress) if progress is not None else 0.0
+                    except (ValueError, TypeError):
+                        progress_val = 0.0
+
+                    if progress_val > 0:
+                        t_name = existing.get("name") or rename
+                        print(f'[QBIT] add duplicate hash={info_hash} name="{t_name}"')
+                        self.last_add_was_duplicate = True
+                        self.last_add_error = ""
+                        return True
+                    else:
+                        self.last_add_was_duplicate = False
+                        try:
+                            self.recheck_torrent(info_hash)
+                            self.resume_torrent(info_hash)
+                        except Exception as exc:
+                            print(f"[QBIT] error requesting recheck/resume for {info_hash}: {exc}")
+                        self.last_add_error = (
+                            f"Existing torrent has no data (progress={progress_val:g}), recheck requested"
+                            if progress_val != 0
+                            else "Existing torrent has no data (progress=0), recheck requested"
+                        )
+                        return False
 
             if resp is not None:
                 body_snippet = _format_body_snippet(resp).strip()

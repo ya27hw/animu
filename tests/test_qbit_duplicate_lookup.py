@@ -155,6 +155,122 @@ class TestQbitDuplicateLookup:
         assert "/api/v2/torrents/add" in paths
         assert "/api/v2/torrents/info" in paths
 
+    def test_2b_add_path_fails_response_with_hash_present_zero_progress_requests_recheck(self):
+        """Hash present with progress: 0.0 => False, last_add_was_duplicate False,
+        last_add_error mentions no data, and recheck request was actually issued."""
+        client = QbitClient()
+        client.sid = "validsid"
+        client.expires = time.time() + 3000
+
+        torrent_bytes, expected_hash = _make_torrent_bytes(
+            name="Osananajimi to wa Love Comedy ni Naranai - 2.mkv",
+            length=500000000
+        )
+        client.download_torrent_file = lambda link, use_proxy: torrent_bytes
+
+        calls = []
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            if request.url.path == "/api/v2/torrents/add":
+                return httpx.Response(200, text="Fails.")
+            elif request.url.path == "/api/v2/torrents/info":
+                body = request.read().decode("utf-8", errors="replace")
+                assert expected_hash in body
+                return httpx.Response(
+                    200,
+                    json=[{
+                        "hash": expected_hash,
+                        "name": "Osananajimi to wa Love Comedy ni Naranai - 2",
+                        "state": "pausedDL",
+                        "progress": 0.0,
+                    }]
+                )
+            elif request.url.path == "/api/v2/torrents/recheck":
+                body = request.read().decode("utf-8", errors="replace")
+                assert expected_hash in body
+                return httpx.Response(200, text="Fails.")
+            elif request.url.path == "/api/v2/torrents/resume":
+                body = request.read().decode("utf-8", errors="replace")
+                assert expected_hash in body
+                return httpx.Response(200, text="Fails.")
+            return httpx.Response(404)
+
+        client.client = httpx.Client(transport=httpx.MockTransport(mock_handler))
+
+        added = client.add_torrent(
+            "http://example.com/osananajimi_02.torrent",
+            "Osananajimi to wa Love Comedy ni Naranai",
+            2
+        )
+
+        assert added is False
+        assert client.last_add_was_duplicate is False
+        assert "no data" in client.last_add_error.lower()
+
+        # Verify calls occurred: torrents/add, torrents/info, torrents/recheck, torrents/resume
+        paths = [r.url.path for r in calls]
+        assert "/api/v2/torrents/add" in paths
+        assert "/api/v2/torrents/info" in paths
+        assert "/api/v2/torrents/recheck" in paths
+        assert "/api/v2/torrents/resume" in paths
+
+    def test_2c_add_path_fails_response_with_hash_present_missing_progress_requests_recheck(self):
+        """Hash present with missing progress field => False, last_add_was_duplicate False,
+        last_add_error mentions no data, and recheck request was issued."""
+        client = QbitClient()
+        client.sid = "validsid"
+        client.expires = time.time() + 3000
+
+        torrent_bytes, expected_hash = _make_torrent_bytes(
+            name="Osananajimi to wa Love Comedy ni Naranai - 2.mkv",
+            length=500000000
+        )
+        client.download_torrent_file = lambda link, use_proxy: torrent_bytes
+
+        calls = []
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            if request.url.path == "/api/v2/torrents/add":
+                return httpx.Response(200, text="Fails.")
+            elif request.url.path == "/api/v2/torrents/info":
+                body = request.read().decode("utf-8", errors="replace")
+                assert expected_hash in body
+                return httpx.Response(
+                    200,
+                    json=[{
+                        "hash": expected_hash,
+                        "name": "Osananajimi to wa Love Comedy ni Naranai - 2",
+                        "state": "missingFiles",
+                    }]
+                )
+            elif request.url.path == "/api/v2/torrents/recheck":
+                body = request.read().decode("utf-8", errors="replace")
+                assert expected_hash in body
+                return httpx.Response(200, text="Ok.")
+            elif request.url.path == "/api/v2/torrents/resume":
+                body = request.read().decode("utf-8", errors="replace")
+                assert expected_hash in body
+                return httpx.Response(200, text="Ok.")
+            return httpx.Response(404)
+
+        client.client = httpx.Client(transport=httpx.MockTransport(mock_handler))
+
+        added = client.add_torrent(
+            "http://example.com/osananajimi_02.torrent",
+            "Osananajimi to wa Love Comedy ni Naranai",
+            2
+        )
+
+        assert added is False
+        assert client.last_add_was_duplicate is False
+        assert "no data" in client.last_add_error.lower()
+
+        paths = [r.url.path for r in calls]
+        assert "/api/v2/torrents/recheck" in paths
+        assert "/api/v2/torrents/resume" in paths
+
     def test_3_add_path_fails_response_with_hash_absent_fails(self):
         """3. Add path: 'Fails.' and the hash absent => still fails,
         last_add_error contains the status and body."""
