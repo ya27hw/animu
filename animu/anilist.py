@@ -1102,6 +1102,11 @@ class AnilistClient:
             user_name = config.ani_user_name
 
         if not user_name:
+            viewer = self.get_viewer()
+            if viewer and viewer.get("name"):
+                user_name = viewer.get("name")
+
+        if not user_name:
             return {"lists": [], "hasNextChunk": False}
 
         variables = {
@@ -1142,6 +1147,238 @@ class AnilistClient:
             chunk += 1
 
         return {"lists": list(all_lists.values()), "hasNextChunk": False}
+
+    def _completed_anime_relations_query(self) -> str:
+        """Dedicated query for relations of completed anime, bounded to avoid payload inflation."""
+        return """
+        query($userName: String, $type: MediaType, $status_in: [MediaListStatus], $chunk: Int, $perChunk: Int, $forceSingleCompletedList: Boolean, $sort: [MediaListSort]) {
+          MediaListCollection(
+            userName: $userName, type: $type, status_in: $status_in,
+            chunk: $chunk, perChunk: $perChunk,
+            forceSingleCompletedList: $forceSingleCompletedList, sort: $sort
+          ) {
+            lists {
+              name
+              status
+              entries {
+                mediaId
+                status
+                media {
+                  id
+                  title { romaji english native }
+                  relations {
+                    edges {
+                      relationType
+                      node {
+                        id
+                        title { romaji english native }
+                        coverImage { extraLarge large medium color }
+                        bannerImage
+                        format
+                        status
+                        episodes
+                        season
+                        seasonYear
+                        averageScore
+                        nextAiringEpisode { episode timeUntilAiring airingAt }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            hasNextChunk
+          }
+        }
+        """
+
+    @_cached_persistent(ttl=300, stale_while_revalidate=True)
+    def get_completed_anime_with_relations(
+        self,
+        user_name: Optional[str] = None,
+        per_chunk: int = 50,
+        max_chunks: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """Fetch completed anime list entries with relations, bounded to max_chunks pages."""
+        config = get_config()
+        if not user_name:
+            user_name = config.ani_user_name
+        if not user_name:
+            viewer = self.get_viewer()
+            if viewer and viewer.get("name"):
+                user_name = viewer.get("name")
+        if not user_name:
+            return []
+
+        variables = {
+            "userName": user_name,
+            "type": "ANIME",
+            "status_in": ["COMPLETED"],
+            "perChunk": min(per_chunk, 50),
+            "chunk": 1,
+            "forceSingleCompletedList": True,
+            "sort": ["UPDATED_TIME_DESC"],
+        }
+
+        completed_entries: List[Dict[str, Any]] = []
+        has_next_chunk = True
+        chunk = 1
+
+        while has_next_chunk and chunk <= max_chunks:
+            variables["chunk"] = chunk
+            resp = self._query(self._completed_anime_relations_query(), variables)
+            if not resp or "data" not in resp:
+                break
+            data = resp["data"]
+            if not data or "MediaListCollection" not in data or not data["MediaListCollection"]:
+                break
+
+            collection = data["MediaListCollection"]
+            for lst in collection.get("lists", []):
+                completed_entries.extend(lst.get("entries", []))
+            has_next_chunk = collection.get("hasNextChunk", False)
+            chunk += 1
+
+        return completed_entries
+
+    @_cached_persistent(ttl=300, stale_while_revalidate=True)
+    def get_completed_sequels(self, user_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Find direct sequels of anime completed by the user that are not on their list.
+
+        Returns a dictionary with:
+          - 'sequels': list of unique sequel media objects, each annotated with 'parentMedia'
+          - 'groups': dict with 'finished', 'airing', and 'upcoming' lists
+          - 'counts': dict with 'total', 'finished', 'airing', and 'upcoming' counts
+        """
+        config = get_config()
+        if not user_name:
+            user_name = config.ani_user_name
+        if not user_name:
+            viewer = self.get_viewer()
+            if viewer and viewer.get("name"):
+                user_name = viewer.get("name")
+        if not user_name:
+            return {
+                "sequels": [],
+                "groups": {"finished": [], "airing": [], "upcoming": []},
+                "counts": {"total": 0, "finished": 0, "airing": 0, "upcoming": 0},
+                "error": "No AniList username configured or authenticated",
+            }
+
+        collection_data = self.get_media_list_collection(user_name=user_name, media_type="ANIME")
+        if collection_data is None or "lists" not in collection_data:
+            return None
+
+        lists = collection_data.get("lists", [])
+        all_user_media_ids = set()
+        completed_from_collection = []
+
+        for lst in lists:
+            entries = lst.get("entries", [])
+            list_is_completed = lst.get("status") == "COMPLETED" or lst.get("name", "").lower() == "completed"
+            for entry in entries:
+                media_id = entry.get("mediaId")
+                if media_id:
+                    all_user_media_ids.add(int(media_id))
+                media_obj = entry.get("media")
+                if isinstance(media_obj, dict) and media_obj.get("id"):
+                    all_user_media_ids.add(int(media_obj["id"]))
+
+                if entry.get("status") == "COMPLETED" or list_is_completed:
+                    completed_from_collection.append(entry)
+
+        # Check if completed entries from collection already have relations (e.g. from unit test mocks)
+        has_relations = any(
+            isinstance(e.get("media"), dict) and e["media"].get("relations")
+            for e in completed_from_collection
+        )
+
+        if has_relations:
+            completed_entries = completed_from_collection
+        else:
+            completed_entries = self.get_completed_anime_with_relations(user_name=user_name)
+            for entry in completed_entries:
+                mid = entry.get("mediaId")
+                if mid:
+                    all_user_media_ids.add(int(mid))
+                m = entry.get("media")
+                if isinstance(m, dict) and m.get("id"):
+                    all_user_media_ids.add(int(m["id"]))
+
+        sequels_by_id: Dict[int, Dict[str, Any]] = {}
+
+        for entry in completed_entries:
+            media = entry.get("media") or {}
+            parent_id = media.get("id") or entry.get("mediaId")
+            parent_title = media.get("title") or {}
+
+            relations = media.get("relations") or {}
+            edges = relations.get("edges", []) if isinstance(relations, dict) else []
+
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                if edge.get("relationType") != "SEQUEL":
+                    continue
+                node = edge.get("node")
+                if not node or not isinstance(node, dict):
+                    continue
+                sequel_id = node.get("id")
+                if not sequel_id:
+                    continue
+                sequel_id_int = int(sequel_id)
+                if sequel_id_int in all_user_media_ids:
+                    continue
+                fmt = node.get("format")
+                if fmt in ("MANGA", "NOVEL", "ONE_SHOT"):
+                    continue
+
+                if sequel_id_int not in sequels_by_id:
+                    sequels_by_id[sequel_id_int] = {
+                        **node,
+                        "parentMedia": {
+                            "id": parent_id,
+                            "title": parent_title,
+                        },
+                    }
+
+        finished = []
+        airing = []
+        upcoming = []
+
+        for seq in sequels_by_id.values():
+            status = seq.get("status")
+            if status == "FINISHED":
+                finished.append(seq)
+            elif status == "RELEASING":
+                airing.append(seq)
+            elif status == "NOT_YET_RELEASED":
+                upcoming.append(seq)
+            # CANCELLED, HIATUS, or unknown statuses are explicitly excluded
+
+        def _sort_key(m):
+            return (m.get("popularity") or 0, m.get("averageScore") or 0)
+
+        finished.sort(key=_sort_key, reverse=True)
+        airing.sort(key=_sort_key, reverse=True)
+        upcoming.sort(key=_sort_key, reverse=True)
+
+        qualifying_sequels = finished + airing + upcoming
+
+        return {
+            "sequels": qualifying_sequels,
+            "groups": {
+                "finished": finished,
+                "airing": airing,
+                "upcoming": upcoming,
+            },
+            "counts": {
+                "total": len(qualifying_sequels),
+                "finished": len(finished),
+                "airing": len(airing),
+                "upcoming": len(upcoming),
+            },
+        }
 
     # === GenreCollection ===
 

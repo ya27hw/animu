@@ -718,6 +718,18 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
 
+        elif path == "/api/anilist/completed-sequels":
+            params = urllib.parse.parse_qs(url.query)
+            user_name = params.get("userName", [None])[0]
+            try:
+                result = anilist.get_completed_sequels(user_name=user_name or None)
+                if result is None:
+                    self.send_json(502, {"error": "Failed to fetch sequels from AniList"})
+                    return
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"error": str(e)})
+
         elif path == "/api/anilist/airing-today":
             params = urllib.parse.parse_qs(url.query)
             try:

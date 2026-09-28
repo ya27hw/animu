@@ -8,6 +8,8 @@ Tests verify that:
   - mutation routes require auth (fail-closed path).
 """
 
+import os
+import sys
 import json
 import threading
 import time
@@ -15,6 +17,8 @@ import http.client as http_client
 import http.server
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from animu.web import AnimuHTTPHandler
 
@@ -105,6 +109,278 @@ class TestAniListRoutes(unittest.TestCase):
         status, data = self.request("GET", "/api/anilist/user-list?userName=testuser")
         self.assertEqual(status, 200)
         self.assertIn("lists", data)
+
+    @patch("animu.web.anilist.get_completed_sequels")
+    def test_completed_sequels_route(self, mock_sequels):
+        mock_sequels.return_value = {
+            "sequels": [{"id": 202, "title": {"romaji": "Sequel Show"}, "status": "FINISHED"}],
+            "groups": {
+                "finished": [{"id": 202, "title": {"romaji": "Sequel Show"}, "status": "FINISHED"}],
+                "airing": [],
+                "upcoming": []
+            },
+            "counts": {"total": 1, "finished": 1, "airing": 0, "upcoming": 0}
+        }
+        status, data = self.request("GET", "/api/anilist/completed-sequels?userName=testuser")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["counts"]["total"], 1)
+        self.assertEqual(len(data["groups"]["finished"]), 1)
+        self.assertEqual(data["groups"]["finished"][0]["id"], 202)
+
+    def test_get_completed_sequels_logic(self):
+        from animu.anilist import anilist
+        mock_collection = {
+            "lists": [
+                {
+                    "name": "Completed",
+                    "status": "COMPLETED",
+                    "entries": [
+                        {
+                            "mediaId": 101,
+                            "status": "COMPLETED",
+                            "media": {
+                                "id": 101,
+                                "title": {"romaji": "Show A Season 1"},
+                                "relations": {
+                                    "edges": [
+                                        {
+                                            "relationType": "SEQUEL",
+                                            "node": {
+                                                "id": 102,
+                                                "title": {"romaji": "Show A Season 2"},
+                                                "status": "FINISHED",
+                                                "format": "TV"
+                                            }
+                                        },
+                                        {
+                                            "relationType": "PREQUEL",
+                                            "node": {
+                                                "id": 99,
+                                                "title": {"romaji": "Show A Prequel"},
+                                                "status": "FINISHED"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "mediaId": 103,
+                            "status": "COMPLETED",
+                            "media": {
+                                "id": 103,
+                                "title": {"romaji": "Show B Season 1"},
+                                "relations": {
+                                    "edges": [
+                                        {
+                                            "relationType": "SEQUEL",
+                                            "node": {
+                                                "id": 104,
+                                                "title": {"romaji": "Show B Season 2"},
+                                                "status": "RELEASING",
+                                                "format": "TV"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "mediaId": 105,
+                            "status": "COMPLETED",
+                            "media": {
+                                "id": 105,
+                                "title": {"romaji": "Show C Season 1"},
+                                "relations": {
+                                    "edges": [
+                                        {
+                                            "relationType": "SEQUEL",
+                                            "node": {
+                                                "id": 106,
+                                                "title": {"romaji": "Show C Season 2"},
+                                                "status": "NOT_YET_RELEASED",
+                                                "format": "TV"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            # Duplicate sequel test: another entry pointing to sequel 102
+                            "mediaId": 107,
+                            "status": "COMPLETED",
+                            "media": {
+                                "id": 107,
+                                "title": {"romaji": "Show A OVA"},
+                                "relations": {
+                                    "edges": [
+                                        {
+                                            "relationType": "SEQUEL",
+                                            "node": {
+                                                "id": 102,
+                                                "title": {"romaji": "Show A Season 2"},
+                                                "status": "FINISHED",
+                                                "format": "TV"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            # Sequel already on user list test: Show D Season 2 is on Watching list (id 200)
+                            "mediaId": 108,
+                            "status": "COMPLETED",
+                            "media": {
+                                "id": 108,
+                                "title": {"romaji": "Show D Season 1"},
+                                "relations": {
+                                    "edges": [
+                                        {
+                                            "relationType": "SEQUEL",
+                                            "node": {
+                                                "id": 200,
+                                                "title": {"romaji": "Show D Season 2"},
+                                                "status": "FINISHED",
+                                                "format": "TV"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            # Cancelled sequel test: should NOT be grouped into upcoming or any group
+                            "mediaId": 109,
+                            "status": "COMPLETED",
+                            "media": {
+                                "id": 109,
+                                "title": {"romaji": "Show E Season 1"},
+                                "relations": {
+                                    "edges": [
+                                        {
+                                            "relationType": "SEQUEL",
+                                            "node": {
+                                                "id": 205,
+                                                "title": {"romaji": "Show E Season 2 (Cancelled)"},
+                                                "status": "CANCELLED",
+                                                "format": "TV"
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Watching",
+                    "status": "CURRENT",
+                    "entries": [
+                        {"mediaId": 200, "status": "CURRENT", "media": {"id": 200, "title": {"romaji": "Show D Season 2"}}}
+                    ]
+                }
+            ]
+        }
+        with patch.object(anilist, "get_media_list_collection", return_value=mock_collection):
+            res = anilist.get_completed_sequels(user_name="testuser")
+        self.assertIsNotNone(res)
+        # Verify deduplication and exclusion:
+        # Expected sequels: 102 (Show A Season 2, finished), 104 (Show B Season 2, airing), 106 (Show C Season 2, upcoming)
+        # Excluded: 200 (already on watching list), 99 (prequel, not sequel), 102 (deduped from 2 completed entries to 1), 205 (cancelled)
+        self.assertEqual(res["counts"]["total"], 3)
+        self.assertEqual(res["counts"]["finished"], 1)
+        self.assertEqual(res["counts"]["airing"], 1)
+        self.assertEqual(res["counts"]["upcoming"], 1)
+        self.assertEqual(res["groups"]["finished"][0]["id"], 102)
+        self.assertEqual(res["groups"]["airing"][0]["id"], 104)
+        self.assertEqual(res["groups"]["upcoming"][0]["id"], 106)
+        # Check parentMedia annotation
+        self.assertEqual(res["groups"]["finished"][0]["parentMedia"]["id"], 101)
+
+    def test_query_design_relations_separation(self):
+        """Ensure relations are removed from standard list query and kept in dedicated query."""
+        from animu.anilist import anilist
+        standard_query = anilist._media_list_collection_query()
+        self.assertNotIn("relations", standard_query, "Standard list query should not inflate payloads with relations")
+
+        relations_query = anilist._completed_anime_relations_query()
+        self.assertIn("relations", relations_query, "Dedicated query must fetch relations for completed anime")
+        self.assertIn("relationType", relations_query)
+
+    def test_completed_sequels_invokes_dedicated_relations_query(self):
+        """When collection has no relations (normal case), dedicated query is called."""
+        from animu.anilist import anilist
+
+        cache = getattr(anilist.get_completed_sequels, "_cache", None)
+        if cache:
+            cache.clear()
+            self.addCleanup(cache.clear)
+
+        try:
+            mock_collection = {
+                "lists": [
+                    {
+                        "name": "Completed",
+                        "status": "COMPLETED",
+                        "entries": [
+                            {"mediaId": 301, "status": "COMPLETED", "media": {"id": 301, "title": {"romaji": "Parent"}}}
+                        ]
+                    },
+                    {
+                        "name": "Planning",
+                        "status": "PLANNING",
+                        "entries": [
+                            {"mediaId": 302, "status": "PLANNING", "media": {"id": 302, "title": {"romaji": "Already Planned"}}}
+                        ]
+                    }
+                ]
+            }
+            mock_completed_with_relations = [
+                {
+                    "mediaId": 301,
+                    "status": "COMPLETED",
+                    "media": {
+                        "id": 301,
+                        "title": {"romaji": "Parent"},
+                        "relations": {
+                            "edges": [
+                                {
+                                    "relationType": "SEQUEL",
+                                    "node": {
+                                        "id": 302,
+                                        "title": {"romaji": "Already Planned"},
+                                        "status": "NOT_YET_RELEASED",
+                                        "format": "TV"
+                                    }
+                                },
+                                {
+                                    "relationType": "SEQUEL",
+                                    "node": {
+                                        "id": 303,
+                                        "title": {"romaji": "New Unwatched Sequel"},
+                                        "status": "RELEASING",
+                                        "format": "TV"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+            with patch.object(anilist, "get_media_list_collection", return_value=mock_collection):
+                with patch.object(anilist, "get_completed_anime_with_relations", return_value=mock_completed_with_relations) as mock_rel:
+                    res = anilist.get_completed_sequels(user_name="dedicated_test_user")
+                    mock_rel.assert_called_once_with(user_name="dedicated_test_user")
+            self.assertIsNotNone(res)
+            self.assertEqual(res["counts"]["total"], 1)
+            self.assertEqual(res["counts"]["airing"], 1)
+            self.assertEqual(res["groups"]["airing"][0]["id"], 303)
+        finally:
+            if cache:
+                cache.clear()
+
 
     @patch("animu.web.anilist.get_genre_collection")
     def test_genres_route(self, genres):

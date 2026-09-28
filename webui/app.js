@@ -13,6 +13,8 @@
     unreadNotifCount: 0,
     discoverSeason: `${getCurrentSeason().season}_${getCurrentSeason().year}`,
     discoverChartTab: 'Airing',
+    discoverSequelsGroup: 'all',
+    sequelsData: null,
     hideOnMyList: false,
     listsMediaType: 'ANIME',
     listsStatusGroup: 'ALL',
@@ -599,7 +601,9 @@
   // TAB 1: DISCOVER HUB (RAILS & SEASONAL CHART)
   // ==========================================
   async function loadDiscover() {
+    ensureListEntriesLoaded();
     loadReleasingTodayFeed();
+    loadSequels();
     loadRails();
     loadSeasonalChartGrid();
   }
@@ -659,6 +663,252 @@
     }
   }
 
+  // ==========================================
+  // UNWATCHED DIRECT SEQUELS
+  // ==========================================
+  function updateSequelsToolbar() {
+    const activeGroup = state.discoverSequelsGroup || 'all';
+    document.querySelectorAll('.sequels-group-btn').forEach(btn => {
+      const isCurrent = btn.getAttribute('data-sequels-group') === activeGroup;
+      if (isCurrent) {
+        btn.classList.add('bg-violet-600', 'text-white', 'font-bold');
+        btn.classList.remove('text-slate-400', 'hover:text-white');
+      } else {
+        btn.classList.remove('bg-violet-600', 'text-white', 'font-bold');
+        btn.classList.add('text-slate-400', 'hover:text-white');
+      }
+    });
+  }
+
+  function updateSequelsCounts(counts = {}) {
+    const countAll = document.getElementById('sequels-count-all');
+    const countAiring = document.getElementById('sequels-count-airing');
+    const countUpcoming = document.getElementById('sequels-count-upcoming');
+    const countFinished = document.getElementById('sequels-count-finished');
+
+    if (countAll) countAll.textContent = `(${counts.total ?? 0})`;
+    if (countAiring) countAiring.textContent = `(${counts.airing ?? 0})`;
+    if (countUpcoming) countUpcoming.textContent = `(${counts.upcoming ?? 0})`;
+    if (countFinished) countFinished.textContent = `(${counts.finished ?? 0})`;
+  }
+
+  function renderSequelsError(message) {
+    const container = document.getElementById('sequels-container');
+    if (!container) return;
+    container.innerHTML = `
+      <div class="col-span-full py-8 text-center text-slate-400">
+        <i class="fa-solid fa-circle-exclamation text-xl mb-2 text-rose-500 block"></i>
+        <p class="text-xs font-semibold text-rose-400">${escapeHtml(message || 'Failed to load sequels.')}</p>
+      </div>
+    `;
+  }
+
+  function renderSequelCard(m) {
+    const title = formatTitle(m.title);
+    const safeTitle = escapeHtml(title);
+    const parentRaw = m.parentMedia?.title ? formatTitle(m.parentMedia.title) : '';
+    const safeParentTitle = parentRaw && parentRaw !== 'Untitled' ? escapeHtml(parentRaw) : '';
+    const score = m.averageScore ? `${m.averageScore}%` : 'N/A';
+    const coverUrl = (m.coverImage && (m.coverImage.extraLarge || m.coverImage.large || m.coverImage.medium)) || '';
+    const safeCoverUrl = /^https?:\/\//i.test(coverUrl) ? escapeHtml(coverUrl) : '';
+    const format = escapeHtml(m.format || 'TV');
+    const epCount = m.episodes ? `${m.episodes} eps` : '? eps';
+    const onList = Boolean(state.listEntriesByMedia && state.listEntriesByMedia[m.id]);
+    const isLocalWatch = state.animeList && state.animeList.some(a => a.mediaId === m.id);
+
+    let statusBadge = '';
+    if (m.status === 'RELEASING') {
+      if (m.nextAiringEpisode) {
+        const nextEp = m.nextAiringEpisode;
+        const days = Math.floor(nextEp.timeUntilAiring / 86400);
+        const hours = Math.floor((nextEp.timeUntilAiring % 86400) / 3600);
+        statusBadge = `<span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md inline-block">Ep ${nextEp.episode} in ${days}d ${hours}h</span>`;
+      } else {
+        statusBadge = `<span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md inline-block">Airing</span>`;
+      }
+    } else if (m.status === 'NOT_YET_RELEASED') {
+      const seasonParts = [m.season ? m.season.charAt(0) + m.season.slice(1).toLowerCase() : '', m.seasonYear || ''].filter(Boolean).join(' ');
+      const label = seasonParts || 'Upcoming';
+      statusBadge = `<span class="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md inline-block">${escapeHtml(label)}</span>`;
+    } else if (m.status === 'FINISHED') {
+      statusBadge = `<span class="text-[10px] font-bold text-slate-400 bg-slate-500/10 px-2 py-0.5 rounded-md inline-block">Finished</span>`;
+    }
+
+    return `
+      <div onclick="openMediaDetail(${m.id})" data-sequel-id="${m.id}" data-media-id="${m.id}" class="sequel-card group p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 hover:border-violet-500 transition-all cursor-pointer flex gap-3.5 shadow-sm">
+        <div class="relative shrink-0 overflow-hidden rounded-xl">
+          ${safeCoverUrl
+            ? `<img src="${safeCoverUrl}" alt="${safeTitle}" class="w-20 h-28 object-cover rounded-xl group-hover:scale-105 transition-transform" />`
+            : '<div class="w-20 h-28 bg-slate-200 dark:bg-slate-800 rounded-xl flex items-center justify-center text-slate-400"><i class="fa-solid fa-film text-xl"></i></div>'}
+          ${onList ? '<span class="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-lg bg-emerald-600/90 text-[10px] font-bold text-white shadow flex items-center"><i class="fa-solid fa-check mr-1"></i>In List</span>' : ''}
+        </div>
+        <div class="flex flex-col justify-between flex-grow min-w-0">
+          <div class="space-y-1">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${format}</span>
+            <h4 class="font-['Outfit'] font-bold text-xs text-slate-800 dark:text-slate-100 line-clamp-2" title="${safeTitle}">${safeTitle}</h4>
+            ${safeParentTitle ? `
+              <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate" title="Sequel to ${safeParentTitle}">
+                <span class="text-violet-500 dark:text-violet-400 font-semibold">Sequel to:</span> ${safeParentTitle}
+              </p>
+            ` : ''}
+          </div>
+          <div class="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/60 text-[11px]">
+            <div class="flex items-center justify-between font-semibold">
+              <span class="text-amber-400"><i class="fa-solid fa-star mr-1"></i>${score}</span>
+              <span class="text-slate-400">${epCount}</span>
+            </div>
+            ${statusBadge ? `<div>${statusBadge}</div>` : ''}
+            ${isLocalWatch ? '<span class="text-[10px] font-bold text-violet-400 block"><i class="fa-solid fa-download mr-1"></i>Downloaded</span>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSequels() {
+    const container = document.getElementById('sequels-container');
+    if (!container) return;
+
+    if (!state.sequelsData) {
+      container.innerHTML = `
+        <div class="col-span-full py-10 flex flex-col items-center justify-center text-slate-400">
+          <i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-violet-500"></i>
+          <p class="text-xs">Finding sequels to your completed anime...</p>
+        </div>
+      `;
+      return;
+    }
+
+    const data = state.sequelsData;
+    const counts = data.counts || {};
+    if (counts.total === 0 || !data.sequels || data.sequels.length === 0) {
+      container.innerHTML = `
+        <div class="col-span-full py-8 text-center text-slate-400 text-xs sm:text-sm">
+          <i class="fa-solid fa-film text-xl mb-2 text-slate-500 block"></i>
+          No unwatched direct sequels found for your completed anime.
+        </div>
+      `;
+      return;
+    }
+
+    const groupDefs = [
+      { key: 'finished', label: 'Finished', singular: 'finished', dotColor: 'bg-violet-500' },
+      { key: 'airing', label: 'Airing now', singular: 'airing', dotColor: 'bg-emerald-500' },
+      { key: 'upcoming', label: 'Upcoming', singular: 'upcoming', dotColor: 'bg-blue-500' }
+    ];
+
+    const activeGroup = state.discoverSequelsGroup || 'all';
+    const seenIds = new Set();
+
+    function dedupeSequels(list) {
+      const unique = [];
+      for (const item of (list || [])) {
+        if (!item || !item.id) continue;
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          unique.push(item);
+        }
+      }
+      return unique;
+    }
+
+    if (activeGroup === 'all') {
+      const sections = [];
+      for (const def of groupDefs) {
+        const rawItems = data.groups?.[def.key] || [];
+        const items = dedupeSequels(rawItems);
+        sections.push(`
+          <div class="sequels-group-section space-y-3" data-group="${def.key}">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full ${def.dotColor}"></span>
+              <h3 class="sequels-group-title font-['Outfit'] font-bold text-sm text-slate-800 dark:text-slate-200">${def.label}</h3>
+              <span class="text-xs text-slate-400">(${items.length})</span>
+            </div>
+            ${items.length > 0 ? `
+              <div class="sequels-group-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                ${items.map(renderSequelCard).join('')}
+              </div>
+            ` : `
+              <div class="py-3 text-slate-400 text-xs italic">No ${escapeHtml(def.singular)} sequels found.</div>
+            `}
+          </div>
+        `);
+      }
+      container.innerHTML = `<div class="space-y-6">${sections.join('')}</div>`;
+    } else {
+      const def = groupDefs.find(g => g.key === activeGroup);
+      const rawItems = def ? (data.groups?.[def.key] || []) : [];
+      const items = dedupeSequels(rawItems);
+      const label = def ? def.label : activeGroup;
+      const singular = def ? def.singular : activeGroup;
+      const dotColor = def ? def.dotColor : 'bg-violet-500';
+
+      container.innerHTML = `
+        <div class="sequels-group-section space-y-3" data-group="${escapeHtml(activeGroup)}">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full ${dotColor}"></span>
+            <h3 class="sequels-group-title font-['Outfit'] font-bold text-sm text-slate-800 dark:text-slate-200">${label}</h3>
+            <span class="text-xs text-slate-400">(${items.length})</span>
+          </div>
+          ${items.length > 0 ? `
+            <div class="sequels-group-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              ${items.map(renderSequelCard).join('')}
+            </div>
+          ` : `
+            <div class="py-8 text-center text-slate-400 text-xs sm:text-sm">
+              <i class="fa-solid fa-film text-xl mb-2 text-slate-500 block"></i>
+              No ${escapeHtml(singular)} sequels found.
+            </div>
+          `}
+        </div>
+      `;
+    }
+  }
+
+  async function loadSequels() {
+    const container = document.getElementById('sequels-container');
+    if (!container) return;
+    const token = tabToken;
+    const listEntriesPromise = ensureListEntriesLoaded();
+
+    try {
+      const url = state.userName
+        ? `/api/anilist/completed-sequels?userName=${encodeURIComponent(state.userName)}`
+        : '/api/anilist/completed-sequels';
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Failed to load sequels (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      await listEntriesPromise;
+      if (isStaleTab(token)) return;
+
+      if (data.error && (!data.sequels || data.sequels.length === 0)) {
+        throw new Error(data.error);
+      }
+
+      state.sequelsData = data;
+      updateSequelsCounts(data.counts || {});
+      renderSequels();
+    } catch (err) {
+      if (isStaleTab(token)) return;
+      state.sequelsData = null;
+      updateSequelsCounts({ total: 0, finished: 0, airing: 0, upcoming: 0 });
+      renderSequelsError(err.message);
+    }
+  }
+
+  document.querySelectorAll('.sequels-group-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const group = btn.getAttribute('data-sequels-group');
+      if (!group) return;
+      state.discoverSequelsGroup = group;
+      updateSequelsToolbar();
+      renderSequels();
+    });
+  });
+
   async function loadRails() {
     const rails = [
       { id: 'rail-trending', sort: 'TRENDING_DESC', sparkline: true },
@@ -668,6 +918,7 @@
       { id: 'rail-top-100', sort: 'SCORE_DESC' }
     ];
     const token = tabToken;
+    const listEntriesPromise = ensureListEntriesLoaded();
 
     for (const r of rails) {
       const container = document.getElementById(r.id);
@@ -690,6 +941,7 @@
           }
         `;
         const data = await queryAniList(query, { sort: [r.sort], status: r.status, season: r.season, seasonYear: r.year });
+        await listEntriesPromise;
         if (isStaleTab(token)) return;
         const items = data.Page.media || [];
         container.innerHTML = items.map(m => renderRailCard(m, r.sparkline)).join('');
@@ -703,7 +955,7 @@
   function renderRailCard(media, showSparkline = false) {
     const title = formatTitle(media.title);
     const score = media.averageScore ? `${media.averageScore}%` : 'N/A';
-    const isDownloaded = state.animeList.some(a => a.mediaId === media.id);
+    const onList = Boolean(state.listEntriesByMedia && state.listEntriesByMedia[media.id]);
     const coverUrl = (media.coverImage && (media.coverImage.extraLarge || media.coverImage.large)) || '';
 
     // Sparkline SVG path generator
@@ -731,7 +983,7 @@
             <span class="px-2 py-0.5 rounded-lg bg-slate-950/80 backdrop-blur-md text-[10px] font-bold text-amber-400">
               <i class="fa-solid fa-star text-[9px] mr-1"></i>${score}
             </span>
-            ${isDownloaded ? '<span class="px-2 py-0.5 rounded-lg bg-emerald-600/90 text-[10px] font-bold text-white"><i class="fa-solid fa-check mr-1"></i>In List</span>' : ''}
+            ${onList ? '<span class="px-2 py-0.5 rounded-lg bg-emerald-600/90 text-[10px] font-bold text-white"><i class="fa-solid fa-check mr-1"></i>In List</span>' : ''}
           </div>
 
           ${sparklineSvg}
@@ -795,6 +1047,7 @@
     const token = tabToken;
 
     try {
+      const listEntriesPromise = ensureListEntriesLoaded();
       const [season, year] = state.discoverSeason.split('_');
       // Map chart subtab -> AniList status filter. Upcoming/TBA both use
       // NOT_YET_RELEASED and are split client-side by whether an air date exists.
@@ -822,6 +1075,7 @@
         }
       `;
       const data = await queryAniList(query, { season, seasonYear: parseInt(year), status });
+      await listEntriesPromise;
       if (isStaleTab(token)) return;
       let items = data.Page.media || [];
 
@@ -834,8 +1088,7 @@
       }
 
       if (state.hideOnMyList) {
-        const onListIds = new Set(state.animeList.map(a => a.mediaId));
-        items = items.filter(i => !onListIds.has(i.id) && !i.mediaListEntry);
+        items = items.filter(i => !(state.listEntriesByMedia && state.listEntriesByMedia[i.id]));
       }
 
       if (items.length === 0) {
@@ -855,11 +1108,15 @@
           countdownStr = `Ep ${nextEp.episode} in ${days}d ${hours}h`;
         }
 
+        const onList = Boolean(state.listEntriesByMedia && state.listEntriesByMedia[m.id]);
         const isLocalWatch = state.animeList.some(a => a.mediaId === m.id);
 
         return `
           <div onclick="openMediaDetail(${m.id})" class="group p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 hover:border-violet-500 transition-all cursor-pointer flex gap-3.5 shadow-sm">
-            <img src="${coverUrl}" class="w-20 h-28 object-cover rounded-xl shrink-0 group-hover:scale-105 transition-transform" />
+            <div class="relative shrink-0 overflow-hidden rounded-xl">
+              <img src="${coverUrl}" class="w-20 h-28 object-cover rounded-xl group-hover:scale-105 transition-transform" />
+              ${onList ? '<span class="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-lg bg-emerald-600/90 text-[10px] font-bold text-white shadow flex items-center"><i class="fa-solid fa-check mr-1"></i>In List</span>' : ''}
+            </div>
             <div class="flex flex-col justify-between flex-grow">
               <div class="space-y-1">
                 <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400">${m.format || 'TV'}</span>

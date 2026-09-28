@@ -222,6 +222,38 @@
         </div>
       </div>
 
+      <!-- Unwatched Direct Sequels Section -->
+      <div id="sequels-section" class="rounded-2xl border border-slate-200/60 dark:border-slate-800 bg-white dark:bg-[#111827]/80 p-5 shadow-sm space-y-4">
+        <!-- Title row + filter selector -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="space-y-1">
+            <h2 class="text-lg sm:text-xl font-bold font-['Outfit'] tracking-tight flex items-center gap-2.5 text-slate-900 dark:text-white">
+              <span class="w-8 h-8 rounded-xl bg-violet-600/10 text-violet-500 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-forward-step text-sm"></i>
+              </span>
+              Unwatched Sequels
+            </h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Direct sequels of anime you've completed that aren't on your list yet</p>
+          </div>
+
+          <!-- Group / Status Filter Toolbar -->
+          <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold font-['Outfit'] shrink-0 overflow-x-auto self-start sm:self-auto">
+            <button data-sequels-group="all" class="sequels-group-btn px-3 py-1.5 rounded-lg bg-violet-600 text-white font-bold transition-all">All <span id="sequels-count-all" class="ml-1 opacity-80">(0)</span></button>
+            <button data-sequels-group="airing" class="sequels-group-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">Airing now <span id="sequels-count-airing" class="ml-1 opacity-80">(0)</span></button>
+            <button data-sequels-group="upcoming" class="sequels-group-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">Upcoming <span id="sequels-count-upcoming" class="ml-1 opacity-80">(0)</span></button>
+            <button data-sequels-group="finished" class="sequels-group-btn px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">Finished <span id="sequels-count-finished" class="ml-1 opacity-80">(0)</span></button>
+          </div>
+        </div>
+
+        <!-- Sequels Content Container -->
+        <div id="sequels-container" class="min-h-[140px]">
+          <div class="col-span-full py-10 flex flex-col items-center justify-center text-slate-400">
+            <i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-violet-500"></i>
+            <p class="text-xs">Finding sequels to your completed anime...</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Rails Section -->
       <div class="space-y-8">
 

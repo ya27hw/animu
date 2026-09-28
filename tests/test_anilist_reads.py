@@ -311,13 +311,27 @@ class TestMediaListCollection(unittest.TestCase):
         self.assertEqual(len(result["lists"][0]["entries"]), 10)
 
     def test_get_media_list_collection_no_user_name(self):
+        AC.clear_all_caches()
+        if hasattr(AC.get_media_list_collection, '_cache'):
+            AC.get_media_list_collection._cache.clear()
+        self.addCleanup(AC.clear_all_caches)
+        if hasattr(AC.get_media_list_collection, '_cache'):
+            self.addCleanup(AC.get_media_list_collection._cache.clear)
+
         cfg = make_config(ani_user_name=None)
-        with patch("animu.anilist.get_config", return_value=cfg), patch.object(
-            self.client, "_query"
-        ) as q:
-            result = self.client.get_media_list_collection()
-            self.assertEqual(result, {"lists": [], "hasNextChunk": False})
-            q.assert_not_called()
+        with patch("animu.anilist.get_config", return_value=cfg), \
+             patch.object(self.client, "get_viewer", return_value=None) as mock_get_viewer, \
+             patch.object(self.client, "_query") as mock_query:
+            try:
+                result = self.client.get_media_list_collection()
+                mock_get_viewer.assert_called_once()
+                self.assertEqual(result, {"lists": [], "hasNextChunk": False})
+                mock_query.assert_not_called()
+            finally:
+                if hasattr(AC.get_media_list_collection, '_cache'):
+                    AC.get_media_list_collection._cache.clear()
+                AC.clear_all_caches()
+
 
     def test_get_media_list_collection_caps_per_chunk(self):
         collection = {"lists": [], "hasNextChunk": False}
