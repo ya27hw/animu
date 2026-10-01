@@ -2601,6 +2601,10 @@
       btn: document.getElementById('btn-anilist-oauth'),
     };
     if (!d.statusText) return; // Settings panel not in DOM
+    const setOAuthBox = (tone) => {
+      const box = document.getElementById('oauth-status-box');
+      if (box) box.className = `p-4 rounded-xl bg-${tone}-500/10 border border-${tone}-500/20 text-xs space-y-1.5`;
+    };
 
     try {
       const res = await fetch('/api/anilist/auth/state');
@@ -2611,6 +2615,7 @@
       const expiry = state.tokenExpiry || {};
 
       if (!connected) {
+        setOAuthBox('rose');
         if (d.indicator) d.indicator.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shrink-0';
         if (d.statusText) d.statusText.textContent = 'OAuth Status: Not connected';
         if (d.expiryText) d.expiryText.textContent = '';
@@ -2620,6 +2625,7 @@
         return;
       }
 
+      setOAuthBox(needsReauth ? 'amber' : 'emerald');
       if (d.indicator) d.indicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block shrink-0';
       if (d.statusText) d.statusText.textContent = `OAuth Status: Connected${state.userName ? ` as ${state.userName}` : ''}`;
       if (d.btn) d.btn.innerHTML = '<i class="fa-solid fa-right-to-bracket text-[10px]"></i>Reconnect';
@@ -2649,6 +2655,7 @@
         if (d.ok) d.ok.classList.remove('hidden');
       }
     } catch (err) {
+      setOAuthBox('rose');
       if (d.indicator) d.indicator.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shrink-0';
       if (d.statusText) d.statusText.textContent = 'OAuth Status: Unable to check';
       if (d.expiryText) d.expiryText.textContent = '';
@@ -3239,5 +3246,25 @@
   ensureListEntriesLoaded();
   pollNotifications();
   setInterval(pollNotifications, 60000);
+
+  // Live scheduler status badge on the Watching banner (from /api/health).
+  async function refreshSchedulerBadge() {
+    const dot = document.getElementById('scheduler-dot');
+    const label = document.getElementById('scheduler-label');
+    if (!dot || !label) return;
+    let text = 'Scheduler status unknown';
+    let tone = 'bg-slate-400';
+    try {
+      const res = await fetch('/api/health');
+      const h = await res.json();
+      if (h.scheduler_running) { text = 'Scheduler Active'; tone = 'bg-emerald-500 animate-pulse'; }
+      else if (h.last_error_type) { text = 'Scheduler error'; tone = 'bg-rose-500'; }
+      else { text = 'Scheduler idle'; tone = 'bg-amber-500'; }
+    } catch (_) { /* keep unknown */ }
+    label.textContent = text;
+    dot.className = `w-3 h-3 rounded-full ${tone}`;
+  }
+  refreshSchedulerBadge();
+  setInterval(refreshSchedulerBadge, 30000);
 
 })();
