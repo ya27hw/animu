@@ -1,9 +1,0 @@
-{
-  "apps": [],
-  "metadata": {
-    "authoritative_runtime": "systemd",
-    "service": "animu.service",
-    "retired": true,
-    "reason": "The Python rewrite is run by systemd; PM2 must not start the stale build/main.js command."
-  }
-}

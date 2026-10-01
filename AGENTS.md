@@ -275,7 +275,6 @@ ssh root@10.0.0.2 "pct exec 102 -- curl -s http://127.0.0.1:3210/ | grep -o 'app
 
 **Rollback:** `git reset --hard <previous-sha>` on CT 102 + restart (state lives in `logs/offline_db.json` + `logs/history.json`, which are untracked).
 
-**Legacy tar deploy** (`deploy.sh`, tar-to-/root/animu): still present but superseded; the git path is authoritative.
 
 **Monitor:** `ssh root@10.0.0.2 "pct exec 102 -- journalctl -u animu.service -f"` — logs also at `/root/animu/logs/animu.log` (RotatingFileHandler 5MB × 3).
 
