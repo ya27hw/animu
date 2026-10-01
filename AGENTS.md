@@ -143,7 +143,6 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
     app.js (2,129 lines) — Vanilla JS: anime grid, Discover feed+search+detail, history with
     delete/re-run/ignore-redownload actions, ignored management, settings, dark theme toggle
     (class-based: @custom-variant dark in the tailwindcss style block), inline SVG favicon
-    js/features-unused/ — ARCHIVED T3 module layer (never loaded — see below)
 ```
 
 ---
@@ -160,7 +159,7 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
 - `settings-behavior.js` targets DOM ids that don't exist in index.html (`btn-theme-light/dark/system`, `title-language-select`; real ids: `theme-toggle`, `pref-title-lang`) — written against a different DOM contract.
 - `home.js` / `engagement.js` / `media-detail.js` / `search.js` are no-op stubs.
 
-**Implementation (commits `60ae2e0`, `04e28a9`):** removed all `window.Animu` delegation hooks from app.js; archived the 10 module files to `webui/js/features-unused/` (preserved for revival — see `webui/js/features-unused/README.md` for the revival checklist). **Rule: do not re-add `<script src="/js/...">` tags or `window.Animu` guards to app.js without revisiting this decision.**
+**Implementation (commits `60ae2e0`, `04e28a9`):** removed all `window.Animu` delegation hooks from app.js; archived the 10 module files to `webui/js/features-unused/`, since deleted (recoverable from git history before the cleanup commit). **Rule: do not re-add `<script src="/js/...">` tags or `window.Animu` guards to app.js without revisiting this decision.**
 
 ---
 

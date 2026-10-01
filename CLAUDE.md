@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Animu is a Python 3 anime auto-downloader. It reads a user's AniList WATCHING list, works out which aired episodes are missing, finds them on Nyaa (RSS), sends them to qBittorrent, and records state in PocketBase (with a local JSON fallback). A vanilla-JS web UI is served by the same process. `main` is the Python rewrite; the old Node/TypeScript tree in `src/`, `package.json`, `tsconfig.json`, `ecosystem.config.json`, `yarn.lock` is **legacy** (Firebase/PM2 era) — don't extend it or file TS-era bugs. `plugins/jellyfin-ani-sync/` is a separate C# Jellyfin plugin (AniList progress sync).
+Animu is a Python 3 anime auto-downloader. It reads a user's AniList WATCHING list, works out which aired episodes are missing, finds them on Nyaa (RSS), sends them to qBittorrent, and records state in PocketBase (with a local JSON fallback). A vanilla-JS web UI is served by the same process. `main` is the Python rewrite; the old Node/TypeScript (Firebase/PM2) tree has been removed — don't file TS-era bugs. `plugins/jellyfin-ani-sync/` is a separate C# Jellyfin plugin (AniList progress sync).
 
 ## Commands
 
@@ -14,7 +14,7 @@ Animu is a Python 3 anime auto-downloader. It reads a user's AniList WATCHING li
 - `python3 main.py --schedule` — production mode: initialises the DB, starts the web server, runs the scheduler loop
 - `python3 main.py --once` — one scheduler cycle then exit; `--web` — web UI only; no flag shows a menu (`main.py 1|2|3` picks an entry directly)
 - Web server port: `ANIMU_PORT` env var, default 3210. Health check: `GET /api/health`.
-- Tests: `PYTHONPATH=. pytest -q`; single test: `PYTHONPATH=. pytest tests/test_web_api.py::TestWebAPI::test_search_debug_endpoint_returns_persistent_traces`. `tests/frontend_queue_test.mjs` is a separate puppeteer-based script (`node tests/frontend_queue_test.mjs`, needs `puppeteer-core` on `NODE_PATH`). There is no linter; `python3 -m compileall animu tests` is the compile check used in `QA_REPORT.md`.
+- Tests: `PYTHONPATH=. pytest -q`; single test: `PYTHONPATH=. pytest tests/test_web_api.py::TestWebAPI::test_search_debug_endpoint_returns_persistent_traces`. `tests/frontend_queue_test.mjs` is a separate puppeteer-based script (`node tests/frontend_queue_test.mjs`, needs `puppeteer-core` on `NODE_PATH`). There is no linter; `python3 -m compileall animu tests` is the compile check.
 - Nothing needs compiling — the web UI loads Tailwind in-browser and `app.js` directly.
 
 ## Configuration and state
@@ -37,7 +37,7 @@ Non-obvious cross-file behaviour:
 - **`verify=False` on every `httpx.Client`** (anilist, nyaa, qbittorrent, database) is deliberate: the qBittorrent and PocketBase hosts use self-signed certs.
 - **Proxy**: `useProxy`/`triggerGenre` route Nyaa and `.torrent` downloads through a proxy; with a proxy the `.torrent` is downloaded and uploaded to qBittorrent instead of passing the URL.
 - **Web server** (`animu/web.py`) is a hand-rolled `http.server` handler (`do_GET`/`do_POST`/`do_PATCH`/`do_DELETE` dispatch on path) serving both `/api/*` and `webui/`. It injects `?v=<git SHA>` into the `app.js` URL in `index.html`; keep that — the production reverse proxy caches JS aggressively.
-- **Frontend**: `webui/app.js` is the single source of truth and `index.html` loads only it. The modules in `webui/js/features-unused/` are archived dead code; do not re-add `<script src="/js/...">` tags or `window.Animu` hooks (rationale in `AGENTS.md`).
+- **Frontend**: `webui/app.js` is the single source of truth and `index.html` loads only it. The old modular layer (`webui/js/`) was deleted as dead code; do not re-add `<script src="/js/...">` tags or `window.Animu` hooks (rationale in `AGENTS.md`).
 
 ## Deployment
 
