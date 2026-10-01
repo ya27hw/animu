@@ -33,7 +33,7 @@ You give the program your AniList profile. It looks at your current "*WATCHING*"
 
 ## How do I set this up?
 
-> NOTE: This is the Python rewrite (default branch `python-rewrite`). The old Node.js v4.3.0 tree with Firebase is legacy.
+> NOTE: This is the Python rewrite (default branch `main`). The old Node.js v4.3.0 tree with Firebase is legacy.
 
 1. `pip install -r requirements.txt` (httpx, feedparser, rapidfuzz, schedule, colorama, anitopy)
 2. Download qBittorrent, enable its Web UI

@@ -7,7 +7,7 @@ This document describes the production deployment and automated GitHub update pi
 ## 1. Architecture Overview
 
 - **Host**: CT102 container (`10.0.0.2`), working directory `/root/animu`.
-- **Branch**: `python-rewrite` tracking `origin/python-rewrite` (`git@github.com:ya27hw/animu.git`).
+- **Branch**: `main` tracking `origin/main` (`git@github.com:ya27hw/animu.git`).
 - **Main Service**: `animu.service` running `main.py --schedule` under Python 3 venv.
 - **Auto-Updater**: `animu-update.service` triggered by `animu-update.timer` (every 15 minutes).
 - **Health Check**: Native `/api/health` HTTP endpoint (port 3210) validating runtime readiness.
@@ -20,11 +20,11 @@ The update runner (`/root/animu/scripts/animu-update.sh`) executes on a 15-minut
 
 1. **Flock Locking**: Acquires an exclusive non-blocking lock (`/run/lock/animu-update.lock` or `/tmp/animu-update.lock`) to prevent overlapping update runs.
 2. **Dirty Tree Detection**: Verifies that the deployment directory has no uncommitted tracked modifications (`git diff` and `git diff --cached`) or untracked files (`git status --porcelain`). If uncommitted modifications or untracked files are detected, update is refused.
-3. **Target Polling**: Fetches the exact target branch `origin/python-rewrite` quietly without altering working state.
-4. **Quiet Exit on Unchanged**: If `HEAD` matches `origin/python-rewrite`, exits code 0 without restarting the service.
-5. **Fast-Forward Only Enforcement**: Verifies `origin/python-rewrite` is an ancestor of `HEAD` using `git merge-base --is-ancestor`. Non-fast-forward updates (divergent histories or rebased trees) are rejected.
+3. **Target Polling**: Fetches the exact target branch `origin/main` quietly without altering working state.
+4. **Quiet Exit on Unchanged**: If `HEAD` matches `origin/main`, exits code 0 without restarting the service.
+5. **Fast-Forward Only Enforcement**: Verifies `origin/main` is an ancestor of `HEAD` using `git merge-base --is-ancestor`. Non-fast-forward updates (divergent histories or rebased trees) are rejected.
 6. **Rollback Target Recording**: Pre-update commit hash (`PREV_COMMIT`) is recorded prior to touching the checkout.
-7. **Fast-Forward Merge**: Applies `git merge --ff-only origin/python-rewrite`.
+7. **Fast-Forward Merge**: Applies `git merge --ff-only origin/main`.
 8. **Dependency Update**: If `requirements.txt` changed between commits, runs `./venv/bin/pip install -r requirements.txt`.
 9. **Service Restart & Health Verification**: Restarts `animu.service` and polls `http://127.0.0.1:3210/api/health` for up to 30 seconds to confirm the service is active and reporting healthy readiness.
 10. **Automated Rollback**: If restart or `/api/health` verification fails, the script automatically resets the git checkout back to `PREV_COMMIT` (`git reset --hard $PREV_COMMIT`), reinstalls dependencies if needed, restarts `animu.service`, and verifies recovery.

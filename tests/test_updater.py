@@ -17,7 +17,7 @@ class TestUpdater(unittest.TestCase):
 
         # 2. Init app dir, configure user and remote
         os.makedirs(self.app_dir, exist_ok=True)
-        subprocess.run(["git", "init", "-b", "python-rewrite", self.app_dir], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main", self.app_dir], check=True, capture_output=True)
         subprocess.run(["git", "-C", self.app_dir, "config", "user.email", "test@animu.local"], check=True)
         subprocess.run(["git", "-C", self.app_dir, "config", "user.name", "Test User"], check=True)
         subprocess.run(["git", "-C", self.app_dir, "remote", "add", "origin", self.remote_dir], check=True)
@@ -27,7 +27,7 @@ class TestUpdater(unittest.TestCase):
             f.write("v1.0.0\n")
         subprocess.run(["git", "-C", self.app_dir, "add", "version.txt"], check=True)
         subprocess.run(["git", "-C", self.app_dir, "commit", "-m", "Initial commit"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", self.app_dir, "push", "-u", "origin", "python-rewrite"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", self.app_dir, "push", "-u", "origin", "main"], check=True, capture_output=True)
 
         # Path to animu-update.sh
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -39,7 +39,7 @@ class TestUpdater(unittest.TestCase):
     def _run_updater(self, extra_env=None):
         env = os.environ.copy()
         env["ANIMU_DIR"] = self.app_dir
-        env["ANIMU_BRANCH"] = "python-rewrite"
+        env["ANIMU_BRANCH"] = "main"
         env["ANIMU_REMOTE"] = "origin"
         env["ANIMU_SERVICE"] = "animu-test.service"
         env["ANIMU_LOCK_FILE"] = self.lock_file
@@ -65,14 +65,14 @@ class TestUpdater(unittest.TestCase):
         """When remote has a new fast-forward commit, updater applies it and exits 0."""
         # Make a new commit from another clone and push to remote
         clone_dir = os.path.join(self.test_dir, "clone2")
-        subprocess.run(["git", "clone", "-b", "python-rewrite", self.remote_dir, clone_dir], check=True, capture_output=True)
+        subprocess.run(["git", "clone", "-b", "main", self.remote_dir, clone_dir], check=True, capture_output=True)
         subprocess.run(["git", "-C", clone_dir, "config", "user.email", "test@animu.local"], check=True)
         subprocess.run(["git", "-C", clone_dir, "config", "user.name", "Test User"], check=True)
 
         with open(os.path.join(clone_dir, "version.txt"), "w") as f:
             f.write("v1.1.0\n")
         subprocess.run(["git", "-C", clone_dir, "commit", "-am", "Release v1.1.0"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", clone_dir, "push", "origin", "python-rewrite"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", clone_dir, "push", "origin", "main"], check=True, capture_output=True)
 
         # Mock health check server returning 200
         import http.server
@@ -136,14 +136,14 @@ class TestUpdater(unittest.TestCase):
 
         # Advance remote with a different commit
         clone_dir = os.path.join(self.test_dir, "clone2")
-        subprocess.run(["git", "clone", "-b", "python-rewrite", self.remote_dir, clone_dir], check=True, capture_output=True)
+        subprocess.run(["git", "clone", "-b", "main", self.remote_dir, clone_dir], check=True, capture_output=True)
         subprocess.run(["git", "-C", clone_dir, "config", "user.email", "test@animu.local"], check=True)
         subprocess.run(["git", "-C", clone_dir, "config", "user.name", "Test User"], check=True)
         with open(os.path.join(clone_dir, "remote.txt"), "w") as f:
             f.write("remote only\n")
         subprocess.run(["git", "-C", clone_dir, "add", "remote.txt"], check=True)
         subprocess.run(["git", "-C", clone_dir, "commit", "-m", "Remote commit"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", clone_dir, "push", "origin", "python-rewrite"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", clone_dir, "push", "origin", "main"], check=True, capture_output=True)
 
         res = self._run_updater()
         self.assertEqual(res.returncode, 1)
@@ -155,14 +155,14 @@ class TestUpdater(unittest.TestCase):
 
         # Push new commit to remote
         clone_dir = os.path.join(self.test_dir, "clone2")
-        subprocess.run(["git", "clone", "-b", "python-rewrite", self.remote_dir, clone_dir], check=True, capture_output=True)
+        subprocess.run(["git", "clone", "-b", "main", self.remote_dir, clone_dir], check=True, capture_output=True)
         subprocess.run(["git", "-C", clone_dir, "config", "user.email", "test@animu.local"], check=True)
         subprocess.run(["git", "-C", clone_dir, "config", "user.name", "Test User"], check=True)
         with open(os.path.join(clone_dir, "broken.txt"), "w") as f:
             f.write("broken\n")
         subprocess.run(["git", "-C", clone_dir, "add", "broken.txt"], check=True)
         subprocess.run(["git", "-C", clone_dir, "commit", "-m", "Broken commit"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", clone_dir, "push", "origin", "python-rewrite"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", clone_dir, "push", "origin", "main"], check=True, capture_output=True)
 
         # Health endpoint fails (no server listening on port 39282)
         res = self._run_updater(extra_env={

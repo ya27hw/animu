@@ -21,7 +21,7 @@ set -euo pipefail
 
 # Configurable environment with production defaults
 APP_DIR="${ANIMU_DIR:-/root/animu}"
-BRANCH="${ANIMU_BRANCH:-python-rewrite}"
+BRANCH="${ANIMU_BRANCH:-main}"
 REMOTE="${ANIMU_REMOTE:-origin}"
 SERVICE_NAME="${ANIMU_SERVICE:-animu.service}"
 HEALTH_URL="${ANIMU_HEALTH_URL:-http://127.0.0.1:3210/api/health}"

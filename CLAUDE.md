@@ -41,4 +41,4 @@ Non-obvious cross-file behaviour:
 
 ## Deployment
 
-Production is a git checkout on a container, updated by `scripts/animu-update.sh` (systemd timer, fast-forward only with health-check rollback; see `DEPLOYMENT.md`). That script defaults to the branch `python-rewrite` (`ANIMU_BRANCH`), and `AGENTS.md`/`DEPLOYMENT.md` still name `python-rewrite` — the default branch is now `main`, so those references need updating when the deploy checkout is switched over. Never restart `animu.service` from the Proxmox host — only inside the container (see `AGENTS.md`).
+Production is a git checkout on a container, updated by `scripts/animu-update.sh` (systemd timer, fast-forward only with health-check rollback; see `DEPLOYMENT.md`). That script tracks `main` by default (`ANIMU_BRANCH`). Never restart `animu.service` from the Proxmox host — only inside the container (see `AGENTS.md`).

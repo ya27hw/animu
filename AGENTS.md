@@ -2,12 +2,12 @@
 
 > Pure Python 3 rewrite of the animu anime auto-downloader.  
 > **Version:** 1.1.0 (rewrite of Node.js v4.3.0)  
-> **Branch:** `python-rewrite` on `ya27hw/animu` (default branch; `ani` is the old remote default — merge into `python-rewrite`)  
+> **Branch:** `main` on `ya27hw/animu` (default branch; formerly `python-rewrite`; `ani` was the old TypeScript default)  
 > **Instance:** CT 102 (`10.0.0.165`) on Proxmox host (`10.0.0.2`)  
 > **Process:** `systemd animu.service` (`WorkingDirectory=/root/animu`, `ExecStart=venv/bin/python3 main.py --schedule`)  
 > **Database:** PocketBase on CT 120 (`https://pb.atoona.com`, behind NPM @ 10.0.0.113)  
 > **Lines:** ~4,524 Python (14 modules) + 2,840 frontend HTML/JS  
-> **Production deploy:** git fast-forward of `python-rewrite` into `/root/animu` on CT 102 + `systemctl restart animu.service` **inside the container** (never from the Proxmox host — see Pitfall G in the animu skill)
+> **Production deploy:** git fast-forward of `main` into `/root/animu` on CT 102 + `systemctl restart animu.service` **inside the container** (never from the Proxmox host — see Pitfall G in the animu skill)
 
 ---
 
@@ -253,16 +253,16 @@ New **Discover tab** in the WebUI (between Watching and History), modeled on AL-
 
 ## Deploy Process (CANONICAL — 2026-08-07)
 
-**The live service is a git checkout on CT 102.** Deploy = fast-forward `python-rewrite` + restart **inside the container**:
+**The live service is a git checkout on CT 102.** Deploy = fast-forward `main` + restart **inside the container**:
 
 ```bash
-# 1. From the Hermes workspace: merge/push to python-rewrite first
-cd /home/hermes/animu-python && git push origin python-rewrite
+# 1. From the Hermes workspace: merge/push to main first
+cd /home/hermes/animu-python && git push origin main
 
 # 2. On CT 102: fetch + fast-forward + restart (INSIDE the container!)
 ssh root@10.0.0.2 "pct exec 102 -- bash -c 'cd /root/animu && \
-  git fetch origin python-rewrite --quiet && \
-  git merge --ff-only origin/python-rewrite && \
+  git fetch origin main --quiet && \
+  git merge --ff-only origin/main && \
   systemctl restart animu.service && sleep 6 && systemctl is-active animu.service'"
 
 # 3. Verify
