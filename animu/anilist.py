@@ -4,6 +4,7 @@ import threading
 import time
 from typing import Optional, List, Dict, Any, Callable, Tuple
 from .config import get_config
+from .storage import atomic_write_json
 from .anilist_auth import execute_graphql
 from .airschedule import record_from_media_list
 
@@ -21,6 +22,8 @@ class TTLCache:
     window; expired entries are evicted lazily on access.
     """
 
+    MAX_ENTRIES = 512
+
     def __init__(self, ttl: int = 60):
         self.ttl = ttl
         self._store: Dict[str, Tuple[Any, float]] = {}
@@ -37,7 +40,15 @@ class TTLCache:
         return value
 
     def set(self, key: str, value: Any) -> None:
-        self._store[key] = (value, time.time() + self.ttl)
+        now = time.time()
+        if len(self._store) >= self.MAX_ENTRIES:
+            # Expired entries were only ever evicted on access, so free-text
+            # search keys accumulated without bound. Purge on write instead.
+            for k in [k for k, (_, exp) in list(self._store.items()) if exp <= now]:
+                self._store.pop(k, None)
+            while len(self._store) >= self.MAX_ENTRIES:
+                self._store.pop(next(iter(self._store)), None)
+        self._store[key] = (value, now + self.ttl)
 
     def clear(self) -> None:
         """Drop all cached entries (e.g. after authentication changes)."""
@@ -72,6 +83,10 @@ class PersistentCache:
             cache_dir = None
         self._path = os.path.join(cache_dir, f"{name}.json") if cache_dir else None
         self._memory: Dict[str, Tuple[Any, float]] = {}
+        # The disk file is parsed once and then kept in memory; it used to be
+        # re-read and re-parsed on every cold get, get_stale and set (the
+        # media-list collection alone is megabytes).
+        self._disk: Optional[Dict[str, Tuple[Any, float]]] = None
 
     def get(self, key: str) -> Optional[Any]:
         """Return a fresh (non-expired) cached value, or None."""
@@ -105,8 +120,24 @@ class PersistentCache:
                 return entry[0]
             return None
 
+    def age(self, key: str) -> Optional[float]:
+        """Seconds since ``key`` was stored (None if absent)."""
+        with self._lock:
+            entry = self._memory.get(key)
+            if entry is None:
+                disk = self._load_disk()
+                entry = disk.get(key) if disk else None
+            if entry is None:
+                return None
+            return max(0.0, time.time() - (entry[1] - self.ttl))
+
+    # Entries this long past expiry are dropped on write; stale-while-revalidate
+    # only needs the previous value, not arbitrarily old ones.
+    STALE_RETENTION_SECONDS = 7 * 86400
+
     def set(self, key: str, value: Any) -> None:
-        expires_at = time.time() + self.ttl
+        now = time.time()
+        expires_at = now + self.ttl
         with self._lock:
             self._memory[key] = (value, expires_at)
             if self._path is None:
@@ -114,26 +145,31 @@ class PersistentCache:
             try:
                 disk = self._load_disk()
                 disk[key] = (value, expires_at)
-                tmp = self._path + ".tmp"
-                with open(tmp, "w") as f:
-                    json.dump(disk, f)
-                os.replace(tmp, self._path)
+                cutoff = now - self.STALE_RETENTION_SECONDS
+                for k in [k for k, (_, exp) in disk.items() if exp < cutoff]:
+                    disk.pop(k, None)
+                atomic_write_json(self._path, {k: [v, e] for k, (v, e) in disk.items()})
             except Exception:
                 pass  # Disk write failures must never break the hot path.
 
     def _load_disk(self) -> Dict[str, Tuple[Any, float]]:
+        if self._disk is not None:
+            return self._disk
         if self._path is None or not os.path.exists(self._path):
-            return {}
+            self._disk = {}
+            return self._disk
         try:
             with open(self._path) as f:
                 raw = json.load(f)
-            return {k: (v[0], v[1]) for k, v in raw.items()}
+            self._disk = {k: (v[0], v[1]) for k, v in raw.items()}
         except Exception:
-            return {}
+            self._disk = {}
+        return self._disk
 
     def clear(self) -> None:
         with self._lock:
             self._memory.clear()
+            self._disk = {}
             if self._path and os.path.exists(self._path):
                 try:
                     os.remove(self._path)
@@ -212,10 +248,26 @@ def _cached_persistent(ttl: int = 300, stale_while_revalidate: bool = True):
                 pass  # Keep serving stale on next request; never crash the caller.
 
         def wrapper(self, *args, **kwargs):
+            # force_refresh=True: bypass the cache and hit AniList now (used
+            # by the scheduler, which otherwise acted on the previous cycle's
+            # data). If AniList cannot be reached the stale copy is returned
+            # and ``wrapper.last_served`` says so, keeping the cached-schedule
+            # fallback working during an outage.
+            force_refresh = kwargs.pop("force_refresh", False)
             key_parts = [func.__name__]
             key_parts.extend(str(a) for a in args)
             key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
             key = "|".join(key_parts)
+
+            if force_refresh:
+                result = func(self, *args, **kwargs)
+                if result is not None:
+                    cache.set(key, result)
+                    wrapper.last_served = {"stale": False, "age": 0.0}
+                    return result
+                stale = cache.get_stale(key)
+                wrapper.last_served = {"stale": stale is not None, "age": cache.age(key)}
+                return stale
 
             fresh = cache.get(key)
             if fresh is not None:
@@ -244,6 +296,7 @@ def _cached_persistent(ttl: int = 300, stale_while_revalidate: bool = True):
             return result
 
         wrapper._cache = cache  # exposed for testing / clear_all_caches
+        wrapper.last_served = None
         return wrapper
 
     return decorator
@@ -320,9 +373,13 @@ class AnilistClient:
             data = resp["data"]
             if data and "MediaListCollection" in data and data["MediaListCollection"]:
                 lists = data["MediaListCollection"].get("lists", [])
-                if lists:
-                    return lists[0].get("entries", [])
-                return []
+                # An entry can sit in several lists (custom lists mirror the
+                # CURRENT status list); merge them de-duplicated by media id.
+                merged: Dict[Any, Dict[str, Any]] = {}
+                for lst in lists:
+                    for entry in lst.get("entries") or []:
+                        merged.setdefault(entry.get("mediaId"), entry)
+                return list(merged.values())
 
         if "errors" in resp:
             print(f"[ERROR] AniList GraphQL query returned errors: {resp['errors']}")
@@ -400,31 +457,6 @@ class AnilistClient:
 
         return None
 
-    def get_airing_schedule(self, page: int, media_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve the airing schedule for a specific anime by its ID."""
-        query = """
-        query($id: Int, $page: Int) {
-          Media(id: $id) {
-            title {
-              romaji
-              english
-            }
-            airingSchedule(page: $page, perPage: 25) {
-              nodes {
-                airingAt
-                episode
-              }
-            }
-          }
-        }
-        """
-        resp = self._query(query, {"id": media_id, "page": page})
-        if resp and "data" in resp and resp["data"]:
-            media = resp["data"].get("Media")
-            if media:
-                return media.get("airingSchedule")
-        return None
-
     def get_previous_relations(self, media_id: int) -> Optional[List[Dict[str, Any]]]:
         """Retrieve previous relations (e.g. prequels) for an anime."""
         query = """
@@ -449,74 +481,11 @@ class AnilistClient:
         resp = self._query(query, {"id": media_id})
         if resp and "data" in resp and resp["data"]:
             media = resp["data"].get("Media")
-            if media and "relations" in media and media["relations"]:
-                return media["relations"].get("edges", [])
+            if media:
+                # [] means "answered, no relations"; None is reserved for a
+                # failed request so callers can tell the two apart.
+                return (media.get("relations") or {}).get("edges") or []
         return None
-
-    def get_discover_anime(self, type_str: str = "trending", page: int = 1, per_page: int = 20) -> Dict[str, Any]:
-        """Fetch paginated anime discovery feed (trending, popular, or top)."""
-        sort_map = {
-            "trending": ["TRENDING_DESC", "POPULARITY_DESC"],
-            "popular": ["POPULARITY_DESC"],
-            "top": ["SCORE_DESC"],
-        }
-        sort = sort_map.get(type_str.lower(), ["TRENDING_DESC", "POPULARITY_DESC"])
-
-        query = """
-        query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
-          Page(page: $page, perPage: $perPage) {
-            pageInfo {
-              total
-              perPage
-              currentPage
-              lastPage
-              hasNextPage
-            }
-            media(type: ANIME, sort: $sort) {
-              id
-              title {
-                romaji
-                english
-                native
-              }
-              coverImage {
-                extraLarge
-                large
-                medium
-                color
-              }
-              bannerImage
-              format
-              status
-              episodes
-              duration
-              season
-              seasonYear
-              averageScore
-              meanScore
-              popularity
-              genres
-              nextAiringEpisode {
-                id
-                episode
-                timeUntilAiring
-                airingAt
-              }
-              mediaListEntry {
-                id
-                status
-                progress
-                score
-              }
-            }
-          }
-        }
-        """
-        resp = self._query(query, {"page": page, "perPage": per_page, "sort": sort})
-        if resp and "data" in resp and resp["data"] and "Page" in resp["data"]:
-            return resp["data"]["Page"]
-        return {"pageInfo": {"total": 0, "perPage": per_page, "currentPage": page, "lastPage": 1, "hasNextPage": False}, "media": []}
-
     def search_anime(self, query_text: str, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
         """Search anime on AniList with pagination."""
         query = """

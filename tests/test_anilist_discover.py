@@ -106,7 +106,7 @@ class TestAniListDiscoverRoutes(unittest.TestCase):
         conn.close()
         return response.status, data
 
-    @patch("animu.web.db.get", return_value=None)
+    @patch("animu.web.db.get_local", return_value=None)
     @patch("animu.web.anilist.get_discover_anime")
     def test_discover_route_enriches_media(self, discover, _db_get):
         discover.return_value = {

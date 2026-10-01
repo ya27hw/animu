@@ -11,6 +11,9 @@ setup_logging()
 
 from animu.scheduler import scheduler
 from animu import readiness
+from animu.anilist_auth import enable_rate_limiter
+
+enable_rate_limiter()
 
 
 def initialize_runtime():

@@ -51,7 +51,7 @@ class TestAniListRoutes(unittest.TestCase):
     # Read-side routes (GET)
     # ------------------------------------------------------------------
 
-    @patch("animu.web.db.get", return_value=None)
+    @patch("animu.web.db.get_local", return_value=None)
     @patch("animu.web.anilist.get_discover_anime")
     def test_discover_route(self, discover, _db_get):
         discover.return_value = {
@@ -64,7 +64,7 @@ class TestAniListRoutes(unittest.TestCase):
         self.assertEqual(data["media"][0]["id"], 7)
         discover.assert_called_once_with("top", 1, 20)
 
-    @patch("animu.web.db.get", return_value=None)
+    @patch("animu.web.db.get_local", return_value=None)
     @patch("animu.web.anilist.search_anime")
     def test_search_route(self, search, _db_get):
         search.return_value = {
@@ -81,7 +81,7 @@ class TestAniListRoutes(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("q", data["error"].lower())
 
-    @patch("animu.web.db.get", return_value=None)
+    @patch("animu.web.db.get_local", return_value=None)
     @patch("animu.web.anilist.get_media_trend")
     def test_media_trend_route(self, trend, _db_get):
         trend.return_value = {"pageInfo": {"hasNextPage": False}, "mediaTrend": [{"mediaId": 1}]}

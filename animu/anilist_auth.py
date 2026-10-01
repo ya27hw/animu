@@ -24,11 +24,13 @@ References:
 import base64
 import httpx
 import json
+import threading
 import time
 import urllib.parse
 from typing import Any, Dict, Optional, Tuple
 
 from .config import get_config, save_config, reload_config
+from .http import client_scope
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -331,6 +333,58 @@ auth = AniListAuth()
 # ---------------------------------------------------------------------------
 
 
+class _RateLimiter:
+    """Client-side token bucket in front of AniList (90 req/min hard limit).
+
+    Paces bursts (a cycle used to fire dozens of queries back to back) and
+    lets one 429 ``Retry-After`` pause every thread instead of each thread
+    discovering the limit separately.
+    """
+
+    def __init__(self, burst: int = 30, per_second: float = 1.2):
+        # Off until the application enables it (main.py), so unit tests that
+        # drive execute_graphql in a tight loop are not throttled.
+        self.enabled = False
+        self.burst = float(burst)
+        self.per_second = per_second
+        self._tokens = float(burst)
+        self._stamp = time.monotonic()
+        self._blocked_until = 0.0
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            now = time.monotonic()
+            self._tokens = min(self.burst, self._tokens + (now - self._stamp) * self.per_second)
+            self._stamp = now
+            wait = max(0.0, self._blocked_until - now)
+            # Reserve this caller's slot even when the bucket is empty: tokens
+            # go negative, so concurrent waiters queue up one after another
+            # instead of all waking together.
+            self._tokens -= 1.0
+            if self._tokens < 0.0:
+                wait = max(wait, -self._tokens / self.per_second)
+        if wait > 0:
+            # Event.wait, not time.sleep: this is pacing, not a retry delay.
+            threading.Event().wait(min(wait, 60.0))
+
+    def block_for(self, seconds: float) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            self._blocked_until = max(self._blocked_until, time.monotonic() + seconds)
+
+
+_limiter = _RateLimiter()
+
+
+def enable_rate_limiter(enabled: bool = True) -> None:
+    """Turn the client-side AniList rate limiter on (application start-up)."""
+    _limiter.enabled = enabled
+
+
 def execute_graphql(
     query: str,
     variables: Optional[Dict[str, Any]] = None,
@@ -396,11 +450,8 @@ def execute_graphql(
 
     for attempt in range(max_retries + 1):
         try:
-            client_kwargs = {"verify": False, "timeout": 15}
-            if proxy_url:
-                client_kwargs["proxy"] = proxy_url
-
-            with httpx.Client(**client_kwargs) as client:
+            _limiter.acquire()
+            with client_scope(proxy_url, 15.0) as client:
                 resp = client.post(
                     ANILIST_API,
                     json={"query": query, "variables": variables},
@@ -413,8 +464,10 @@ def execute_graphql(
             if status == 429:
                 retry_after = _parse_retry_after(resp)
                 if retry_after > 0 and attempt < max_429_retries:
-                    # Sleep for the server-requested window (bounded)
+                    # Sleep for the server-requested window (bounded); the
+                    # limiter makes every other thread wait it out as well.
                     sleep_time = min(retry_after, 60)
+                    _limiter.block_for(sleep_time)
                     time.sleep(sleep_time)
                     continue
                 # Exhausted 429 retries — return the error payload
@@ -461,8 +514,11 @@ def execute_graphql(
                     ]
                 }
 
-            # -- 5xx / 502 / 404 retry with backoff (reads) ------------------
-            is_retryable = status == 502 or status == 404 or status >= 500
+            # -- 5xx / 502 retry with backoff (reads) -------------------------
+            # 404 is deliberately not retried: AniList answers "not found"
+            # with 404 + a GraphQL error body, which retrying only delays
+            # (2+4+8 s of blocked sleep) without changing.
+            is_retryable = status == 502 or status >= 500
             if is_retryable and attempt < max_retries:
                 delay = retry_delays[attempt]
                 time.sleep(delay)

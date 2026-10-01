@@ -37,21 +37,164 @@ class TestWebAPI(unittest.TestCase):
         self.assertEqual(match[0]["anime_title"], "Debug Anime")
         self.assertTrue(match[0]["unresolved"])
 
-    def test_static_webui_files_served(self):
-        """Verify webui index.html and app.js are served cleanly."""
+    def _get(self, path, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port)
-        conn.request("GET", "/")
+        conn.request("GET", path, headers=headers or {})
         res = conn.getresponse()
-        self.assertEqual(res.status, 200)
-        body = res.read().decode("utf-8")
-        self.assertIn("Animu Control Panel", body)
-        self.assertIn("mobile-nav-tab", body)
+        return res, res.read()
 
-        conn.request("GET", "/app.js")
-        res_js = conn.getresponse()
+    def test_static_webui_files_served(self):
+        """The SPA shell is served with its hashed entry assets."""
+        import re
+        res, raw = self._get("/")
+        self.assertEqual(res.status, 200)
+        body = raw.decode("utf-8")
+        self.assertIn("Animu Control Panel", body)
+        self.assertIn('<div id="app">', body)
+
+        # The shell references content-hashed assets (no ?v= cache busting needed).
+        script = re.search(r'src="(/assets/[^"]+\.js)"', body)
+        self.assertIsNotNone(script, "index.html must reference a hashed /assets/*.js entry")
+        res_js, js_raw = self._get(script.group(1))
         self.assertEqual(res_js.status, 200)
-        js_body = res_js.read().decode("utf-8")
-        self.assertIn("switchTab", js_body)
+        self.assertTrue(res_js.getheader("Content-Type").startswith("application/javascript"))
+        self.assertGreater(len(js_raw), 1000)
+
+    def test_hashed_assets_are_immutable_and_shell_revalidates(self):
+        import re
+        res, raw = self._get("/")
+        self.assertEqual(res.getheader("Cache-Control"), "no-cache")
+        asset = re.search(r'(/assets/[^"]+\.css)', raw.decode()) or re.search(r'(/assets/[^"]+\.js)', raw.decode())
+        res2, _ = self._get(asset.group(1))
+        self.assertIn("immutable", res2.getheader("Cache-Control"))
+        self.assertIn("max-age=31536000", res2.getheader("Cache-Control"))
+
+    def test_static_etag_returns_304(self):
+        res, _ = self._get("/")
+        etag = res.getheader("ETag")
+        self.assertTrue(etag)
+        res2, body2 = self._get("/", headers={"If-None-Match": etag})
+        self.assertEqual(res2.status, 304)
+        self.assertEqual(body2, b"")
+
+    def test_static_is_gzipped_when_accepted(self):
+        import gzip
+        import re
+        _, raw = self._get("/")
+        script = re.search(r'(/assets/index-[^"]+\.js)', raw.decode())
+        res, body = self._get(script.group(1), headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(res.getheader("Content-Encoding"), "gzip")
+        self.assertEqual(int(res.getheader("Content-Length")), len(body))
+        self.assertGreater(len(gzip.decompress(body)), len(body))
+        res_plain, body_plain = self._get(script.group(1))
+        self.assertIsNone(res_plain.getheader("Content-Encoding"))
+        self.assertEqual(body_plain, gzip.decompress(body))
+
+    def test_spa_routes_fall_back_to_the_shell(self):
+        for path in ("/library", "/library/12345", "/discover/7", "/queue", "/history", "/activity", "/settings"):
+            res, raw = self._get(path)
+            self.assertEqual(res.status, 200, path)
+            self.assertIn("Animu Control Panel", raw.decode("utf-8"), path)
+
+    def test_unknown_files_and_api_paths_are_404_not_the_shell(self):
+        res, _ = self._get("/missing.js")
+        self.assertEqual(res.status, 404)
+        self.assertIsNotNone(res.getheader("Content-Length"))
+        res2, _ = self._get("/api/does-not-exist")
+        self.assertEqual(res2.status, 404)
+
+    def test_static_path_traversal_is_blocked(self):
+        for path in ("/../animu/web.py", "/%2e%2e/animu/web.py", "/assets/../../animu/web.py", "/..%2fCLAUDE.md"):
+            res, raw = self._get(path)
+            self.assertIn(res.status, (403, 404), path)
+            self.assertNotIn(b"class AnimuHTTPHandler", raw, path)
+
+    def test_static_mime_types(self):
+        from animu.web import STATIC_MIME_TYPES
+        self.assertEqual(STATIC_MIME_TYPES[".woff2"], "font/woff2")
+        self.assertEqual(STATIC_MIME_TYPES[".svg"], "image/svg+xml")
+        self.assertEqual(STATIC_MIME_TYPES[".webp"], "image/webp")
+        res, _ = self._get("/favicon.svg")
+        self.assertEqual(res.status, 200)
+        self.assertEqual(res.getheader("Content-Type"), "image/svg+xml")
+
+    def test_json_is_gzipped_for_large_payloads_when_accepted(self):
+        import gzip
+        from animu.history import history_manager
+        for i in range(40):
+            history_manager.add_entry(title=f"Gzip Probe {i} " + "x" * 40, link="http://example.com/x", anime_title="Gzip Probe")
+        try:
+            res, body = self._get("/api/history?limit=40", headers={"Accept-Encoding": "gzip"})
+            self.assertEqual(res.getheader("Content-Encoding"), "gzip")
+            data = json.loads(gzip.decompress(body))
+            self.assertEqual(len(data["history"]), 40)
+        finally:
+            for item in [h for h in history_manager.get_all() if h.get("anime_title") == "Gzip Probe"]:
+                history_manager.delete_entry(item["id"])
+
+    def test_history_supports_limit_and_offset(self):
+        from animu.history import history_manager
+        ids = [history_manager.add_entry(title=f"Paging Probe {i}", link="l", anime_title="Paging Probe")["id"] for i in range(5)]
+        try:
+            res, raw = self._get("/api/history?limit=2&offset=1")
+            data = json.loads(raw)
+            self.assertEqual(len(data["history"]), 2)
+            self.assertGreaterEqual(data["count"], 5)
+            all_ids = [h["id"] for h in json.loads(self._get("/api/history")[1])["history"]]
+            self.assertEqual([h["id"] for h in data["history"]], all_ids[1:3])
+        finally:
+            for i in ids:
+                history_manager.delete_entry(i)
+
+    def test_status_endpoint_is_cheap_and_shaped_for_the_dashboard(self):
+        res, raw = self._get("/api/status")
+        self.assertEqual(res.status, 200)
+        data = json.loads(raw)
+        for key in ("scheduler", "services", "intervalMinutes"):
+            self.assertIn(key, data)
+        for key in ("pocketbase", "qbittorrent", "anilist"):
+            self.assertIn(key, data["services"])
+        for key in ("next_run_at", "cycle", "degraded", "cycle_running"):
+            self.assertIn(key, data["scheduler"])
+        # The token must never be exposed here.
+        self.assertNotIn("token", raw.decode().lower().replace("tokenexpiry", ""))
+
+    def test_events_endpoint_returns_newest_first(self):
+        from animu import readiness
+        readiness.record_event("info", "probe-one")
+        readiness.record_event("warning", "probe-two")
+        res, raw = self._get("/api/events?limit=5")
+        self.assertEqual(res.status, 200)
+        events = json.loads(raw)["events"]
+        messages = [e["message"] for e in events]
+        self.assertLess(messages.index("probe-two"), messages.index("probe-one"))
+
+    def test_scheduler_run_is_refused_while_a_cycle_is_running(self):
+        from animu.scheduler import scheduler
+        self.assertTrue(scheduler._cycle_lock.acquire(blocking=False))
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("POST", "/api/scheduler/run", body="{}", headers={"Content-Type": "application/json"})
+            res = conn.getresponse()
+            res.read()
+            self.assertEqual(res.status, 409)
+        finally:
+            scheduler._cycle_lock.release()
+
+    def test_anime_list_is_served_from_local_mirror_without_descriptions(self):
+        from unittest.mock import patch
+        entry = {"mediaId": 424242, "progress": 1, "media": {
+            "title": {"romaji": "Mirror Show"}, "description": "<b>long synopsis</b>", "episodes": 12, "status": "RELEASING",
+            "nextAiringEpisode": {"episode": 3, "timeUntilAiring": 3600}}}
+        with patch("animu.web.anilist.get_anime_user_list", return_value=[entry]), \
+             patch("animu.web.db.get_all", side_effect=AssertionError("must not hit PocketBase")):
+            res, raw = self._get("/api/anime")
+        self.assertEqual(res.status, 200)
+        item = json.loads(raw)["anime"][0]
+        self.assertNotIn("description", item["media"])
+        for key in ("airedEpisodes", "nextAirAt", "state", "stateDetail", "nextAttemptAt", "timeouts", "maxTimeouts"):
+            self.assertIn(key, item)
+        self.assertEqual(item["airedEpisodes"], 2)
 
     def test_ignored_api_endpoints(self):
         """Verify GET, POST, DELETE for /api/ignored."""

@@ -57,7 +57,7 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
 │
 ├── animu/nyaa.py (501 lines)
 │   NyaaClient — RSS fetcher + torrent ranking
-│   • fetch_rss_feed() — httpx + feedparser, 2 retries on 504/connection errors
+│   • fetch_rss_feed() — pooled httpx + xml.etree (no feedparser), 2 retries; raises SearchUnavailable (not "no results") when Nyaa/AniList fail
 │   • get_torrents() — searches episode-by-episode or batch
 │   • search_episode_candidates() / search_title_candidates() / search_raw_title_candidates() — ranked for web UI + history re-download
 │   • get_episode_air_dates() — paginates AniList airing schedule
@@ -82,7 +82,7 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
 │   • check() → fetch watching list → skip ignored (ignored_manager) → handle_anime() per anime
 │   • handle_anime() — episode range calc, alt-title fallback, synonym search
 │   • download_torrents() → qbit.add_check_torrent + DB.upsert + Discord webhook
-│   • set_timeout / reset_timeout — exponential backoff (cap at 10)
+│   • set_timeout / reset_timeout — time-based exponential backoff via next_attempt_at (failure count capped at 10, wait capped at 8 h)
 │   • sync_anime_rewatching_status — marks FINISHED anime as REPEATING
 │   • Per-cycle log: [SYNC_STATE] <title> (ID <n>) downloaded_episodes=<k>, timeouts=<t>
 │   Singleton: `scheduler = Scheduler()` at module bottom
@@ -121,16 +121,20 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
 │   • POST /api/anime/<id>/reset — clears downloaded_episodes (reused by history rerun)
 │   • POST /api/anime/<id>/nyaa-search|nyaa-download|rewatching — manual controls
 │   • GET /api/downloads, /api/logs, /api/config, /api/search-debug, /api/health, /api/test/*
-│   • Static: serves webui/ from disk; ★ CACHE-BUSTING: index.html's app.js URL gets
-│     `?v=<git-SHA>` injected at serve time (ASSET_VERSION) — NPM's assets.conf caches
-│     .js/.css with a long max-age and strips backend Cache-Control, so without versioning
-│     browsers keep stale JS after deploys (see Known Pitfalls #7)
+│   • Static: serves webui/ (the committed Vite build); ★ CACHE-BUSTING: build output is
+│     content-hashed (`/assets/<name>-<hash>.js|css`), served `immutable`; index.html is
+│     `no-cache` + ETag/304. NPM's assets.conf caches .js/.css and strips Cache-Control,
+│     which is safe now because a new build means new filenames (see Known Pitfalls #7).
+│     Text assets are gzipped (cached by mtime); unknown extensionless paths fall back to
+│     index.html (client-side routes: /library/123, /settings, …)
+│   • NEW: GET /api/status (dashboard snapshot, no network), GET /api/events (scheduler
+│     event ring buffer), POST /api/scheduler/run (manual cycle; 409 if one is running)
 │
 ├── animu/utils.py (411 lines)
 │   fix_anime_season() — S2/Season II/7th Season detection
 │   count_past_relations() — prequel chain walker
 │   verify_query() — 4-factor torrent scoring (title, episode, resolution, air date)
-│   find_best_match() — rapidfuzz string similarity
+│   find_best_match() — cached Sørensen–Dice bigram similarity (rapidfuzz is not used)
 │
 ├── animu/logger.py (94 lines)
 │   Python logging with RotatingFileHandler (5MB, 3 backups)
@@ -138,28 +142,26 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
 ├── animu/readiness.py (137 lines)
 │   Health/readiness state for /api/health (heartbeat ages, scheduler cycle tracking)
 │
-└── webui/ (2,840 lines)
-    index.html (711 lines) — Tailwind v4 browser-engine SPA, tabs: Watching / Discover / History / Logs / Settings
-    app.js (2,129 lines) — Vanilla JS: anime grid, Discover feed+search+detail, history with
-    delete/re-run/ignore-redownload actions, ignored management, settings, dark theme toggle
-    (class-based: @custom-variant dark in the tailwindcss style block), inline SVG favicon
+├── animu/storage.py — atomic_write_json (temp + os.replace), per-path locks; used by every local state file
+├── animu/http.py — pooled httpx clients keyed by proxy (client_scope); verify=False
+│
+├── webui-src/ — the UI source: Vite + Svelte 5 (TypeScript), hand-written CSS tokens, one
+│   self-hosted variable font, inline SVG icons, no CDN. `npm run build` writes ../webui.
+│   `npm run dev:mock` serves dev/fixtures.json (built by dev/make_fixtures.py) so the UI
+│   can be developed without PocketBase/qBittorrent/AniList login.
+└── webui/ — GENERATED build output, committed so production (a git checkout, no Node) serves it.
+    Do not hand-edit; change webui-src/ and rebuild.
 ```
 
 ---
 
-## Frontend Architecture Decision — T3 Module Layer (2026-08-08)
+## Frontend Architecture Decision — Svelte rewrite (2026-10)
 
-**Decision: Option B — clean up the dead layer** (kanban task `t_42504c23`). **`app.js` is the single source of truth** for the WebUI; `index.html` loads ONLY `/app.js`. `window.Animu` is deliberately **absent** on the live page.
+The old Tailwind-in-browser SPA (`webui/app.js` + `index.html`, plus the earlier dead `webui/js/` module layer) was replaced by a from-scratch Vite + Svelte 5 app in `webui-src/`. Build output is committed to `webui/` (content-hashed assets) so deploys need no Node.
 
-**Context:** a modular T3 frontend layer (`webui/js/`: core.js, api.js, list.js, downloads.js, settings-behavior.js, features/{home,engagement,lists-social,media-detail,search}.js) was merged in `fd387a7` but **never wired into index.html** — no `<script>` tags were added, so it was 100% dead code. The `window.Animu && ...` delegation guards in app.js always fell through to the legacy inline implementations.
-
-**Why not Option A (wire the modules):** wiring them in would have **regressed** tested, backend-routed features:
-- `lists-social.js` mutations are **sandbox-only** (local state via `Animu.list.updateListEntry`; no backend call) — would have undone "route quick +1 progress through backend" and the Lists end-to-end work (server-side AniList token; the browser never holds `bearerTokenAnilist`).
-- It would **double-bind** `btn-editor-save` / `btn-post-activity` / `btn-editor-delete` / list controls that app.js also binds → duplicate POSTs + duplicate fetches.
-- `settings-behavior.js` targets DOM ids that don't exist in index.html (`btn-theme-light/dark/system`, `title-language-select`; real ids: `theme-toggle`, `pref-title-lang`) — written against a different DOM contract.
-- `home.js` / `engagement.js` / `media-detail.js` / `search.js` are no-op stubs.
-
-**Implementation (commits `60ae2e0`, `04e28a9`):** removed all `window.Animu` delegation hooks from app.js; archived the 10 module files to `webui/js/features-unused/`, since deleted (recoverable from git history before the cleanup commit). **Rule: do not re-add `<script src="/js/...">` tags or `window.Animu` guards to app.js without revisiting this decision.**
+- **Backend only:** the browser never calls AniList directly and never holds the bearer token. Discover rails use the cached `/api/anilist/*` routes. (The old client-side `anilistQueue` and its puppeteer test are gone.)
+- **Scope:** downloader-first — Today, Library (+ other AniList lists), Discover, Queue, History, Activity (events/logs/search diagnostics), Settings (incl. PIN-flow AniList sign-in and the ignore list). Social feed, Stats and entity search were dropped.
+- **Rules:** keep one entry per build (hashed filenames are the cache-bust); routes are History-API paths and `web.py` falls back to `index.html` for extensionless paths; `/api/health` must stay 200/503 for the updater. Tests: `tests/test_web_api.py` (static serving) and `tests/test_mobile_navigation.py` (Playwright; skips if no Chrome/Chromium).
 
 ---
 
@@ -184,8 +186,10 @@ main.py (99 lines) — CLI entrypoint, argparsing, dispatcher
    f. Database.upsert(mediaId, OfflineAnime(downloaded_episodes=...))
    g. Discord.send_anime_downloaded_hook() → webhook embed
 
-3. Backoff: set_timeout() increments timeouts counter, skip N future cycles
-   • Cap at 10, resets on successful download
+3. Backoff: set_timeout() bumps the failure count and sets `next_attempt_at` (doubling, 8 h cap, jitter)
+   • Only a genuine "not found" backs off; Nyaa/AniList/qBittorrent outages (SearchUnavailable / ServiceDown) do not
+   • A freshly aired episode (< 6 h) is retried every ~10 min without escalating
+   • Resets when nothing in the window is missing (download complete, batch reconciled, or user caught up)
 ```
 
 ---
@@ -266,8 +270,8 @@ ssh root@10.0.0.2 "pct exec 102 -- bash -c 'cd /root/animu && \
 
 # 3. Verify
 ssh root@10.0.0.2 "pct exec 102 -- curl -s http://127.0.0.1:3210/api/health"
-# Check the served index.html carries the NEW app.js?v=<new-sha>:
-ssh root@10.0.0.2 "pct exec 102 -- curl -s http://127.0.0.1:3210/ | grep -o 'app.js?v=[a-f0-9]*'"
+# Check the served index.html references the NEW hashed entry (/assets/index-<hash>.js):
+ssh root@10.0.0.2 "pct exec 102 -- curl -s http://127.0.0.1:3210/ | grep -o '/assets/index-[A-Za-z0-9_-]*\\.js'"
 ```
 
 **⚠️ NEVER `systemctl restart animu.service` from the Proxmox host** — a duplicate `animu.service` exists on the host itself (203/EXEC loop, disabled 2026-08-07) and a host-side restart spawns a second scheduler against the same `offline_db.json` + qBittorrent → re-download bug. Always `pct exec 102 -- systemctl restart animu.service`.
@@ -291,9 +295,9 @@ ssh root@10.0.0.2 "pct exec 102 -- curl -s http://127.0.0.1:3210/ | grep -o 'app
 
 5. **profile.json camelCase:** Python uses `snake_case` internally (e.g., `qbit_url`, `ani_user_name`) but profile.json uses `camelCase`. `MAP_JSON_TO_ATTR` in `config.py` handles the translation.
 
-6. **`verify=False` is load-bearing:** Every `httpx.Client()` in anilist.py, nyaa.py, qbittorrent.py, and database.py must use `verify=False`. Without it, self-signed certs (qb.atoona.com, pb.atoona.com via NPM) will fail.
+6. **`verify=False` is load-bearing:** Every httpx client (now pooled in `animu/http.py`, plus the long-lived ones in qbittorrent.py and database.py) must use `verify=False`. Without it, self-signed certs (qb.atoona.com, pb.atoona.com via NPM) will fail.
 
-7. **★ NPM asset cache causes stale frontend after deploys (2026-08-07):** NPM's global `/etc/nginx/conf.d/include/assets.conf` caches `.js/.css` (proxy_cache, `expires` long max-age ≈ 18h) and **strips the backend's Cache-Control** (`proxy_ignore_headers` + `proxy_hide_header`). Result: after deploying new app.js, browsers keep the old JS for ~18h → symptoms like "Discover tab exists but does nothing". **Fix already in place:** web.py injects `app.js?v=<git-SHA>` into index.html (ASSET_VERSION) — every deploy changes the URL so both NPM proxy cache and browser cache refresh. If you ever remove that, reintroduce stale-cache bugs. For users still stuck after a deploy: hard refresh (Ctrl+Shift+R).
+7. **★ NPM asset cache causes stale frontend after deploys (2026-08-07):** NPM's global `/etc/nginx/conf.d/include/assets.conf` caches `.js/.css` (≈18h) and strips the backend's Cache-Control. Since the 2026-10 rewrite this is handled by **content-hashed filenames** (Vite) — a new build changes every asset URL, so stale caches are harmless. Keep `index.html` un-cached (it is `no-cache` + ETag) and never serve un-hashed JS/CSS from `webui/`. (The legacy `?v=<git-SHA>` rewrite for `src="/app.js"` still exists in web.py but is a no-op.)
 
 8. **Tests gotcha:** `.gitignore` line 138 (`test*`) ignores test files — `tests/test_nyaa_episode_offsets.py` is an untracked leftover that FAILS 2 assertions against current code. It is not part of the repo; pytest shows "2 failed" because of it. Don't chase those failures; the tracked suite passes.
 

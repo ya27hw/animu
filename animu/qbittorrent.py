@@ -3,8 +3,11 @@ import time
 import re
 import posixpath
 import hashlib
+import threading
+from contextlib import contextmanager
 from typing import Optional, Any
 from .config import get_config
+from .http import client_scope
 
 def _format_body_snippet(resp: Any) -> str:
     text = getattr(resp, "text", "")
@@ -161,12 +164,74 @@ class QbitClient:
         self.sid: Optional[str] = None
         self.expires: float = 0.0
         self.last_auth_status: int = 0
+        # Diagnostic text only (shared on purpose: the diagnostics endpoint
+        # reads it from a different thread than the one that failed).
         self.last_add_error: str = ""
-        self.last_add_was_duplicate: bool = False
+        # The outcome of the last add is per thread: the scheduler and the web
+        # handlers both call add_check_torrent on this singleton, and a shared
+        # attribute let one thread read the other's "duplicate" flag.
+        self._tls = threading.local()
+        self._auth_lock = threading.RLock()
+        # Optional per-cycle read cache, active only inside ``snapshot()``.
+        self._snapshot_depth = 0
+        self._torrent_snapshot: dict = {}
+        self._files_snapshot: dict = {}
         # verify=False is critical to bypass self-signed SSL errors (a major Node.js issue)
-        self.client = httpx.Client(verify=False, timeout=15)
+        self.client = httpx.Client(verify=False, timeout=httpx.Timeout(15.0, connect=5.0))
+
+    @property
+    def last_add_was_duplicate(self) -> bool:
+        return getattr(self._tls, "last_add_was_duplicate", False)
+
+    @last_add_was_duplicate.setter
+    def last_add_was_duplicate(self, value: bool) -> None:
+        self._tls.last_add_was_duplicate = value
+
+    @property
+    def last_add_existing(self) -> Optional[dict]:
+        """The pre-existing torrent that made the last add fail (state/progress), if any."""
+        return getattr(self._tls, "last_add_existing", None)
+
+    @last_add_existing.setter
+    def last_add_existing(self, value: Optional[dict]) -> None:
+        self._tls.last_add_existing = value
+
+    @property
+    def last_add_hash(self) -> Optional[str]:
+        return getattr(self._tls, "last_add_hash", None)
+
+    @last_add_hash.setter
+    def last_add_hash(self, value: Optional[str]) -> None:
+        self._tls.last_add_hash = value
+
+    @contextmanager
+    def snapshot(self):
+        """Reuse one torrent list (and file lists) for the scope of a cycle.
+
+        ``check_episodes_in_batch`` and ``check_torrent_episode`` ran once per
+        anime and each downloaded the whole torrent list (plus one file list
+        per matching torrent). Inside this scope they share a single fetch;
+        any add/delete invalidates it. Outside the scope nothing is cached,
+        so verification retries always see fresh state.
+        """
+        self._snapshot_depth += 1
+        try:
+            yield self
+        finally:
+            self._snapshot_depth -= 1
+            if self._snapshot_depth <= 0:
+                self._snapshot_depth = 0
+                self.invalidate_snapshot()
+
+    def invalidate_snapshot(self) -> None:
+        self._torrent_snapshot = {}
+        self._files_snapshot = {}
 
     def _authenticate(self) -> bool:
+        with self._auth_lock:
+            return self._authenticate_locked()
+
+    def _authenticate_locked(self) -> bool:
         """Log in to qBittorrent and retrieve the session ID (SID)."""
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
@@ -272,7 +337,10 @@ class QbitClient:
     def _ensure_auth(self) -> bool:
         """Ensure the client has a valid, unexpired session ID."""
         if not self.sid or time.time() >= self.expires:
-            return self._authenticate()
+            with self._auth_lock:
+                # Re-check: another thread may have logged in while we waited.
+                if not self.sid or time.time() >= self.expires:
+                    return self._authenticate()
         return True
 
     def test_connection(self, url: str, user: str, passwd: str) -> tuple[bool, str]:
@@ -336,13 +404,18 @@ class QbitClient:
             print(f"Error checking hash existence: {e}")
         return None
 
-    def get_all_torrents(self, category: str = "animu") -> list:
+    def get_all_torrents(self, category: str = "animu", use_snapshot: bool = False,
+                         max_rows: Optional[int] = None) -> list:
         """Return the full torrent list for a category by paginating POST /api/v2/torrents/info.
 
         Uses limit and offset with page size 1000. Stops when a page returns fewer rows than 1000,
         with a hard cap of 20 pages. Detects infinite loops if qBittorrent ignores offset
         (page identical to the previous one) and stops.
         """
+        snapshot_active = use_snapshot and self._snapshot_depth > 0
+        if snapshot_active and category in self._torrent_snapshot:
+            return self._torrent_snapshot[category]
+
         if not self._ensure_auth():
             return []
 
@@ -351,8 +424,12 @@ class QbitClient:
         info_url = f"{base_url}/api/v2/torrents/info"
         page_size = 1000
         max_pages = 20
+        if max_rows is not None:
+            page_size = max(1, min(page_size, max_rows))
+            max_pages = max(1, -(-max_rows // page_size))
         all_torrents = []
         prev_page = None
+        complete = True
 
         for page_idx in range(max_pages):
             offset = page_idx * page_size
@@ -374,12 +451,15 @@ class QbitClient:
                     is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
                 )
                 if resp is None or getattr(resp, "status_code", 0) != 200:
+                    complete = False
                     break
                 page = resp.json() if callable(getattr(resp, "json", None)) else []
                 if not isinstance(page, list):
+                    complete = False
                     break
             except Exception as exc:
                 print(f"Failed to fetch paginated torrents (page {page_idx}): {exc}")
+                complete = False
                 break
 
             if not page:
@@ -395,6 +475,8 @@ class QbitClient:
             if len(page) < page_size:
                 break
 
+        if snapshot_active and complete and max_rows is None:
+            self._torrent_snapshot[category] = all_torrents
         return all_torrents
 
     def add_check_torrent(
@@ -414,6 +496,10 @@ class QbitClient:
             added = self.add_torrent(link, title, episode, use_proxy_download)
             if not added:
                 print(f"Attempt {attempt}: Failed to send add command to qBittorrent for: {display_title}")
+                if self.last_add_existing is not None:
+                    # The torrent is already in qBittorrent (a recheck was
+                    # requested); retrying the add cannot change that.
+                    return False
                 time.sleep(1.5)
                 continue
 
@@ -422,14 +508,21 @@ class QbitClient:
                 return True
 
             print(f"Sent Add Request to qBittorrent: {display_title}. Verifying...")
-            
-            # Check with retries to give qBittorrent time to register/fetch metadata
+
+            # Check with retries to give qBittorrent time to register/fetch metadata.
+            # Prefer the exact info hash (one row) over scanning names, which can
+            # be satisfied by an older episode of the same show.
+            info_hash = self.last_add_hash
             for check_attempt in range(3):
                 time.sleep(2.0)
-                if self.check_torrent(display_title):
+                if info_hash:
+                    if self.check_hash_exists(info_hash) is not None:
+                        print(f"Torrent {display_title} successfully verified in qBittorrent.")
+                        return True
+                elif self.check_torrent(display_title):
                     print(f"Torrent {display_title} successfully verified in qBittorrent.")
                     return True
-                    
+
             print(f"Attempt {attempt}: Torrent {display_title} was not verified in qBittorrent torrent list.")
             if not self.last_add_error:
                 self.last_add_error = f"Torrent {display_title} was not verified in qBittorrent torrent list"
@@ -447,7 +540,7 @@ class QbitClient:
         if use_proxy and config.proxy_address and config.proxy_port:
             proxy_url = f"http://{config.proxy_address}:{config.proxy_port}"
 
-        with httpx.Client(verify=False, proxy=proxy_url, timeout=20) as client:
+        with client_scope(proxy_url, 20.0) as client:
             resp = client.get(link)
             resp.raise_for_status()
             return resp.content
@@ -455,6 +548,8 @@ class QbitClient:
     def add_torrent_file(self, auth_url: str, link: str, save_path: str, rename: str, use_proxy: bool) -> bool:
         """Download the .torrent file and upload it to qBittorrent (used when proxy is active)."""
         self.last_add_was_duplicate = False
+        self.last_add_existing = None
+        self.last_add_hash = None
         try:
             torrent_bytes = self.download_torrent_file(link, use_proxy)
             size = len(torrent_bytes)
@@ -469,6 +564,7 @@ class QbitClient:
             except Exception as exc:
                 info_hash = None
                 print(f"[QBIT] could not compute info hash from torrent payload: {exc}")
+            self.last_add_hash = info_hash
 
             torrent_filename = f"{self.safe_torrent_filename(rename)}.torrent"
 
@@ -495,6 +591,7 @@ class QbitClient:
             if resp is not None and status == 200 and text == "Ok.":
                 self.last_add_error = ""
                 self.last_add_was_duplicate = False
+                self.invalidate_snapshot()
                 return True
 
             # If the POST came back with a non-accepted response (e.g. Fails.),
@@ -516,6 +613,13 @@ class QbitClient:
                         return True
                     else:
                         self.last_add_was_duplicate = False
+                        # Tell the caller the torrent IS in qBittorrent (just empty
+                        # so far) so it is not mistaken for a failed add.
+                        self.last_add_existing = {
+                            "hash": info_hash,
+                            "state": existing.get("state") or "",
+                            "progress": progress_val,
+                        }
                         try:
                             self.recheck_torrent(info_hash)
                             self.resume_torrent(info_hash)
@@ -554,6 +658,8 @@ class QbitClient:
         appear. By fetching in Python we control the download and can use the proxy.
         """
         self.last_add_was_duplicate = False
+        self.last_add_existing = None
+        self.last_add_hash = None
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
         add_url = f"{base_url.rstrip('/')}/api/v2/torrents/add"
@@ -567,7 +673,10 @@ class QbitClient:
         # Use alt_root_dir when proxy download is requested (different storage location)
         base_root_dir = config.alt_root_dir if use_proxy_download else config.root_dir
         base_root_dir = base_root_dir or "/mock"
-        save_path = posixpath.join(base_root_dir, title)
+        # A "/" in a title used to create nested folders (and "\\" / NUL are
+        # never valid); other punctuation is kept so existing folders still match.
+        folder_name = re.sub(r"[/\\\u0000]", "_", title) or "download"
+        save_path = posixpath.join(base_root_dir, folder_name)
 
         # Always use proxy if configured globally, or if this specific download needs it
         use_proxy = config.use_proxy or use_proxy_download
@@ -592,7 +701,7 @@ class QbitClient:
                 return False
 
             ep_pattern = re.compile(r"(?:^|[^\w])(?:e(?:p)?\s*)?0*%d(?:$|[^\w])" % episode, re.IGNORECASE)
-            torrents = self.get_all_torrents()
+            torrents = self.get_all_torrents(use_snapshot=True)
             for t in torrents:
                 if t.get("progress", 0) <= 0:
                     continue
@@ -631,7 +740,7 @@ class QbitClient:
             base_url = config.qbit_url or "http://localhost:8080"
             files_url = f"{base_url.rstrip('/')}/api/v2/torrents/files"
 
-            torrents = self.get_all_torrents()
+            torrents = self.get_all_torrents(use_snapshot=True)
             for t in torrents:
                 if t.get("progress", 0) < 1:
                     continue
@@ -639,17 +748,23 @@ class QbitClient:
                 save_path = (t.get("save_path") or "").lower()
                 if not (all(tok in t_name for tok in tokens) or all(tok in save_path for tok in tokens)):
                     continue
-                fr = self._authenticated_request(
-                    "info",
-                    "POST",
-                    files_url,
-                    data={"hash": t.get("hash")},
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
-                )
-                if fr is None or getattr(fr, "status_code", 0) != 200:
-                    continue
-                files_list = (fr.json() if callable(getattr(fr, "json", None)) else []) or []
+                t_hash = t.get("hash")
+                if self._snapshot_depth > 0 and t_hash in self._files_snapshot:
+                    files_list = self._files_snapshot[t_hash]
+                else:
+                    fr = self._authenticated_request(
+                        "info",
+                        "POST",
+                        files_url,
+                        data={"hash": t_hash},
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        is_accepted=lambda r: getattr(r, "status_code", 0) == 200,
+                    )
+                    if fr is None or getattr(fr, "status_code", 0) != 200:
+                        continue
+                    files_list = (fr.json() if callable(getattr(fr, "json", None)) else []) or []
+                    if self._snapshot_depth > 0:
+                        self._files_snapshot[t_hash] = files_list
                 for f in files_list:
                     parsed = self._parse_episode_from_filename(f.get("name") or "", season)
                     if parsed is not None and parsed in target:
@@ -700,15 +815,26 @@ class QbitClient:
             if not torrents:
                 return False
             target_clean = name.lower().strip()
+            # "<title> - <episode>": the episode token must match exactly, so
+            # "Show - 4" is not satisfied by "Show - 40" or by an older episode
+            # that merely shares the save folder.
+            split = re.match(r"^(.*\S)\s+-\s+(\d+(?:\.\d+)?)$", target_clean)
+            base_clean, ep_token = (split.group(1), split.group(2)) if split else (None, None)
+            exact_re = re.compile(re.escape(target_clean) + r"(?!\d)")
+            ep_re = re.compile(r"(?<!\d)0*" + re.escape(ep_token) + r"(?!\d)") if ep_token else None
             for t in torrents:
                 t_name = (t.get("name") or "").lower().strip()
                 # Exact match, or our expected name is contained in the torrent name
                 # (e.g. rename "Mushoku Tensei S3 - 4" found inside qBittorrent name)
-                if t_name == target_clean or target_clean in t_name:
+                if t_name == target_clean or exact_re.search(t_name):
                     return True
                 # save_path fallback: the title folder should be in the save path
+                # and the torrent itself must carry the episode number.
                 save_path = (t.get("save_path") or "").lower()
-                if target_clean in save_path:
+                if base_clean is None:
+                    if target_clean in save_path:
+                        return True
+                elif base_clean in save_path and ep_re.search(t_name):
                     return True
         except Exception as e:
             print(f"Error checking torrent: {e}")
@@ -716,6 +842,7 @@ class QbitClient:
 
     def delete_torrent(self, name: str) -> bool:
         """Deletes a torrent matching the given name."""
+        self.invalidate_snapshot()
         if not self._ensure_auth():
             return False
 
@@ -768,7 +895,7 @@ class QbitClient:
         if not self._ensure_auth():
             return []
         try:
-            torrents = self.get_all_torrents()
+            torrents = self.get_all_torrents(max_rows=300)
             enriched = []
             for t in torrents:
                 item = dict(t)
@@ -855,6 +982,7 @@ class QbitClient:
     def resume_torrent(self, torrent_hash: str) -> bool:
         """Resume/retry a torrent by hash (works for stopped, paused, and
         errored torrents — qBittorrent re-checks errored ones on resume)."""
+        self.invalidate_snapshot()
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
         resume_url = f"{base_url.rstrip('/')}/api/v2/torrents/resume"
@@ -881,6 +1009,7 @@ class QbitClient:
         them; a recheck makes it re-scan the save path and recover the data
         (e.g. files moved back into place, stale temp pointer).
         """
+        self.invalidate_snapshot()
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
         recheck_url = f"{base_url.rstrip('/')}/api/v2/torrents/recheck"
@@ -934,6 +1063,7 @@ class QbitClient:
     def delete_torrent_by_hash(self, torrent_hash: str, delete_files: bool = False) -> bool:
         """Delete a torrent by hash. ``delete_files=False`` keeps the data on
         disk (safe default for a mistaken remove)."""
+        self.invalidate_snapshot()
         config = get_config()
         base_url = config.qbit_url or "http://localhost:8080"
         delete_url = f"{base_url.rstrip('/')}/api/v2/torrents/delete"

@@ -5,12 +5,15 @@ Provides local extrapolation of episode air times based on the last recorded
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
 import threading
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+from .storage import atomic_write_json
 
 EPISODE_INTERVAL_DAYS: int = 7
 RETENTION_DAYS: int = 60
@@ -23,6 +26,10 @@ STORE_PATH = DEFAULT_STORE_PATH
 
 _lock = threading.Lock()
 _corrupt_logged_paths: set[str] = set()
+# (path, mtime_ns, size) -> parsed store. The scheduler asks for the store
+# several times per anime per cycle; re-parsing the JSON each time was pure
+# overhead. Treat the returned dict as read-only (writers deep-copy first).
+_store_cache: Optional[Tuple[Tuple[str, int, int], Dict[str, Any]]] = None
 
 
 def _now_utc() -> datetime:
@@ -45,15 +52,35 @@ def _parse_iso_utc(val: Union[str, datetime]) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _store_signature(path: str) -> Optional[Tuple[str, int, int]]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (path, st.st_mtime_ns, st.st_size)
+
+
 def _load_store() -> Dict[str, Any]:
-    """Load air schedule disk store. Tolerate missing or corrupt JSON."""
+    """Load air schedule disk store. Tolerate missing or corrupt JSON.
+
+    The parsed store is cached and revalidated against the file's
+    mtime/size, so repeated reads cost one ``stat`` instead of a JSON parse.
+    The returned dict must not be mutated; copy it first when writing.
+    """
+    global _store_cache
     path = STORE_PATH
-    if not os.path.exists(path):
+    signature = _store_signature(path)
+    if signature is None:
+        _store_cache = None
         return {}
+    cached = _store_cache
+    if cached is not None and cached[0] == signature:
+        return cached[1]
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            _store_cache = (signature, data)
             return data
         raise ValueError(f"Root element in {path} is not a dictionary")
     except Exception as e:
@@ -65,25 +92,15 @@ def _load_store() -> Dict[str, Any]:
 
 def _save_store(store: Dict[str, Any]) -> None:
     """Persist air schedule store atomically using a temporary file."""
+    global _store_cache
     path = STORE_PATH
-    cache_dir = os.path.dirname(os.path.abspath(path))
     try:
-        os.makedirs(cache_dir, exist_ok=True)
-    except OSError:
-        pass
-    tmp_path = f"{path}.tmp.{os.getpid()}.{threading.get_ident()}"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(store, f, indent=2)
-        os.replace(tmp_path, path)
+        atomic_write_json(path, store)
         _corrupt_logged_paths.discard(path)
+        signature = _store_signature(path)
+        _store_cache = (signature, store) if signature else None
     except Exception as e:
         print(f"[ERROR] Failed to save air schedule store to {path}: {e}")
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            pass
 
 
 def get_anchor(media_id: Union[int, str]) -> Optional[Dict[str, Any]]:
@@ -117,7 +134,8 @@ def record_from_media_list(
 
     recorded_count = 0
     with _lock:
-        store = _load_store()
+        original = _load_store()
+        store = copy.deepcopy(original)
 
         # Prune entries not updated for 60 days
         for key, entry in list(store.items()):
@@ -172,7 +190,7 @@ def record_from_media_list(
             }
             recorded_count += 1
 
-        if recorded_count > 0 or len(store) != len(_load_store()):
+        if recorded_count > 0 or len(store) != len(original):
             _save_store(store)
 
     return recorded_count
@@ -227,6 +245,25 @@ def estimate_aired(
     return max(0, aired)
 
 
+def _end_date_passed(media: Dict[str, Any], now: Optional[Union[datetime, int, float]]) -> bool:
+    """True when AniList reports a complete ``endDate`` that is already past."""
+    end = media.get("endDate")
+    if not isinstance(end, dict):
+        return False
+    try:
+        year, month, day = int(end["year"]), int(end["month"]), int(end["day"])
+        end_dt = datetime(year, month, day, tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        return False
+    if now is None:
+        now_dt = _now_utc()
+    elif isinstance(now, (int, float)):
+        now_dt = datetime.fromtimestamp(now, tz=timezone.utc)
+    else:
+        now_dt = _parse_iso_utc(now)
+    return end_dt <= now_dt
+
+
 def aired_episodes(
     anime: Dict[str, Any],
     *,
@@ -247,21 +284,32 @@ def aired_episodes(
     media_id = anime.get("mediaId") or media.get("id") if isinstance(anime, dict) else None
     next_ep = media.get("nextAiringEpisode")
 
+    status = str(media.get("status") or "").upper()
     if isinstance(next_ep, dict) and next_ep.get("episode") is not None:
         payload_aired = int(next_ep["episode"]) - 1
+    elif status == "NOT_YET_RELEASED":
+        # Nothing has aired yet; ``media.episodes`` is only the planned count.
+        payload_aired = 0
+    elif status in ("RELEASING", "HIATUS") and not _end_date_passed(media, now):
+        # AniList dropped the next-airing pointer (hiatus / TBD schedule): the
+        # planned episode count says nothing about what actually aired. Rely
+        # on the cached schedule estimate below instead of claiming every
+        # episode exists, which sent the scheduler hunting for releases that
+        # were never published.
+        payload_aired = 0
     else:
         payload_aired = media.get("episodes") or 0
     payload_aired = max(0, int(payload_aired))
 
     total_episodes = media.get("episodes")
     estimated: Optional[int] = None
-    if media_id is not None:
+    if media_id is not None and status not in ("FINISHED", "CANCELLED", "NOT_YET_RELEASED"):
+        # A finished show's anchor is stale by definition; extrapolating it
+        # past the payload would invent episodes when the total is unknown.
         estimated = estimate_aired(media_id, now=now, total_episodes=total_episodes)
 
     if estimated is not None and estimated > payload_aired:
-        with _lock:
-            store = _load_store()
-            anchor = store.get(str(media_id)) if media_id is not None else None
+        anchor = get_anchor(media_id) if media_id is not None else None
 
         title = None
         title_obj = media.get("title")

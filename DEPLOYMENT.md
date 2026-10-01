@@ -25,8 +25,8 @@ The update runner (`/root/animu/scripts/animu-update.sh`) executes on a 15-minut
 5. **Fast-Forward Only Enforcement**: Verifies `origin/main` is an ancestor of `HEAD` using `git merge-base --is-ancestor`. Non-fast-forward updates (divergent histories or rebased trees) are rejected.
 6. **Rollback Target Recording**: Pre-update commit hash (`PREV_COMMIT`) is recorded prior to touching the checkout.
 7. **Fast-Forward Merge**: Applies `git merge --ff-only origin/main`.
-8. **Dependency Update**: If `requirements.txt` changed between commits, runs `./venv/bin/pip install -r requirements.txt`.
-9. **Service Restart & Health Verification**: Restarts `animu.service` and polls `http://127.0.0.1:3210/api/health` for up to 30 seconds to confirm the service is active and reporting healthy readiness.
+8. **Dependency Update**: If `requirements.txt` changed between commits, runs `./venv/bin/pip install -r requirements.txt`. The web UI needs no build step on CT102: `webui/` is the committed output of `webui-src/` (build locally with `cd webui-src && npm install && npm run build`, commit `webui/`). Hashed asset filenames mean a deploy never leaves browsers or the NPM cache on stale JS.
+9. **Service Restart & Health Verification**: Restarts `animu.service` and polls `http://127.0.0.1:3210/api/health` for up to 30 seconds to confirm the service is active and reporting healthy readiness. The scheduler runs its first cycle immediately at boot, and `/api/health` treats a freshly started scheduler that has not failed as ready (`"starting": true`) until one stale-threshold elapses, so a slow first cycle does not trigger a rollback.
 10. **Automated Rollback**: If restart or `/api/health` verification fails, the script automatically resets the git checkout back to `PREV_COMMIT` (`git reset --hard $PREV_COMMIT`), reinstalls dependencies if needed, restarts `animu.service`, and verifies recovery.
 11. **Secret Isolation**: Operates without access to credentials, webhooks, or `profile.json`. Logs only sanitized decisions and commit hashes to journald.
 

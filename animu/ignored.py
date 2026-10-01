@@ -1,9 +1,13 @@
 import os
 import json
+import re
 import uuid
+import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional
+
+from .storage import atomic_write_json
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
@@ -19,9 +23,22 @@ class IgnoredItem:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+def _contains_phrase(haystack: str, needle: str) -> bool:
+    """True when ``needle`` occurs in ``haystack`` as whole words.
+
+    A bare substring test ignored unrelated shows ("Re" inside "Re:Zero",
+    "Gin" inside "Gintama"); requiring word boundaries keeps legitimate
+    partial titles ("Frieren" inside "Frieren: Beyond Journey's End") working.
+    """
+    if not needle or len(needle) > len(haystack):
+        return False
+    return re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", haystack) is not None
+
+
 class IgnoredManager:
     def __init__(self):
         self.items: List[Dict[str, Any]] = []
+        self._lock = threading.RLock()
         self._load_ignored()
 
     def _load_ignored(self):
@@ -35,14 +52,16 @@ class IgnoredManager:
                 self.items = []
 
     def _save_ignored(self):
-        os.makedirs(LOGS_DIR, exist_ok=True)
         try:
-            with open(IGNORED_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.items, f, indent=2)
+            atomic_write_json(IGNORED_FILE, self.items)
         except Exception as e:
             print(f"Failed to save ignored.json: {e}")
 
     def add_entry(self, title: str, media_id: Optional[int] = None) -> Dict[str, Any]:
+        with self._lock:
+            return self._add_entry(title, media_id)
+
+    def _add_entry(self, title: str, media_id: Optional[int] = None) -> Dict[str, Any]:
         clean_title = (title or "").strip()
         parsed_media_id = None
         if media_id is not None:
@@ -73,9 +92,14 @@ class IgnoredManager:
         return entry
 
     def get_all(self) -> List[Dict[str, Any]]:
-        return list(self.items)
+        with self._lock:
+            return list(self.items)
 
     def delete_entry(self, id_or_title: str) -> bool:
+        with self._lock:
+            return self._delete_entry(id_or_title)
+
+    def _delete_entry(self, id_or_title: str) -> bool:
         target = str(id_or_title).strip().lower()
         initial_len = len(self.items)
         
@@ -104,7 +128,9 @@ class IgnoredManager:
             
         clean_titles = [t.strip().lower() for t in titles_to_check if t]
 
-        for item in self.items:
+        with self._lock:
+            items = list(self.items)
+        for item in items:
             # Check media_id match
             if media_id is not None and item.get("media_id") is not None:
                 if int(item["media_id"]) == int(media_id):
@@ -116,7 +142,7 @@ class IgnoredManager:
                 continue
                 
             for ct in clean_titles:
-                if item_title == ct or item_title in ct or ct in item_title:
+                if item_title == ct or _contains_phrase(ct, item_title) or _contains_phrase(item_title, ct):
                     return True
         return False
 

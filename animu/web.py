@@ -1,3 +1,5 @@
+import gzip
+import hashlib
 import http.server
 import json
 import os
@@ -8,6 +10,7 @@ import re
 import posixpath
 import urllib.parse
 import threading
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .config import get_config, save_config, reload_config, MAP_ATTR_TO_JSON, MAP_JSON_TO_ATTR
@@ -22,6 +25,8 @@ from .history import history_manager
 from .ignored import ignored_manager
 from .prefs import release_prefs
 from . import readiness
+from . import airschedule
+from .scheduler import scheduler
 
 # Cache-busting version for the SPA assets. NPM's global assets.conf caches
 # .js/.css with a long max-age and strips the backend Cache-Control header, so
@@ -109,7 +114,10 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
     if not media_id:
         return media_item
 
-    record = db.get(int(media_id))
+    # Local mirror only: this runs once per media item on every Discover /
+    # search page, and a PocketBase round trip (plus a cache-file rewrite) per
+    # item made a 50-card page cost 50 serial network calls.
+    record = db.get_local(int(media_id))
     enriched = dict(media_item)
     if record:
         enriched["localState"] = {
@@ -194,10 +202,11 @@ def handle_history_delete_action(entry_id: str, action: str) -> tuple:
 
     if action == "rerun":
         if matched_media_id:
-            record = db.get(matched_media_id) or OfflineAnime(media_id=matched_media_id)
-            record.downloaded_episodes = []
-            record.reset_timeout()
-            db.upsert(matched_media_id, record)
+            def _clear(rec: OfflineAnime) -> None:
+                rec.downloaded_episodes = []
+                rec.reset_timeout()
+
+            db.update(matched_media_id, _clear)
             return 200, {
                 "ok": True,
                 "action": "rerun",
@@ -403,17 +412,103 @@ def _handle_graphql_mutation(mutation_name: str, **kwargs):
     return 200, data
 
 
+GZIP_MIN_BYTES = 1400
+MAX_CONCURRENT_REQUESTS = 48
+_request_slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
+
+STATIC_MIME_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".webmanifest": "application/manifest+json; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+}
+_COMPRESSIBLE_EXTENSIONS = {".html", ".js", ".mjs", ".css", ".json", ".webmanifest", ".map", ".txt", ".svg"}
+
+# path -> ((mtime_ns, size), asset). Files are read, version-stamped, gzipped
+# and hashed once per change instead of once per request.
+_static_cache: Dict[str, tuple] = {}
+_static_lock = threading.Lock()
+
+
+def _load_static_asset(full_path: str) -> Dict[str, Any]:
+    stat = os.stat(full_path)
+    signature = (stat.st_mtime_ns, stat.st_size)
+    with _static_lock:
+        hit = _static_cache.get(full_path)
+        if hit and hit[0] == signature:
+            return hit[1]
+    with open(full_path, 'rb') as f:
+        content = f.read()
+    if os.path.basename(full_path) == 'index.html':
+        # Legacy cache-busting for an un-hashed entry script; a no-op for the
+        # built SPA, whose assets are content-hashed.
+        content = content.replace(b'src="/app.js"', ('src="/app.js?v=' + ASSET_VERSION + '"').encode())
+    ext = os.path.splitext(full_path)[1].lower()
+    asset = {
+        "content": content,
+        "content_type": STATIC_MIME_TYPES.get(ext, "application/octet-stream"),
+        "etag": '"' + hashlib.sha1(content).hexdigest()[:24] + '"',
+        "gzip": gzip.compress(content, compresslevel=9) if ext in _COMPRESSIBLE_EXTENSIONS and len(content) >= GZIP_MIN_BYTES else None,
+    }
+    with _static_lock:
+        _static_cache[full_path] = (signature, asset)
+    return asset
+
+
 class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
+    # HTTP/1.0 (one request per connection) on purpose: the production proxy
+    # talks HTTP/1.0 upstream anyway, and keep-alive would stall the
+    # single-threaded servers the test-suite uses. Every response still carries
+    # a Content-Length.
+
     def log_message(self, format, *args):
         # Override to suppress standard HTTP request printing in console logs (matches Node.js clean log)
         pass
 
+    def handle(self):
+        # Bound concurrent request handling. The stock ThreadingHTTPServer
+        # starts an unbounded thread per connection; past the cap a client
+        # gets an immediate 503 instead of piling up more work.
+        if not _request_slots.acquire(blocking=False):
+            try:
+                self.wfile.write(b"HTTP/1.0 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n")
+            except OSError:
+                pass
+            return
+        try:
+            super().handle()
+        finally:
+            _request_slots.release()
+
+    def _accepts_gzip(self) -> bool:
+        return "gzip" in (self.headers.get("Accept-Encoding", "") if self.headers else "")
+
     def send_json(self, status: int, data: Any):
         content = json.dumps(data).encode("utf-8")
+        encoding = None
+        if len(content) >= GZIP_MIN_BYTES and self._accepts_gzip():
+            content = gzip.compress(content, compresslevel=5)
+            encoding = "gzip"
         try:
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            if encoding:
+                self.send_header("Content-Encoding", encoding)
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()
             self.wfile.write(content)
@@ -444,8 +539,11 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         # None (network/GraphQL outage) degrades to an empty list so the API
         # stays up; empty list means "no anime in watching list".
         anime_list = anilist.get_anime_user_list() or []
-        pb_records = db.get_all()
+        # Local mirror: no PocketBase round trip per page view. It is refreshed
+        # from PocketBase every scheduler cycle and on every write.
+        pb_records = db.all_local()
         pb_map = {r.media_id: r for r in pb_records}
+        now = time.time()
         
         merged = []
         for anime in anime_list:
@@ -467,6 +565,9 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             # (e.g. an entry whose title was deleted upstream). Null-safe here
             # so one broken record never 500s the whole /api/anime response.
             media = dict(anime["media"]) if anime.get("media") else {}
+            # The synopsis is the heaviest field and no list view needs it;
+            # the detail sheet loads it from /api/anilist/media/<id>.
+            media.pop("description", None)
             media["alternativeTitle"] = alt_title or None
             media["startingEpisode"] = start_ep
             media["preferredReleaseGroup"] = pref_group or None
@@ -483,6 +584,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             }
             entry["requireJapaneseAudio"] = req_jpn
             entry["requireEnglishSubs"] = req_subs
+            entry.update(self._scheduling_fields(anime, media_id, record, now))
             merged.append(entry)
 
         # Sort Romaji titles (A-Z first, then others)
@@ -495,6 +597,39 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             
         merged.sort(key=get_sort_key)
         return merged
+
+    @staticmethod
+    def _scheduling_fields(anime: dict, media_id: int, record, now: float) -> dict:
+        """Scheduler-derived fields the UI shows per anime (aired count, next
+        air time, and what the scheduler last did with it)."""
+        fields: Dict[str, Any] = {
+            "airedEpisodes": None,
+            "nextAirAt": None,
+            "state": "pending",
+            "stateDetail": "",
+            "nextAttemptAt": None,
+            "timeouts": record.timeouts if record else 0,
+            "maxTimeouts": record.max_timeouts if record else 0,
+        }
+        try:
+            fields["airedEpisodes"] = airschedule.aired_episodes(anime)
+        except Exception:
+            pass
+        try:
+            anchor = airschedule.get_anchor(media_id)
+            if anchor and anchor.get("air_at"):
+                fields["nextAirAt"] = anchor["air_at"]
+        except Exception:
+            pass
+        known = scheduler.anime_state.get(media_id)
+        if known:
+            fields["state"] = known.get("status", "pending")
+            fields["stateDetail"] = known.get("detail", "")
+        if record and record.next_attempt_at > now:
+            fields["nextAttemptAt"] = datetime.fromtimestamp(record.next_attempt_at, tz=timezone.utc).isoformat()
+            if fields["state"] in ("pending", "up_to_date"):
+                fields["state"] = "backoff"
+        return fields
 
     def build_raw_search_payload(self, query: str, use_alt_url: bool) -> dict:
         """Build the title-only Nyaa search payload (with track classification)."""
@@ -579,7 +714,8 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 except ValueError:
                     per_page = 20
 
-                result = anilist.get_discover_anime(disc_type, page, per_page)
+                # Copy: the AniList client returns its cached object.
+                result = dict(anilist.get_discover_anime(disc_type, page, per_page))
                 media = result.get("media", [])
                 result["media"] = enrich_media_list_with_local_state(media)
                 result["type"] = disc_type
@@ -604,7 +740,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     self.send_json(400, {"error": "Query parameter 'q' is required"})
                     return
 
-                result = anilist.search_anime(q, page, per_page)
+                result = dict(anilist.search_anime(q, page, per_page))
                 media = result.get("media", [])
                 result["media"] = enrich_media_list_with_local_state(media)
                 result["query"] = q
@@ -1105,12 +1241,30 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/health":
             status, payload = health_response()
             self.send_json(status, payload)
+
+        elif path == "/api/status":
+            self.send_json(200, build_status_payload())
+
+        elif path == "/api/events":
+            params = urllib.parse.parse_qs(url.query)
+            try:
+                limit = max(1, min(200, int(params.get("limit", [100])[0])))
+            except ValueError:
+                limit = 100
+            self.send_json(200, {"events": readiness.get_events(limit)})
             
         elif path == "/api/history":
             try:
-                items = history_manager.get_all()
+                params = urllib.parse.parse_qs(url.query)
+                total = len(history_manager.items)
+                try:
+                    limit = int(params["limit"][0]) if "limit" in params else None
+                    offset = max(0, int(params.get("offset", [0])[0]))
+                except ValueError:
+                    limit, offset = None, 0
+                items = history_manager.get_all(limit=limit, offset=offset)
                 self.send_json(200, {
-                    "count": len(items),
+                    "count": total,
                     "history": items
                 })
             except Exception as e:
@@ -1597,13 +1751,21 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
 
             # If successful and episode specified, save progress
             if episode is not None:
-                record = db.get(media_id) or OfflineAnime(media_id=media_id)
-                if episode not in record.downloaded_episodes:
-                    record.downloaded_episodes.append(episode)
-                    record.downloaded_episodes.sort()
-                record.reset_timeout()
-                db.upsert(media_id, record)
-                
+                try:
+                    episode_number = int(episode)
+                except (TypeError, ValueError):
+                    episode_number = None
+                if episode_number is not None:
+                    def _mark(rec: OfflineAnime) -> None:
+                        # int, not the raw JSON value: "5" never matched 5 in
+                        # the scheduler's membership checks and caused a redownload.
+                        if episode_number not in rec.downloaded_episodes:
+                            rec.downloaded_episodes.append(episode_number)
+                            rec.downloaded_episodes.sort()
+                        rec.reset_timeout()
+
+                    db.update(media_id, _mark)
+
             self.send_json(200, {
                 "ok": True,
                 "mediaId": media_id,
@@ -1619,12 +1781,20 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 return
             self.send_json(200, {"ok": True})
 
+        elif path == "/api/scheduler/run":
+            if scheduler.request_run():
+                self.send_json(202, {"ok": True, "message": "Cycle requested"})
+            else:
+                self.send_json(409, {"ok": False, "error": "A cycle is already running"})
+
         elif re.match(r'^/api/anime/(\d+)/reset$', path):
             media_id = int(re.match(r'^/api/anime/(\d+)/reset$', path).group(1))
-            record = db.get(media_id)
-            if record:
-                record.downloaded_episodes = []
-                db.upsert(media_id, record)
+            if db.get(media_id):
+                def _reset(rec: OfflineAnime) -> None:
+                    rec.downloaded_episodes = []
+                    rec.reset_timeout()
+
+                db.update(media_id, _reset)
             self.send_json(200, {"ok": True})
 
         elif path == "/api/ignored":
@@ -1792,32 +1962,38 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                     return
 
             body = self.read_json_body()
-            record = db.get(media_id) or OfflineAnime(media_id=media_id)
-            
-            if "alternativeTitle" in body:
-                record.alternative_title = str(body["alternativeTitle"] or "").strip()
-            if "startingEpisode" in body:
-                try:
-                    record.starting_episode = max(0, int(body["startingEpisode"]))
-                except ValueError:
-                    pass
-            if "preferredReleaseGroup" in body:
-                record.preferred_release_group = str(body["preferredReleaseGroup"] or "").strip()
+
+            def _apply_overrides(record: OfflineAnime) -> None:
+                if "alternativeTitle" in body:
+                    record.alternative_title = str(body["alternativeTitle"] or "").strip()
+                if "startingEpisode" in body:
+                    try:
+                        record.starting_episode = max(0, int(body["startingEpisode"]))
+                    except (TypeError, ValueError):
+                        pass
+                if "preferredReleaseGroup" in body:
+                    record.preferred_release_group = str(body["preferredReleaseGroup"] or "").strip()
+                if "releaseGroupMisses" in body:
+                    try:
+                        record.release_group_misses = max(0, int(body["releaseGroupMisses"]))
+                    except (TypeError, ValueError):
+                        pass
+                if body.get("resetDownloadedEpisodes"):
+                    record.downloaded_episodes = []
+                if body.get("retryNow"):
+                    # Clear back-off so the next cycle searches this anime again.
+                    record.reset_timeout()
+
             if "requireJapaneseAudio" in body or "requireEnglishSubs" in body:
                 release_prefs.set(
                     media_id,
                     require_japanese_audio=body.get("requireJapaneseAudio"),
                     require_english_subs=body.get("requireEnglishSubs"),
                 )
-            if "releaseGroupMisses" in body:
-                try:
-                    record.release_group_misses = max(0, int(body["releaseGroupMisses"]))
-                except ValueError:
-                    pass
-            if body.get("resetDownloadedEpisodes"):
-                record.downloaded_episodes = []
-                
-            db.upsert(media_id, record)
+
+            # Atomic read-modify-write: a running scheduler cycle can no longer
+            # overwrite this edit with its stale copy of the record.
+            db.update(media_id, _apply_overrides)
             cached = db.local_cache.get(str(media_id), {})
             synced = not cached.get("_unsynced", False)
             self.send_json(200, {"ok": True, "synced": synced,
@@ -1915,61 +2091,89 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             "content": content
         })
 
+    def _send_bytes(self, status: int, content_type: str, body: bytes, headers: Optional[Dict[str, str]] = None):
+        """Send a complete response with a Content-Length (required for keep-alive)."""
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+        except (BrokenPipeError, ConnectionError, OSError):
+            pass
+
     def serve_static(self, path: str):
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         public_dir = os.path.join(root_dir, 'webui')
-        
-        # Clean pathname
-        filename = path.lstrip('/')
-        if not filename or filename in ('index.html', 'settings', 'discover') or re.match(r'^(anime|media|discover)(/\d+)?$', filename):
-            filename = 'index.html'
-            
-        full_path = os.path.abspath(os.path.join(public_dir, filename))
-        
-        # Verify subdirectory traversal prevention
-        if not full_path.startswith(os.path.abspath(public_dir)):
-            self.send_response(403)
-            self.end_headers()
-            self._safe_write(b"Forbidden")
-            return
-            
-        if os.path.exists(full_path) and os.path.isfile(full_path):
-            ext = os.path.splitext(full_path)[1].lower()
-            mime_types = {
-                ".html": "text/html; charset=utf-8",
-                ".js": "application/javascript; charset=utf-8",
-                ".css": "text/css; charset=utf-8",
-                ".ico": "image/x-icon",
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-            }
-            content_type = mime_types.get(ext, "application/octet-stream")
-            try:
-                with open(full_path, 'rb') as f:
-                    content = f.read()
-                # Cache-bust SPA assets: NPM caches .js/.css with a long
-                # max-age and strips our Cache-Control, so version the URL.
-                if filename == 'index.html':
-                    content = content.replace(
-                        b'src="/app.js"',
-                        ('src="/app.js?v=' + ASSET_VERSION + '"').encode(),
-                    )
-                self.send_response(200)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Cache-Control", "public, max-age=0, must-revalidate")
-                self.send_header("Content-Length", str(len(content)))
-                self.end_headers()
-                self._safe_write(content)
-                return
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self._safe_write(str(e).encode('utf-8'))
-                return
 
-        self.send_response(404)
-        self.end_headers()
-        self._safe_write(b"Not found")
+        try:
+            filename = urllib.parse.unquote(path, errors="strict").lstrip('/')
+        except UnicodeDecodeError:
+            filename = ""
+        if "\x00" in filename:
+            self._send_bytes(400, "text/plain; charset=utf-8", b"Bad request")
+            return
+
+        full_path = None
+        if filename and not filename.endswith('/'):
+            candidate = os.path.abspath(os.path.join(public_dir, filename))
+            # Subdirectory traversal prevention (commonpath, not a string prefix:
+            # "/webui-evil" shares the "/webui" prefix).
+            try:
+                inside = os.path.commonpath([candidate, public_dir]) == public_dir
+            except ValueError:
+                inside = False
+            if not inside:
+                self._send_bytes(403, "text/plain; charset=utf-8", b"Forbidden")
+                return
+            if os.path.isfile(candidate):
+                full_path = candidate
+
+        if full_path is None:
+            # Client-side routes (/, /library, /anime/123, /settings, …) all
+            # serve the SPA shell; anything that looks like a file is a 404.
+            last_segment = filename.rsplit('/', 1)[-1]
+            if "." not in last_segment and not filename.startswith('api/'):
+                full_path = os.path.join(public_dir, 'index.html')
+        if full_path is None or not os.path.isfile(full_path):
+            self._send_bytes(404, "text/plain; charset=utf-8", b"Not found")
+            return
+
+        try:
+            asset = _load_static_asset(full_path)
+        except Exception as e:
+            self._send_bytes(500, "text/plain; charset=utf-8", str(e).encode('utf-8'))
+            return
+
+        relative = os.path.relpath(full_path, public_dir).replace(os.sep, '/')
+        if relative.startswith('assets/'):
+            # Content-hashed build output: safe to cache forever.
+            cache_control = "public, max-age=31536000, immutable"
+        else:
+            # The shell and anything un-hashed: always revalidate (cheap 304).
+            cache_control = "no-cache"
+        headers = {"Cache-Control": cache_control, "ETag": asset["etag"]}
+
+        if self.headers.get("If-None-Match") == asset["etag"]:
+            try:
+                self.send_response(304)
+                self.send_header("ETag", asset["etag"])
+                self.send_header("Cache-Control", cache_control)
+                self.end_headers()
+            except (BrokenPipeError, ConnectionError, OSError):
+                pass
+            return
+
+        body = asset["content"]
+        if asset["gzip"] is not None and self._accepts_gzip():
+            body = asset["gzip"]
+            headers["Content-Encoding"] = "gzip"
+        if asset["gzip"] is not None:
+            headers["Vary"] = "Accept-Encoding"
+        self._send_bytes(200, asset["content_type"], body, headers)
 
 DEFAULT_PORT = 3210
 
@@ -2066,6 +2270,35 @@ def _prewarm_heavy_reads() -> None:
             print(f"[PREWARM] Warm-up failed (will refresh on first request): {e}")
 
     threading.Thread(target=_load, daemon=True).start()
+
+
+def build_status_payload() -> Dict[str, Any]:
+    """Cheap (no network) snapshot for the dashboard: scheduler + dependencies."""
+    health = readiness.health_snapshot()
+    token_state = {}
+    try:
+        token_state = {
+            "authenticated": anilist_auth.is_token_present(),
+            "userName": anilist_auth.get_user_name() or "",
+        }
+    except Exception:
+        pass
+    return {
+        "scheduler": health,
+        "services": {
+            "pocketbase": health["dependency"]["pocketbase"],
+            "qbittorrent": {
+                "authenticated": bool(qbit.sid),
+                "lastAuthStatus": qbit.last_auth_status,
+                "lastAddError": qbit.last_add_error or "",
+            },
+            "anilist": {
+                "authenticated": bool(token_state.get("authenticated")),
+                "userName": token_state.get("userName") or get_config().ani_user_name or "",
+            },
+        },
+        "intervalMinutes": scheduler.get_cycle_interval(),
+    }
 
 
 def health_response() -> tuple[int, dict[str, Any]]:

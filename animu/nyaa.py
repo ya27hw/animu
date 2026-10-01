@@ -1,12 +1,15 @@
-import feedparser
-import httpx
+import re
 import time
-import anitopy
 import math
 import threading
+import xml.etree.ElementTree as ET
 from typing import Optional, List, Dict, Any
 from .config import get_config
-from .utils import verify_query, SCORE_THRESHOLD, detect_censorship_status, fix_anime_season, get_explicit_season
+from .http import client_scope
+from .utils import (
+    verify_query, SCORE_THRESHOLD, detect_censorship_status, fix_anime_season,
+    get_explicit_season, parse_title,
+)
 from .release_groups import detect_release_group, get_group_score, select_best_candidate
 from .release_tracks import (
     AUDIO_OTHER,
@@ -17,6 +20,50 @@ from .release_tracks import (
 
 trace_lock = threading.Lock()
 
+NYAA_NS = "{https://nyaa.si/xmlns/nyaa}"
+
+# Airing schedules are static between AniList refreshes, but the scheduler's
+# alternative-title search asks for the same show once per title combination.
+AIR_DATES_TTL_SECONDS = 600
+_air_dates_cache: Dict[int, tuple] = {}
+_air_dates_lock = threading.Lock()
+
+
+class SearchUnavailable(Exception):
+    """A search could not be completed because an upstream service failed.
+
+    Distinct from "searched and found nothing": only the latter should push an
+    anime into back-off. An AniList 429 or a Nyaa outage must not.
+    """
+
+
+def _parse_rss_items(content: bytes) -> List[Dict[str, Any]]:
+    """Parse a Nyaa RSS document into the item dicts the rest of the app uses.
+
+    ElementTree instead of feedparser: feedparser sanitises HTML and parses
+    dates for every entry and drags a large dependency tree into memory, none
+    of which a Nyaa feed needs. A non-XML body (e.g. a CDN challenge page
+    served with HTTP 200) raises ``ParseError`` and is treated as a failure
+    rather than silently as "no results".
+    """
+    root = ET.fromstring(content)
+    items = []
+    for entry in root.iter("item"):
+        title = entry.findtext("title")
+        link = entry.findtext("link")
+        pub_date = entry.findtext("pubDate")
+        if not title or not link or not pub_date:
+            continue
+        items.append({
+            "title": title,
+            "link": link,
+            "nyaa:seeders": entry.findtext(f"{NYAA_NS}seeders") or "0",
+            "nyaa:size": entry.findtext(f"{NYAA_NS}size") or "0",
+            "pubDate": pub_date,
+            "guid": entry.findtext("guid") or link,
+        })
+    return items
+
 def safe_int(val: Any, default: int = 0) -> int:
     """Safely convert value to int with fallback on error."""
     try:
@@ -25,9 +72,6 @@ def safe_int(val: Any, default: int = 0) -> int:
         return default
 
 class NyaaClient:
-    def __init__(self):
-        self.client = httpx.Client(verify=False, timeout=20)
-
     def should_use_proxy_download(self, anime: Dict[str, Any]) -> bool:
         """Determines if the anime genres trigger proxy requirements (e.g. Ecchi genre)."""
         config = get_config()
@@ -70,8 +114,7 @@ class NyaaClient:
 
         for attempt in range(max_retries + 1):
             try:
-                # Use a localized client to ensure proxy is loaded correctly per request
-                with httpx.Client(verify=False, proxy=proxy_url, timeout=20) as client:
+                with client_scope(proxy_url, 20.0) as client:
                     resp = client.get(url, params=params)
 
                 if resp.status_code != 200:
@@ -85,18 +128,7 @@ class NyaaClient:
                         "data": None
                     }
 
-                feed = feedparser.parse(resp.text)
-                items = []
-                for entry in feed.entries:
-                    items.append({
-                        "title": entry.title,
-                        "link": entry.link,
-                        # feedparser normalizes nyaa namespace to nyaa_seeders and nyaa_size
-                        "nyaa:seeders": entry.get("nyaa_seeders", "0"),
-                        "nyaa:size": entry.get("nyaa_size", "0"),
-                        "pubDate": entry.published,
-                        "guid": entry.id
-                    })
+                items = _parse_rss_items(resp.content)
 
                 # Sort by seeders descending safely
                 items.sort(key=lambda x: safe_int(x.get("nyaa:seeders", 0)), reverse=True)
@@ -128,6 +160,12 @@ class NyaaClient:
         """Retrieve airing schedules from AniList, paginating as required by the episode list."""
         if not episode_list:
             return {"nodes": []}
+
+        now = time.time()
+        with _air_dates_lock:
+            hit = _air_dates_cache.get(media_id)
+        if hit and now - hit[0] < AIR_DATES_TTL_SECONDS:
+            return hit[1]
 
         # Paginate to fetch airdates
         query = """
@@ -165,7 +203,10 @@ class NyaaClient:
                     return None
                 time.sleep(1)
 
-        return {"nodes": nodes}
+        result = {"nodes": nodes}
+        with _air_dates_lock:
+            _air_dates_cache[media_id] = (now, result)
+        return result
 
     def get_best_torrent(
         self,
@@ -197,7 +238,7 @@ class NyaaClient:
 
             title = item["title"]
             pub_date = item["pubDate"]
-            parsed_data = anitopy.parse(title) or {}
+            parsed_data = parse_title(title)
 
             res_mode = "0" if use_alt_url else config.resolution
 
@@ -355,7 +396,8 @@ class NyaaClient:
             anime["mediaId"], episode_list, starting_episode
         )
         if air_dates is None:
-            return None
+            # AniList failed: that says nothing about whether a release exists.
+            raise SearchUnavailable("AniList airing schedule unavailable")
         if starting_episode:
             # Candidate filenames use release/global numbering; align the
             # AniList airing schedule to that same namespace once.
@@ -369,6 +411,10 @@ class NyaaClient:
 
         status = anime["media"].get("status")
         search_mode = "BATCH" if status == "FINISHED" and start_episode == 0 and not downloaded_episodes else "EPISODE"
+        # Feed fetches that failed outright (HTTP error / unparsable body)
+        # versus ones that answered. Nyaa being down is not "no release".
+        rss_failures = 0
+        rss_successes = 0
 
         if search_mode == "BATCH":
             rss_res = self.fetch_rss_feed(anime_title, search_url, enable_proxy)
@@ -393,8 +439,15 @@ class NyaaClient:
                 trace_status = "SUCCESS" if best else "NO_MATCH"
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], anime_title, trace_status, trace_candidates)
                 if best:
+                    # Only credit the episodes the pack really covers.
+                    best = dict(best)
+                    best["batch_episodes"] = self._batch_episodes(best.get("title", ""), end_episode)
                     return [best]
             else:
+                if rss_res["status"] != 200:
+                    rss_failures += 1
+                else:
+                    rss_successes += 1
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], anime_title, "NO_RESULTS", [])
             search_mode = "EPISODE"
 
@@ -408,6 +461,10 @@ class NyaaClient:
                 formatted_ep = f"{release_episode:02d}"
                 query_str = f'{anime_title} "{formatted_ep}"'
             rss_res = self.fetch_rss_feed(query_str, search_url, enable_proxy)
+            if rss_res["status"] == 200:
+                rss_successes += 1
+            else:
+                rss_failures += 1
             trace_candidates = []
             if rss_res["status"] == 200 and rss_res["data"]:
                 best = self.get_best_torrent(
@@ -442,7 +499,20 @@ class NyaaClient:
             else:
                 record_trace(anime["mediaId"], anime["media"]["title"]["romaji"], query_str, "NO_RESULTS", [])
 
+        if not found_torrents and rss_failures and not rss_successes:
+            raise SearchUnavailable("Nyaa did not return a usable feed for any query")
         return found_torrents if found_torrents else None
+
+    @staticmethod
+    def _batch_episodes(title: str, last_episode: int) -> Optional[List[int]]:
+        """Episodes a batch release explicitly covers (``01-12``), else ``None``."""
+        match = re.search(r"(?<!\d)(\d{1,3})\s*[-~]\s*(\d{1,3})(?!\d)", title or "")
+        if not match:
+            return None
+        start, end = int(match.group(1)), int(match.group(2))
+        if start < 1 or end < start or end > max(last_episode, 1) + 50:
+            return None
+        return list(range(start, end + 1))
 
     def search_episode_candidates(
         self,
@@ -479,7 +549,7 @@ class NyaaClient:
 
         candidates = []
         for item in rss_res["data"]:
-            parsed = anitopy.parse(item["title"])
+            parsed = parse_title(item["title"])
             score_result = verify_query(
                 f'{anime_title} "{formatted_ep}"',
                 parsed,
@@ -519,7 +589,7 @@ class NyaaClient:
         annotated = []
         for item in items:
             cand = dict(item)
-            parsed = anitopy.parse(cand.get("title", "")) or {}
+            parsed = parse_title(cand.get("title", ""))
             cand["audio_rank"], cand["audio_label"] = detect_audio_language(
                 cand.get("title", ""), parsed
             )

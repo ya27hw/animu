@@ -1,7 +1,19 @@
-import httpx
+import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from .config import get_config
+from .http import client_scope
+
+# Discord embed limits; over-long fields make the whole webhook call fail (HTTP 400).
+_MAX_FIELD_VALUE = 1024
+_MAX_FIELD_NAME = 256
+_MAX_DESCRIPTION = 4096
+_MAX_TITLE = 256
+
+
+def _clip(text: object, limit: int) -> str:
+    value = str(text)
+    return value if len(value) <= limit else value[: limit - 1] + "…"
 
 def send_embed(
     title: str,
@@ -16,16 +28,18 @@ def send_embed(
         return False
 
     embed = {
-        "title": title,
+        "title": _clip(title, _MAX_TITLE),
         "color": color,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if description:
-        embed["description"] = description
+        embed["description"] = _clip(description, _MAX_DESCRIPTION)
     if image:
         embed["image"] = {"url": image}
     if fields:
-        embed["fields"] = [{"name": f["name"], "value": f["value"], "inline": True} for f in fields]
+        embed["fields"] = [{"name": _clip(f["name"], _MAX_FIELD_NAME),
+                            "value": _clip(f["value"], _MAX_FIELD_VALUE) or "-",
+                            "inline": True} for f in fields]
 
     payload = {"embeds": [embed]}
     if config.discord_username:
@@ -34,7 +48,16 @@ def send_embed(
         payload["avatar_url"] = config.discord_avatar_url
 
     try:
-        resp = httpx.post(config.webhook, json=payload, timeout=10)
+        with client_scope(None, 10.0) as client:
+            resp = client.post(config.webhook, json=payload)
+            if resp.status_code == 429:
+                # Discord rate limit: wait the requested time once, then retry.
+                try:
+                    delay = float(resp.json().get("retry_after", 1.0))
+                except Exception:
+                    delay = 1.0
+                time.sleep(min(max(delay, 0.1), 10.0))
+                resp = client.post(config.webhook, json=payload)
         return resp.status_code in (200, 204)
     except Exception as e:
         print(f"Discord webhook error: {e}")
@@ -47,12 +70,16 @@ def alert_user(anime: str, image: str) -> bool:
         return False
     
     color_str = config.discord_fail_color or "#ff0000"
-    color = int(color_str.replace("#", "0x"), 16)
-    
+    try:
+        color = int(color_str.replace("#", "0x"), 16)
+    except ValueError:
+        color = 0xff0000
+
     title = config.discord_fail_title or "Anime Not Added"
-    
+
     desc_template = config.discord_fail_description or "Animu could not add {anime} to qBittorrent."
-    desc = desc_template.format(anime=anime) if "{anime}" in desc_template else desc_template
+    # str.replace, not format(): a user template with stray braces must not raise.
+    desc = desc_template.replace("{anime}", anime)
     
     return send_embed(title=title, description=desc, color=color, image=image)
 

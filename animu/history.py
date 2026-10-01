@@ -2,14 +2,30 @@ import os
 import json
 import uuid
 import re
+import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional
+
+from .storage import atomic_write_json
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 HISTORY_FILE = os.path.join(LOGS_DIR, "history.json")
 ANIMU_LOG_FILE = os.path.join(LOGS_DIR, "animu.log")
+MAX_HISTORY_ENTRIES = 1000
+
+
+def _parse_ts(item: Dict[str, Any]) -> float:
+    ts = item.get("added_at")
+    if not ts:
+        return 0.0
+    try:
+        # Handle space in timestamp format e.g. "2025-09-17 19:24:03 +04:00"
+        cleaned = ts.replace(" ", "T", 1) if " " in ts[:11] else ts
+        return datetime.fromisoformat(cleaned).timestamp()
+    except Exception:
+        return 0.0
 
 @dataclass
 class HistoryItem:
@@ -30,7 +46,10 @@ class HistoryItem:
 class HistoryManager:
     def __init__(self):
         self.items: List[Dict[str, Any]] = []
+        self._lock = threading.RLock()
         self._load_history()
+        # Sorted newest-first once at load; add_entry keeps it that way.
+        self.items.sort(key=_parse_ts, reverse=True)
 
     def _load_history(self):
         os.makedirs(LOGS_DIR, exist_ok=True)
@@ -105,10 +124,8 @@ class HistoryManager:
             self._save_history()
 
     def _save_history(self):
-        os.makedirs(LOGS_DIR, exist_ok=True)
         try:
-            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.items, f, indent=2)
+            atomic_write_json(HISTORY_FILE, self.items)
         except Exception as e:
             print(f"Failed to save history: {e}")
 
@@ -136,34 +153,32 @@ class HistoryManager:
             source=source
         ).to_dict()
 
-        self.items.insert(0, item)
-        self._save_history()
+        with self._lock:
+            self.items.insert(0, item)
+            del self.items[MAX_HISTORY_ENTRIES:]
+            self._save_history()
         return item
 
-    def get_all(self) -> List[Dict[str, Any]]:
-        def parse_ts(item):
-            ts = item.get("added_at")
-            if not ts:
-                return 0.0
-            try:
-                # Handle space in timestamp format e.g. "2025-09-17 19:24:03 +04:00"
-                cleaned = ts.replace(" ", "T", 1) if " " in ts[:11] else ts
-                return datetime.fromisoformat(cleaned).timestamp()
-            except Exception:
-                return 0.0
-
-        return sorted(self.items, key=parse_ts, reverse=True)
+    def get_all(self, limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
+        with self._lock:
+            items = list(self.items)
+        if offset or limit is not None:
+            end = None if limit is None else offset + limit
+            return items[offset:end]
+        return items
 
     def clear_all(self):
-        self.items = []
-        self._save_history()
+        with self._lock:
+            self.items = []
+            self._save_history()
 
     def delete_entry(self, entry_id: str) -> bool:
-        initial_len = len(self.items)
-        self.items = [item for item in self.items if item.get("id") != entry_id]
-        if len(self.items) < initial_len:
-            self._save_history()
-            return True
-        return False
+        with self._lock:
+            initial_len = len(self.items)
+            self.items = [item for item in self.items if item.get("id") != entry_id]
+            if len(self.items) < initial_len:
+                self._save_history()
+                return True
+            return False
 
 history_manager = HistoryManager()

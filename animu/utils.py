@@ -1,6 +1,8 @@
 import re
 import email.utils
+import threading
 import time
+from functools import lru_cache
 from typing import List, Dict, Any, Optional
 from .config import get_config
 from .release_tracks import is_japanese_dub
@@ -8,6 +10,28 @@ from .release_tracks import is_japanese_dub
 # Torrent verification score threshold (title similarity + episode/resolution/air-date
 # match bonuses must reach this to be accepted).
 SCORE_THRESHOLD = 3.70
+
+
+@lru_cache(maxsize=8192)
+def _bigrams(text: str) -> frozenset:
+    return frozenset(text[i:i + 2] for i in range(len(text) - 1))
+
+
+@lru_cache(maxsize=4096)
+def _parse_title_cached(title: str) -> Dict[str, Any]:
+    import anitopy
+    return anitopy.parse(title) or {}
+
+
+def parse_title(title: str) -> Dict[str, Any]:
+    """``anitopy.parse`` with memoisation.
+
+    The same release titles are parsed repeatedly (every query, title
+    combination, cycle and web search), and anitopy is a large regex pipeline.
+    A copy is returned so callers may mutate the result.
+    """
+    parsed = _parse_title_cached(title or "")
+    return {k: (list(v) if isinstance(v, list) else v) for k, v in parsed.items()}
 
 
 def dice_coefficient(a: str, b: str) -> float:
@@ -22,8 +46,8 @@ def dice_coefficient(a: str, b: str) -> float:
     if len(a) < 2 or len(b) < 2:
         return 0.0
 
-    a_bigrams = {a[i:i+2] for i in range(len(a) - 1)}
-    b_bigrams = {b[i:i+2] for i in range(len(b) - 1)}
+    a_bigrams = _bigrams(a)
+    b_bigrams = _bigrams(b)
 
     intersection = a_bigrams.intersection(b_bigrams)
     total_bigrams = len(a_bigrams) + len(b_bigrams)
@@ -109,16 +133,44 @@ def fix_anime_season(title: str) -> dict:
         "seasonCount": 1
     }
 
-def count_past_relations(media_id: int, episode_offset: int = 0, season_count: int = 1) -> dict:
-    """Walk prequel chain recursively to compute total episode offset and season count."""
+_relations_cache: Dict[int, tuple] = {}
+_relations_lock = threading.Lock()
+RELATIONS_TTL_SECONDS = 24 * 3600
+
+
+def count_past_relations(media_id: int, episode_offset: int = 0, season_count: int = 1) -> Optional[dict]:
+    """Walk the prequel chain to compute the total episode offset and season count.
+
+    A prequel chain is effectively static, so the result for a top-level call
+    is cached for 24 h (it used to cost one AniList request plus a sleep per
+    hop for every anime on every cycle). Returns ``None`` when AniList could
+    not be reached: callers must treat that as "unknown", never as "season 0"
+    (which silently disabled season checks and could credit the wrong season).
+    A show with no prequel is season 1 with offset 0.
+    """
+    top_level = episode_offset == 0 and season_count == 1
+    if top_level:
+        with _relations_lock:
+            hit = _relations_cache.get(media_id)
+        if hit and time.time() - hit[0] < RELATIONS_TTL_SECONDS:
+            return dict(hit[1])
+
+    result = _walk_prequels(media_id, episode_offset, season_count)
+    if top_level and result is not None:
+        with _relations_lock:
+            _relations_cache[media_id] = (time.time(), dict(result))
+    return result
+
+
+def _walk_prequels(media_id: int, episode_offset: int, season_count: int) -> Optional[dict]:
     # Lazily import anilist to prevent circular dependency
     from .anilist import anilist
 
     relations = anilist.get_previous_relations(media_id)
-    # Sleep to avoid rate limiting
-    time.sleep(0.3)
+    if relations is None:
+        return None
     if not relations:
-        return {"episodeOffset": 0, "seasonCount": 0}
+        return {"episodeOffset": episode_offset, "seasonCount": season_count}
 
     for relation in relations:
         relation_type = relation.get("relationType")
@@ -128,7 +180,7 @@ def count_past_relations(media_id: int, episode_offset: int = 0, season_count: i
             offset_inc = episodes if episodes > 3 else 0
             season_inc = 1 if episodes > 3 else 0
 
-            return count_past_relations(
+            return _walk_prequels(
                 node["id"],
                 episode_offset + offset_inc,
                 season_count + season_inc
@@ -408,10 +460,18 @@ def verify_query(
 
     elif search_mode == "BATCH":
         parsed_release_info = _to_clean_string(anime_parsed_data.get("release_information"))
-        explicit_batch = "batch" in parsed_release_info
+        explicit_batch = "batch" in parsed_release_info or "complete" in parsed_release_info
         last_episode = episodes[-1] if episodes else starting_episode
         is_single_episode = has_episodes and last_episode == 1
-        is_batch = explicit_batch or not is_single_episode
+        # A release that carries exactly one episode number ("Show - 05") is a
+        # single episode, not a batch, unless it says otherwise. Without this
+        # any such file passed BATCH mode for a multi-episode show and the
+        # scheduler then credited the entire season as downloaded.
+        ep_val = anime_parsed_data.get("episode_number")
+        if isinstance(ep_val, list):
+            ep_val = ep_val[0] if len(ep_val) == 1 else None
+        has_single_episode_number = bool(ep_val) and re.fullmatch(r"\d+(?:\.\d+)?", str(ep_val)) is not None
+        is_batch = explicit_batch or (not is_single_episode and not has_single_episode_number)
 
         nodes = air_dates.get("nodes", []) if air_dates else []
         air_date_match_batch = (

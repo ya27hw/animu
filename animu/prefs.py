@@ -17,7 +17,10 @@ still apply.
 
 import json
 import os
+import threading
 from typing import Any, Dict, Optional
+
+from .storage import atomic_write_json
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
@@ -30,6 +33,7 @@ class ReleasePrefsManager:
     def __init__(self, path: Optional[str] = None):
         self.path = path or PREFS_FILE
         self.items: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.RLock()
         self._load()
 
     def _load(self) -> None:
@@ -49,10 +53,8 @@ class ReleasePrefsManager:
             self.items = {}
 
     def _save(self) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         try:
-            with open(self.path, "w", encoding="utf-8") as handle:
-                json.dump(self.items, handle, indent=2)
+            atomic_write_json(self.path, self.items)
         except Exception as exc:
             print(f"Failed to save release_prefs.json: {exc}")
 
@@ -75,21 +77,23 @@ class ReleasePrefsManager:
         if media_id is None:
             return {}
         key = str(media_id)
-        entry = dict(self.items.get(key, {f: False for f in KNOWN_FLAGS}))
-        if require_japanese_audio is not None:
-            entry["require_japanese_audio"] = bool(require_japanese_audio)
-        if require_english_subs is not None:
-            entry["require_english_subs"] = bool(require_english_subs)
-        self.items[key] = entry
-        self._save()
-        return dict(entry)
+        with self._lock:
+            entry = dict(self.items.get(key, {f: False for f in KNOWN_FLAGS}))
+            if require_japanese_audio is not None:
+                entry["require_japanese_audio"] = bool(require_japanese_audio)
+            if require_english_subs is not None:
+                entry["require_english_subs"] = bool(require_english_subs)
+            self.items[key] = entry
+            self._save()
+            return dict(entry)
 
     def delete(self, media_id: Any) -> bool:
         """Drop an entry entirely. Returns True when something was removed."""
-        if self.items.pop(str(media_id), None) is not None:
-            self._save()
-            return True
-        return False
+        with self._lock:
+            if self.items.pop(str(media_id), None) is not None:
+                self._save()
+                return True
+            return False
 
     def get_all(self) -> Dict[str, Dict[str, Any]]:
         return {k: dict(v) for k, v in self.items.items()}

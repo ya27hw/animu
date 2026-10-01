@@ -65,10 +65,14 @@ def setup_logging():
             self.level = level
 
         def write(self, message):
+            # print() emits the text and the trailing "\n" as separate writes.
+            # The terminal/journal must still get the bare newline (it used to
+            # be dropped, running every line together); only the log files
+            # skip whitespace-only chunks.
+            if message:
+                sys.__stdout__.write(message)
             msg = message.rstrip()
             if msg:
-                # Print to real terminal if run interactively
-                sys.__stdout__.write(message)
                 self.logger1.log(self.level, msg)
                 self.logger2.log(self.level, msg)
 
@@ -81,9 +85,10 @@ def setup_logging():
             self.logger_comb = logger_comb
 
         def write(self, message):
+            if message:
+                sys.__stderr__.write(message)
             msg = message.rstrip()
             if msg:
-                sys.__stderr__.write(message)
                 self.logger_err.log(logging.ERROR, msg)
                 self.logger_comb.log(logging.ERROR, msg)
 

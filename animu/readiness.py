@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import threading
+import time
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,6 +26,14 @@ _last_success_at: datetime | None = None
 _last_heartbeat_at: datetime | None = None
 _last_error_type: str | None = None
 _stale_threshold: float | None = None
+# Observability for the UI: last cycle summary, next scheduled wake-up, and a
+# small in-memory ring buffer of scheduler events.
+_cycle_stats: dict[str, Any] = {}
+_cycle_running_since: datetime | None = None
+_next_run_at: datetime | None = None
+_degraded = False
+_scheduler_started_at: datetime | None = None
+_events: deque = deque(maxlen=200)
 
 
 def derive_cycle_interval_seconds(now: datetime | None = None) -> float:
@@ -106,7 +116,14 @@ def reset() -> None:
     global _last_cycle_started_at, _last_cycle_completed_at, _last_success_at
     global _last_heartbeat_at, _last_error_type, _stale_threshold
     global SCHEDULER_HEARTBEAT_STALE_SECONDS
+    global _cycle_stats, _cycle_running_since, _next_run_at, _degraded, _scheduler_started_at
     with _lock:
+        _scheduler_started_at = None
+        _cycle_stats = {}
+        _cycle_running_since = None
+        _next_run_at = None
+        _degraded = False
+        _events.clear()
         _initialized = False
         _scheduler_initialized = False
         _scheduler_running = False
@@ -132,10 +149,12 @@ def mark_database(*, authenticated: bool, offline_safe_mode: bool, status: str |
 
 
 def mark_scheduler_initialized() -> None:
-    global _scheduler_initialized, _initialized, _last_heartbeat_at
+    global _scheduler_initialized, _initialized, _last_heartbeat_at, _scheduler_started_at
     with _lock:
         _scheduler_initialized = True
         _last_heartbeat_at = _utc()
+        if _scheduler_started_at is None:
+            _scheduler_started_at = _last_heartbeat_at
         _initialized = _initialized and _scheduler_initialized
 
 
@@ -146,26 +165,68 @@ def mark_scheduler_running(running: bool = True) -> None:
 
 
 def mark_cycle_started(at: datetime | None = None) -> datetime:
-    global _last_cycle_started_at, _last_heartbeat_at
+    global _last_cycle_started_at, _last_heartbeat_at, _cycle_running_since
     value = _utc(at)
     with _lock:
         _last_cycle_started_at = value
         _last_heartbeat_at = value
+        _cycle_running_since = value
     return value
 
 
-def mark_cycle_completed(*, success: bool, error: BaseException | None = None, at: datetime | None = None) -> datetime:
+def mark_cycle_completed(*, success: bool, error: BaseException | None = None, at: datetime | None = None,
+                         degraded: bool = False) -> datetime:
+    """Record the end of a cycle.
+
+    ``degraded`` marks a cycle that completed but had per-anime failures:
+    the service stays ready (one broken title must not 503 the whole app),
+    and the UI surfaces the degradation instead.
+    """
     global _last_cycle_completed_at, _last_success_at, _last_heartbeat_at, _last_error_type
+    global _cycle_running_since, _degraded
     value = _utc(at)
     with _lock:
         _last_cycle_completed_at = value
         _last_heartbeat_at = value
+        _cycle_running_since = None
+        _degraded = bool(degraded)
         if success:
             _last_success_at = value
             _last_error_type = None
         else:
             _last_error_type = type(error).__name__ if error else "RuntimeError"
     return value
+
+
+def mark_cycle_stats(stats: dict[str, Any]) -> None:
+    """Store the summary of the most recent cycle (counts, duration, errors)."""
+    global _cycle_stats
+    with _lock:
+        _cycle_stats = dict(stats)
+
+
+def set_next_run_at(epoch_seconds: float | None) -> None:
+    """Record when the scheduler will next wake up (epoch seconds, or None)."""
+    global _next_run_at
+    with _lock:
+        _next_run_at = (datetime.fromtimestamp(epoch_seconds, tz=timezone.utc)
+                        if epoch_seconds is not None else None)
+
+
+def record_event(level: str, message: str, **extra: Any) -> None:
+    """Append to the in-memory scheduler event feed shown in the UI."""
+    entry = {"at": _utc().isoformat(), "ts": time.time(), "level": level, "message": message}
+    entry.update(extra)
+    with _lock:
+        _events.append(entry)
+
+
+def get_events(limit: int = 100) -> list[dict[str, Any]]:
+    """Newest-first slice of the event feed."""
+    with _lock:
+        items = list(_events)
+    items.reverse()
+    return items[:max(0, int(limit))]
 
 
 def health_snapshot(*, now: datetime | None = None) -> dict[str, Any]:
@@ -178,7 +239,17 @@ def health_snapshot(*, now: datetime | None = None) -> dict[str, Any]:
         success_age = None
         if _last_success_at:
             success_age = max(0.0, round((current - _last_success_at).total_seconds(), 1))
-        heartbeat_fresh = success_age is not None and success_age <= threshold
+        # Start-up grace: the first cycle runs straight after boot but takes a
+        # while, and the deploy script needs HTTP 200 within ~30 s of a restart.
+        # A scheduler that just started and has not failed counts as healthy
+        # until a full stale-threshold has passed without a successful cycle.
+        starting = bool(
+            _last_success_at is None
+            and _last_error_type is None
+            and _scheduler_started_at is not None
+            and (current - _scheduler_started_at).total_seconds() <= threshold
+        )
+        heartbeat_fresh = (success_age is not None and success_age <= threshold) or starting
         ready = bool(
             _initialized
             and _scheduler_initialized
@@ -201,6 +272,12 @@ def health_snapshot(*, now: datetime | None = None) -> dict[str, Any]:
             "last_success_age_seconds": success_age,
             "heartbeat_stale_threshold_seconds": threshold,
             "last_error_type": _last_error_type,
+            "degraded": _degraded,
+            "starting": starting,
+            "cycle_running": _cycle_running_since is not None,
+            "cycle_running_since": _iso(_cycle_running_since),
+            "next_run_at": _iso(_next_run_at),
+            "cycle": dict(_cycle_stats),
             "dependency": {
                 "pocketbase": {
                     "authenticated": _database_authenticated,
