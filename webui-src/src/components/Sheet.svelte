@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
+  import Toasts from './Toasts.svelte';
 
   let { open, onclose, label, width = 620, children }: {
     open: boolean;
@@ -42,6 +43,7 @@
       <button class="icon-btn close" onclick={onclose} aria-label="Close"><Icon name="x" /></button>
       {@render children()}
     </div>
+    <Toasts />
   {/if}
 </dialog>
 

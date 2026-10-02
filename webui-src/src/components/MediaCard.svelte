@@ -7,14 +7,22 @@
 
   let { media, onopen, width = 150, sub = '' }: { media: Media; onopen: (m: Media) => void; width?: number; sub?: string } = $props();
 
-  const tracked = $derived(media.localState?.tracked || app.anime.some((a) => a.mediaId === media.id));
+  const inLibrary = $derived(app.animeLoaded ? app.anime.some((a) => a.mediaId === media.id) : (media.localState?.tracked ?? false));
+  const onList = $derived(inLibrary || !!media.mediaListEntry);
+  const listTitle = $derived(
+    inLibrary
+      ? 'In your library'
+      : media.mediaListEntry?.status
+        ? `On your list (${media.mediaListEntry.status.replaceAll('_', ' ').toLowerCase()})`
+        : 'On your AniList'
+  );
   const meta = $derived(sub || [media.format, media.episodes ? `${media.episodes} ep` : null].filter(Boolean).join(' · '));
 </script>
 
 <button class="mc" style:width="{width}px" onclick={() => onopen(media)}>
   <div class="art">
     <Poster cover={media.coverImage} title={titleOf(media.title)} />
-    {#if tracked}<span class="in" title="In your library"><Icon name="check" size={12} stroke={2.6} /></span>{/if}
+    {#if onList}<span class="in" title={listTitle} aria-label={listTitle}><Icon name="check" size={12} stroke={2.6} /></span>{/if}
     {#if media.averageScore}<span class="score tnum"><Icon name="star" size={10} />{(media.averageScore / 10).toFixed(1)}</span>{/if}
   </div>
   <b class="clamp-2">{titleOf(media.title, app.titleLang)}</b>

@@ -205,6 +205,9 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
 .btn-danger { background: var(--bad-soft); border-color: transparent; color: var(--bad); }
 .btn-danger:hover { background: color-mix(in oklab, var(--bad) 22%, transparent); }
+.btn-success { background: var(--ok-soft); border-color: color-mix(in oklab, var(--ok) 35%, transparent); color: var(--ok); font-weight: 600; }
+.btn-success[disabled] { opacity: 0.95; pointer-events: none; }
+.spin-sm { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: spin 0.7s linear infinite; display: inline-block; }
 .btn-sm { height: 30px; padding: 0 11px; font-size: 12.5px; border-radius: 8px; }
 .btn-lg { height: 42px; padding: 0 18px; font-size: 14.5px; }
 .icon-btn {

@@ -119,9 +119,17 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
     # item made a 50-card page cost 50 serial network calls.
     record = db.get_local(int(media_id))
     enriched = dict(media_item)
+    is_tracked = False
+    try:
+        watching = anilist.get_anime_user_list()
+        if watching is not None:
+            is_tracked = any(w.get("mediaId") == int(media_id) for w in watching)
+    except Exception:
+        pass
+
     if record:
         enriched["localState"] = {
-            "tracked": True,
+            "tracked": is_tracked,
             "alternativeTitle": record.alternative_title or None,
             "startingEpisode": record.starting_episode,
             "downloadedEpisodes": record.downloaded_episodes or [],
@@ -133,7 +141,7 @@ def enrich_media_with_local_state(media_item: dict) -> dict:
         }
     else:
         enriched["localState"] = {
-            "tracked": False,
+            "tracked": is_tracked,
             "alternativeTitle": None,
             "startingEpisode": 0,
             "downloadedEpisodes": [],
@@ -727,6 +735,13 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             try:
                 params = urllib.parse.parse_qs(url.query)
                 q = params.get("q", [""])[0]
+                sort = params.get("sort", [None])[0]
+                format_val = params.get("format", None)
+                status_val = params.get("status", None)
+                genre_val = params.get("genre", None)
+                season = params.get("season", [None])[0]
+                season_year_str = params.get("seasonYear", [None])[0]
+                season_year = int(season_year_str) if season_year_str and season_year_str.isdigit() else None
                 try:
                     page = int(params.get("page", [1])[0])
                 except ValueError:
@@ -736,11 +751,35 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                 except ValueError:
                     per_page = 20
 
-                if not q:
+                if not q and not (sort or format_val or status_val or genre_val or season or season_year):
                     self.send_json(400, {"error": "Query parameter 'q' is required"})
                     return
 
-                result = dict(anilist.search_anime(q, page, per_page))
+                sort_map = {
+                    "popularity": "POPULARITY_DESC",
+                    "score": "SCORE_DESC",
+                    "trending": "TRENDING_DESC",
+                    "date": "START_DATE_DESC",
+                    "title": "TITLE_ROMAJI",
+                }
+                if sort and sort in sort_map:
+                    sort = sort_map[sort]
+
+                format_in = [item.strip() for f in format_val for item in f.split(",") if item.strip()] if format_val else None
+                status_in = [item.strip() for s in status_val for item in s.split(",") if item.strip()] if status_val else None
+                genre_in = [item.strip() for g in genre_val for item in g.split(",") if item.strip()] if genre_val else None
+
+                result = dict(anilist.search_anime(
+                    query_text=q,
+                    page=page,
+                    per_page=per_page,
+                    sort=sort,
+                    format_in=format_in,
+                    status_in=status_in,
+                    genre_in=genre_in,
+                    season=season,
+                    season_year=season_year,
+                ))
                 media = result.get("media", [])
                 result["media"] = enrich_media_list_with_local_state(media)
                 result["query"] = q
@@ -829,7 +868,7 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
             status_in = params.get("statusIn", None)
             if status_in:
                 try:
-                    status_in = [s for s in status_in]
+                    status_in = [("REPEATING" if s.upper() in ("REWATCHING", "REPEATING") else s) for s in status_in]
                 except Exception:
                     status_in = None
             force_single = _bool_param(params.get("forceSingleCompletedList", [True])[0], default=True)
@@ -1764,7 +1803,9 @@ class AnimuHTTPHandler(http.server.BaseHTTPRequestHandler):
                             rec.downloaded_episodes.sort()
                         rec.reset_timeout()
 
-                    db.update(media_id, _mark)
+                    rec = db.update(media_id, _mark)
+                    if rec and scheduler.should_set_anime_to_rewatching(anime, rec.downloaded_episodes):
+                        scheduler.sync_anime_rewatching_status(anime, rec)
 
             self.send_json(200, {
                 "ok": True,

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { nav, parse, navigateKeepScroll, navigate } from '../lib/router.svelte';
+  import { nav, parse, navigateKeepScroll, navigate, openAnimeView } from '../lib/router.svelte';
   import { api, q } from '../lib/api';
   import { clock, useClock } from '../lib/clock.svelte';
   import { poll } from '../lib/store.svelte';
@@ -119,7 +119,7 @@
             <div class="row between wrap">
               <div><h3>{t.anime_title}</h3><p class="faint mono q">{t.search_query}</p></div>
               <div class="row"><span class="chip bad">{t.status.replaceAll('_', ' ').toLowerCase()}</span>
-                <button class="btn btn-sm" onclick={() => navigate(`/library/${t.media_id}?tab=search`)}>Open<Icon name="chevron-right" size={14} /></button></div>
+                <button class="btn btn-sm" onclick={() => openAnimeView(t.media_id, { tab: 'search' })}>Open<Icon name="chevron-right" size={14} /></button></div>
             </div>
             <div class="facts faint tnum">
               {#if t.max_timeouts != null}<span>{plural(t.max_timeouts, 'failed attempt')}</span>{/if}

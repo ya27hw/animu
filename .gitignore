@@ -13,6 +13,8 @@ __pycache__/
 .worktrees/
 backups/
 *.bak-*
+.site-build/
+.pytest_cache/
 tempCodeRunner*
 
 # Known-bad leftover test

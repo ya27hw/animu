@@ -1,13 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { nav, parse, navigate } from './lib/router.svelte';
-  import { initTheme, loadStatus, loadAnime, loadDownloads, poll } from './lib/store.svelte';
+  import { nav, parse, navigate, closeAnimeView } from './lib/router.svelte';
+  import { initTheme, loadStatus, loadAnime, loadDownloads, poll, app } from './lib/store.svelte';
   import { openPalette } from './lib/palette.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import TabBar from './components/TabBar.svelte';
   import Toasts from './components/Toasts.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import CommandPalette from './components/CommandPalette.svelte';
+  import ShowSheet from './components/ShowSheet.svelte';
+  import MediaSheet from './components/MediaSheet.svelte';
   import Today from './routes/Today.svelte';
 
   // Everything except the landing page is split into its own chunk and only
@@ -22,6 +24,7 @@
   } as const;
 
   const route = $derived(parse(nav.path));
+  const tracked = $derived(route.id != null && app.animeLoaded && app.anime.some((a) => a.mediaId === route.id));
 
   const TITLES: Record<string, string> = {
     today: 'Today', library: 'Library', discover: 'Discover', queue: 'Queue', history: 'History', activity: 'Activity', settings: 'Settings',
@@ -84,7 +87,19 @@
 <TabBar />
 <CommandPalette />
 <ConfirmDialog />
-<Toasts />
+{#if route.id == null}
+  <Toasts />
+{/if}
+
+{#if route.id != null}
+  {#if route.name === 'discover'}
+    <MediaSheet id={route.id} onclose={closeAnimeView} />
+  {:else if tracked}
+    <ShowSheet id={route.id} onclose={closeAnimeView} />
+  {:else}
+    <MediaSheet id={route.id} onclose={closeAnimeView} />
+  {/if}
+{/if}
 
 <style>
   .shell { display: flex; min-height: 100dvh; }

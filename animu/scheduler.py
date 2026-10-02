@@ -393,19 +393,23 @@ class Scheduler:
     def should_set_anime_to_rewatching(self, anime: Dict[str, Any], downloaded: List[int]) -> bool:
         """Helper to determine if anime is complete and should be set to rewatching."""
         config = get_config()
-        total_episodes = anime["media"].get("episodes") or 0
-        downloaded_count = len(set(downloaded))
-
-        return (
+        media = anime.get("media", {})
+        total_episodes = media.get("episodes") or 0
+        if not (
             bool(config.set_completed_to_rewatching) and
-            anime["media"].get("status") == "FINISHED" and
-            total_episodes > 0 and
-            downloaded_count >= total_episodes
-        )
+            media.get("status") == "FINISHED" and
+            total_episodes > 0
+        ):
+            return False
+        downloaded_set = set(downloaded)
+        return all(ep in downloaded_set for ep in range(1, total_episodes + 1))
 
     def sync_anime_rewatching_status(self, anime: Dict[str, Any], record: OfflineAnime) -> None:
         """Sets AniList collection entry status to REPEATING if completed."""
         if not self.should_set_anime_to_rewatching(anime, record.downloaded_episodes):
+            if record.pending_rewatching_update:
+                record.pending_rewatching_update = False
+                db.upsert(anime["mediaId"], record, fields=F_REWATCH)
             return
 
         record.pending_rewatching_update = True
@@ -417,6 +421,11 @@ class Scheduler:
             if success:
                 record.pending_rewatching_update = False
                 db.upsert(anime["mediaId"], record, fields=F_REWATCH)
+                try:
+                    if hasattr(anilist.get_anime_user_list, "clear_cache"):
+                        anilist.get_anime_user_list.clear_cache()
+                except Exception:
+                    pass
             else:
                 print(f"Failed to set {anime['media']['title']['romaji']} to rewatching on AniList.")
         except Exception as e:
@@ -482,6 +491,8 @@ class Scheduler:
         end_episode = aired_episodes(anime)
 
         if end_episode <= start_episode:
+            if record.pending_rewatching_update or self.should_set_anime_to_rewatching(anime, record.downloaded_episodes):
+                self.sync_anime_rewatching_status(anime, record)
             return
 
         # Check if already up to date
@@ -490,7 +501,7 @@ class Scheduler:
 
         if is_up_to_date:
             self._clear_failure_state(anime, record)
-            if record.pending_rewatching_update:
+            if record.pending_rewatching_update or self.should_set_anime_to_rewatching(anime, record.downloaded_episodes):
                 self.sync_anime_rewatching_status(anime, record)
             from .nyaa import remove_failed_trace
             remove_failed_trace(media_id)
@@ -526,7 +537,7 @@ class Scheduler:
                     )
                 if all(ep in record.downloaded_episodes for ep in anime_progress):
                     self._clear_failure_state(anime, record)
-                    if record.pending_rewatching_update:
+                    if record.pending_rewatching_update or self.should_set_anime_to_rewatching(anime, record.downloaded_episodes):
                         self.sync_anime_rewatching_status(anime, record)
                     self._set_state(media_id, "up_to_date", "found in an existing batch")
                     return
@@ -847,7 +858,7 @@ class Scheduler:
                 has_missing = any(ep not in record.downloaded_episodes
                                   for ep in range(start_episode + 1, airing_episodes + 1))
 
-                if has_missing or record.pending_rewatching_update:
+                if has_missing or record.pending_rewatching_update or self.should_set_anime_to_rewatching(anime, record.downloaded_episodes):
                     execution_list.append((anime, record))
                 else:
                     result.up_to_date += 1

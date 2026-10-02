@@ -162,17 +162,57 @@ export function mockApi(): Plugin {
         }
         if (p === '/api/anilist/search') {
           const term = (sp.get('q') ?? '').toLowerCase();
-          const all = Object.values<any>(fx.detail).filter((x) => `${x.title.romaji} ${x.title.english ?? ''}`.toLowerCase().includes(term));
-          return json(res, 200, { media: all.slice(0, Number(sp.get('perPage') ?? 20)), pageInfo: { hasNextPage: false }, query: sp.get('q') }, 180);
+          const genre = sp.get('genre');
+          const format = sp.get('format');
+          const status = sp.get('status');
+          const season = sp.get('season');
+          const seasonYear = sp.get('seasonYear');
+          const sort = sp.get('sort') ?? 'POPULARITY_DESC';
+          let all = Object.values<any>(fx.detail);
+          if (term) {
+            all = all.filter((x) => `${x.title.romaji} ${x.title.english ?? ''}`.toLowerCase().includes(term));
+          }
+          if (genre) all = all.filter((x) => x.genres?.some((g: string) => genre.split(',').map((s) => s.trim().toLowerCase()).includes(g.toLowerCase())));
+          if (format) all = all.filter((x) => format.split(',').map((s) => s.trim()).includes(x.format));
+          if (status) all = all.filter((x) => status.split(',').map((s) => s.trim()).includes(x.status));
+          if (season) all = all.filter((x) => x.season?.toLowerCase() === season.toLowerCase());
+          if (seasonYear) all = all.filter((x) => String(x.seasonYear) === String(seasonYear));
+          if (sort === 'score' || sort === 'SCORE_DESC') all.sort((a, b) => (b.averageScore ?? 0) - (a.averageScore ?? 0));
+          else if (sort === 'title' || sort === 'TITLE_ROMAJI') all.sort((a, b) => (a.title.romaji || '').localeCompare(b.title.romaji || ''));
+          else if (sort === 'date' || sort === 'START_DATE_DESC' || sort === 'year') all.sort((a, b) => (b.seasonYear ?? 0) - (a.seasonYear ?? 0));
+          else if (sort === 'trending' || sort === 'TRENDING_DESC') all.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+          return json(res, 200, {
+            media: all.slice(0, Number(sp.get('perPage') ?? 30)).map((m: any) => {
+              const inAnime = anime.find((x) => x.mediaId === m.id);
+              if (inAnime) return { ...m, mediaListEntry: { id: m.id, status: 'CURRENT', progress: inAnime.progress } };
+              if (m.id === 5114 || m.id === 16498 || m.id === 11061) return { ...m, mediaListEntry: { id: m.id, status: 'PLANNING', progress: 0 } };
+              return m;
+            }),
+            pageInfo: { hasNextPage: false },
+            query: sp.get('q'),
+          }, 180);
         }
-        if ((r = p.match(/^\/api\/anilist\/media\/(\d+)$/))) { const d = fx.detail[r[1]]; return d ? json(res, 200, { media: d }, 150) : json(res, 404, { error: 'Anime not found on AniList' }); }
+        if ((r = p.match(/^\/api\/anilist\/media\/(\d+)$/))) {
+          const d = fx.detail[r[1]];
+          if (!d) return json(res, 404, { error: 'Anime not found on AniList' });
+          const mid = Number(r[1]);
+          const inAnime = anime.find((x) => x.mediaId === mid);
+          const enriched: any = { ...d };
+          if (inAnime) {
+            enriched.mediaListEntry = { id: mid, status: 'CURRENT', progress: inAnime.progress };
+          } else if (mid === 5114 || mid === 16498 || mid === 11061) {
+            enriched.mediaListEntry = { id: mid, status: 'PLANNING', progress: 0 };
+          }
+          return json(res, 200, { media: enriched }, 150);
+        }
         if (p === '/api/anilist/completed-sequels') {
           const sq = fx.rails.upcoming.slice(0, 6).map((m: any, i: number) => ({ ...m, parentMedia: fx.rails.top[i % 12] }));
           return json(res, 200, { sequels: sq, groups: { finished: sq.slice(0, 2), airing: sq.slice(2, 4), upcoming: sq.slice(4) }, counts: { total: 6, finished: 2, airing: 2, upcoming: 2 } }, 260);
         }
         if (p === '/api/anilist/airing-today') return json(res, 200, { entries: fx.airing_today, windowHours: 24 }, 140);
         if (p === '/api/anilist/user-list') {
-          const status = sp.get('statusIn') ?? 'PLANNING';
+          let status = sp.get('statusIn') ?? 'PLANNING';
+          if (status === 'REWATCHING') status = 'REPEATING';
           const entries = fx.rails.popular.concat(fx.rails.top).slice(0, 18).map((media: any, i: number) => ({ id: i + 1, mediaId: media.id, status, progress: status === 'COMPLETED' ? media.episodes ?? 12 : 0, score: 70 + (i % 5) * 5, media }));
           return json(res, 200, { lists: [{ name: status, status, entries }], hasNextChunk: false }, 300);
         }

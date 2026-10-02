@@ -1,15 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { app, attention } from '../lib/store.svelte';
-  import { nav, parse, navigate, navigateKeepScroll } from '../lib/router.svelte';
+  import { nav, parse, navigate, navigateKeepScroll, openAnimeView } from '../lib/router.svelte';
   import { api, q } from '../lib/api';
   import { titleOf, weekdayTime, plural } from '../lib/format';
   import type { Anime, Media } from '../lib/types';
   import Poster from '../components/Poster.svelte';
   import StateChip from '../components/StateChip.svelte';
   import EpisodeBar from '../components/EpisodeBar.svelte';
-  import ShowSheet from '../components/ShowSheet.svelte';
-  import MediaSheet from '../components/MediaSheet.svelte';
   import Icon from '../components/Icon.svelte';
 
   const route = $derived(parse(nav.path));
@@ -74,23 +72,15 @@
     if (source === 'watching') { listEntries = null; return; }
     listEntries = null; listError = '';
     const ctrl = new AbortController();
-    api.get<{ lists: { entries: ListEntry[] }[] }>(`/api/anilist/user-list${q({ userName: app.userName, type: 'ANIME', statusIn: source.toUpperCase() })}`, ctrl.signal)
+    api.get<{ lists: { entries: ListEntry[] }[] }>(`/api/anilist/user-list${q({ userName: app.userName, type: 'ANIME', statusIn: source === 'rewatching' ? 'REPEATING' : source.toUpperCase() })}`, ctrl.signal)
       .then((r) => (listEntries = r.lists.flatMap((l) => l.entries)))
       .catch((e) => { if (!ctrl.signal.aborted) listError = e instanceof Error ? e.message : 'Could not load this list'; });
     return () => ctrl.abort();
   });
 
-  const tracked = $derived(route.id != null && app.anime.some((a) => a.mediaId === route.id));
-  function libraryUrl(id: number | null) {
-    const p = new URLSearchParams(route.query);
-    p.delete('tab'); p.delete('ep');
-    const qs = p.toString();
-    return `/library${id != null ? `/${id}` : ''}${qs ? `?${qs}` : ''}`;
-  }
-  const closeSheet = () => navigateKeepScroll(libraryUrl(null));
-  const openShow = (id: number) => navigateKeepScroll(libraryUrl(id));
+  const openShow = (id: number) => openAnimeView(id);
 
-  const LISTS = [['watching', 'Watching'], ['planning', 'Planning'], ['paused', 'Paused'], ['completed', 'Completed'], ['dropped', 'Dropped']];
+  const LISTS = [['watching', 'Watching'], ['rewatching', 'Rewatching'], ['planning', 'Planning'], ['paused', 'Paused'], ['completed', 'Completed'], ['dropped', 'Dropped']];
 </script>
 
 <div class="page">
@@ -186,7 +176,7 @@
     {:else}
       <div class="grid">
         {#each listEntries as e, i (e.mediaId)}
-          <button class="show rise" style="--i:{Math.min(i, 14)}" onclick={() => navigate(`/library/${e.mediaId}`)}>
+          <button class="show rise" style="--i:{Math.min(i, 14)}" onclick={() => openAnimeView(e.mediaId)}>
             <div class="art"><Poster cover={e.media.coverImage} title={titleOf(e.media.title)} /></div>
             <div class="info"><b class="clamp-2">{titleOf(e.media.title, app.titleLang)}</b>
               <span class="sub tnum">{e.progress ? `Watched ${e.progress}${e.media.episodes ? `/${e.media.episodes}` : ''}` : e.media.episodes ? `${e.media.episodes} episodes` : ''}{e.score ? ` · ★ ${e.score}` : ''}</span></div>
@@ -196,14 +186,6 @@
     {/if}
   {/if}
 </div>
-
-{#if route.id != null}
-  {#if tracked}
-    <ShowSheet id={route.id} onclose={closeSheet} />
-  {:else}
-    <MediaSheet id={route.id} onclose={closeSheet} />
-  {/if}
-{/if}
 
 <style>
   .tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }

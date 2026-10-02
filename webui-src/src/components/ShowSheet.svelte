@@ -63,14 +63,15 @@
   let results = $state<NyaaResult[] | null>(null);
   let searchedFor = $state<string>('');
   let downloading = $state<string | null>(null);
-  $effect(() => { void id; results = null; epInput = ''; searchedFor = ''; });
+  let downloadState = $state<Record<string, 'idle' | 'sending' | 'success' | 'error'>>({});
+  $effect(() => { void id; results = null; epInput = ''; searchedFor = ''; downloadState = {}; });
   $effect(() => {
     if (tab === 'search' && !epInput) epInput = String(route.query.get('ep') ?? missing[0] ?? aired ?? '');
   });
 
   async function search() {
     if (!anime) return;
-    searching = true; results = null;
+    searching = true; results = null; downloadState = {};
     try {
       const body = epInput ? { episode: Number(epInput) } : {};
       const res = await api.post<{ results: NyaaResult[] }>(`/api/anime/${anime.mediaId}/nyaa-search`, body);
@@ -83,11 +84,14 @@
   async function download(r: NyaaResult) {
     if (!anime) return;
     downloading = r.link;
+    downloadState[r.link] = 'sending';
     try {
       await api.post(`/api/anime/${anime.mediaId}/nyaa-download`, { link: r.link, episode: epInput ? Number(epInput) : null });
+      downloadState[r.link] = 'success';
       toast(`Sent episode ${epInput || ''} to qBittorrent`.replace('  ', ' '), 'ok');
       await loadAnime();
     } catch (e) {
+      downloadState[r.link] = 'error';
       const detailMsg = e instanceof ApiError && e.detail ? ` (${e.detail})` : '';
       toast((e instanceof Error ? e.message : 'Download failed') + detailMsg, 'bad');
     } finally { downloading = null; }
@@ -246,6 +250,7 @@
             {:else}
               <ul class="results">
                 {#each results as r, i (r.link)}
+                  {@const st = downloadState[r.link] ?? 'idle'}
                   <li class="res card rise" style="--i:{i}">
                     <div class="rt">
                       <b class="clamp-2">{r.title}</b>
@@ -257,9 +262,27 @@
                       </div>
                       <span class="faint meta tnum">{r.size} · {r.seeders} seeders · {relative(r.pubDate)}</span>
                     </div>
-                    <button class="btn btn-sm btn-primary" onclick={() => download(r)} disabled={downloading !== null}>
-                      {downloading === r.link ? 'Sending…' : 'Download'}
-                    </button>
+                    {#if st === 'success'}
+                      <button class="btn btn-sm btn-success" disabled aria-label="Sent to qBittorrent">
+                        <Icon name="check" size={14} stroke={2.6} />
+                        <span>Sent</span>
+                      </button>
+                    {:else if st === 'sending' || downloading === r.link}
+                      <button class="btn btn-sm btn-primary" disabled aria-label="Sending download to qBittorrent">
+                        <span class="spin-sm" aria-hidden="true"></span>
+                        <span>Sending…</span>
+                      </button>
+                    {:else if st === 'error'}
+                      <button class="btn btn-sm btn-danger" onclick={() => download(r)} aria-label="Download failed. Click to retry">
+                        <Icon name="alert" size={14} />
+                        <span>Failed · Retry</span>
+                      </button>
+                    {:else}
+                      <button class="btn btn-sm btn-primary" onclick={() => download(r)} disabled={downloading !== null} aria-label="Download release">
+                        <Icon name="download" size={14} />
+                        <span>Download</span>
+                      </button>
+                    {/if}
                   </li>
                 {/each}
               </ul>

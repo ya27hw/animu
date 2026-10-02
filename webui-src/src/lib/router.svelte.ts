@@ -8,7 +8,7 @@ export interface Route {
 
 export const nav = $state({ path: typeof location !== 'undefined' ? location.pathname + location.search : '/' });
 
-const NAMES: RouteName[] = ['library', 'discover', 'queue', 'history', 'activity', 'settings'];
+const NAMES: RouteName[] = ['today', 'library', 'discover', 'queue', 'history', 'activity', 'settings'];
 
 export function parse(full: string): Route {
   const [pathname, search = ''] = full.split('?');
@@ -16,9 +16,38 @@ export function parse(full: string): Route {
   const query = new URLSearchParams(search);
   if (parts.length === 0) return { name: 'today', id: null, query };
   const head = parts[0] as RouteName;
-  if (!NAMES.includes(head)) return { name: 'notfound', id: null, query };
+  if (!NAMES.includes(head)) {
+    if (/^\d+$/.test(head)) return { name: 'today', id: Number(head), query };
+    return { name: 'notfound', id: null, query };
+  }
   const id = parts[1] && /^\d+$/.test(parts[1]) ? Number(parts[1]) : null;
   return { name: head, id, query };
+}
+
+export function openAnimeView(id: number, extraQuery?: Record<string, string | null | undefined>): void {
+  const cur = parse(nav.path);
+  const p = new URLSearchParams(cur.query);
+  if (extraQuery) {
+    for (const [k, v] of Object.entries(extraQuery)) {
+      if (v == null) p.delete(k);
+      else p.set(k, v);
+    }
+  }
+  const qs = p.toString();
+  const baseName = cur.name === 'notfound' || cur.name === 'today' ? 'today' : cur.name;
+  const target = `/${baseName}/${id}${qs ? `?${qs}` : ''}`;
+  navigateKeepScroll(target);
+}
+
+export function closeAnimeView(): void {
+  const cur = parse(nav.path);
+  const p = new URLSearchParams(cur.query);
+  p.delete('tab');
+  p.delete('ep');
+  const qs = p.toString();
+  const baseName = cur.name === 'today' ? '/' : `/${cur.name}`;
+  const target = `${baseName}${qs ? `?${qs}` : ''}`;
+  navigateKeepScroll(target);
 }
 
 export function navigate(to: string, opts: { replace?: boolean } = {}): void {

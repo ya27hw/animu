@@ -24,8 +24,8 @@ top = gql({"p": 1, "sort": ["SCORE_DESC"]})
 now = time.time()
 states = ["downloaded", "up_to_date", "up_to_date", "up_to_date", "waiting_release", "not_found", "backoff",
           "up_to_date", "downloaded", "search_error", "up_to_date", "error", "up_to_date", "backoff"]
-anime = []
-for i, m in enumerate(releasing[:14]):
+anime_candidates = [m for m in releasing if m.get("id") != 21]
+for i, m in enumerate(anime_candidates[:14]):
     nxt = m.get("nextAiringEpisode") or {"episode": (m["episodes"] or 12) + 1, "timeUntilAiring": 86400 * random.randint(1, 6)}
     aired = max(1, nxt["episode"] - 1)
     state = states[i % len(states)]

@@ -157,6 +157,41 @@ class TestNavigation(unittest.TestCase):
         page.wait_for_timeout(500)
         self.assertEqual({h for h in hosts if not h.startswith("127.0.0.1")}, set())
 
+    def test_detail_sheet_renders_single_toasts_host_above_dialog(self):
+        page = self._page(1280, 800, "/library")
+        self.assertEqual(page.locator(".toasts").count(), 1)
+        self.assertEqual(page.locator("dialog.sheet").count(), 0)
+
+        # Open detail sheet via deep link client route
+        page.evaluate("window.history.pushState(null, '', '/library/12345'); window.dispatchEvent(new PopStateEvent('popstate'));")
+        page.wait_for_selector("dialog.sheet[open]")
+
+        # Exactly one .toasts host must exist (no duplication), inside the open dialog
+        self.assertEqual(page.locator(".toasts").count(), 1)
+        self.assertEqual(page.locator("dialog.sheet .toasts").count(), 1)
+
+        # Close the sheet
+        page.locator("dialog.sheet button[aria-label=Close]").click()
+        page.wait_for_selector("dialog.sheet[open]", state="detached")
+
+        # After closing, exactly one .toasts host remains
+        self.assertEqual(page.locator(".toasts").count(), 1)
+        self.assertEqual(page.locator("dialog.sheet").count(), 0)
+
+    def test_anime_click_keeps_document_without_full_reload(self):
+        page = self._page(1280, 800, "/discover")
+        page.evaluate("window.__test_document_alive = true")
+
+        # Navigate into anime view
+        page.evaluate("window.history.pushState(null, '', '/discover/12345'); window.dispatchEvent(new PopStateEvent('popstate'));")
+        page.wait_for_selector("dialog.sheet[open]")
+        self.assertTrue(page.evaluate("window.__test_document_alive"))
+
+        # Close anime view
+        page.locator("dialog.sheet button[aria-label=Close]").click()
+        page.wait_for_selector("dialog.sheet[open]", state="detached")
+        self.assertTrue(page.evaluate("window.__test_document_alive"))
+
 
 if __name__ == "__main__":
     unittest.main()

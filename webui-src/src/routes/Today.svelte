@@ -3,7 +3,7 @@
   import { app, attention, loadStatus, loadAnime } from '../lib/store.svelte';
   import { clock, useClock } from '../lib/clock.svelte';
   import { api } from '../lib/api';
-  import { navigate, link } from '../lib/router.svelte';
+  import { navigate, link, openAnimeView } from '../lib/router.svelte';
   import { toast } from '../lib/toast.svelte';
   import { titleOf, weekdayTime, speed, eta, relative, plural } from '../lib/format';
   import type { AiringItem, SchedulerEvent } from '../lib/types';
@@ -115,7 +115,7 @@
           <ul class="card list">
             {#each needs.slice(0, 5) as a (a.mediaId)}
               <li>
-                <button class="who" onclick={() => navigate(`/library/${a.mediaId}`)}>
+                <button class="who" onclick={() => openAnimeView(a.mediaId)}>
                   <span class="thumb"><Poster cover={a.media.coverImage} title={titleOf(a.media.title)} /></span>
                   <span class="meta">
                     <b class="clamp-1">{titleOf(a.media.title, app.titleLang)}</b>
@@ -124,7 +124,7 @@
                 </button>
                 <StateChip state={a.state} detail={a.stateDetail} />
                 <div class="acts">
-                  <button class="btn btn-sm" onclick={() => navigate(`/library/${a.mediaId}?tab=search`)}><Icon name="search" size={14} />Search</button>
+                  <button class="btn btn-sm" onclick={() => openAnimeView(a.mediaId, { tab: 'search' })}><Icon name="search" size={14} />Search</button>
                   <button class="btn btn-sm btn-ghost" onclick={() => retry(a.mediaId)} title="Clear back-off and retry next cycle"><Icon name="refresh" size={14} />Retry</button>
                 </div>
               </li>
@@ -144,7 +144,7 @@
         {:else}
           <div class="hrail">
             {#each airing as e, i (e.mediaId)}
-              <button class="air card rise" style="--i:{i}" onclick={() => navigate(`/library/${e.mediaId}`)}>
+              <button class="air card rise" style="--i:{i}" onclick={() => openAnimeView(e.mediaId)}>
                 <span class="c"><Poster cover={{ large: e.coverImage }} title={e.title} /></span>
                 <span class="t">
                   <small class="when tnum">{weekdayTime(e.airingAt * 1000, clock.now)}</small>

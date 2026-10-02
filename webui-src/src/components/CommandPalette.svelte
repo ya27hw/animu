@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { palette, closePalette } from '../lib/palette.svelte';
-  import { navigate } from '../lib/router.svelte';
+  import { navigate, openAnimeView } from '../lib/router.svelte';
   import { app, toggleTheme, theme } from '../lib/store.svelte';
   import { api, q } from '../lib/api';
   import { titleOf } from '../lib/format';
@@ -62,7 +62,7 @@
       .slice(0, term ? 6 : 0)
       .map<Item>((a) => ({
         id: `s-${a.mediaId}`, label: titleOf(a.media.title, app.titleLang), hint: 'In your library', cover: a.media.coverImage, group: 'Library',
-        run: () => navigate(`/library/${a.mediaId}`),
+        run: () => openAnimeView(a.mediaId),
       }));
     const match = (i: Item) => !term || norm(i.label).includes(term);
     return [...shows, ...pages.filter(match), ...actions.filter(match)];
@@ -70,7 +70,7 @@
 
   const remoteItems = $derived<Item[]>(remote.slice(0, 6).map((m) => ({
     id: `r-${m.id}`, label: titleOf(m.title, app.titleLang), hint: [m.format, m.seasonYear].filter(Boolean).join(' · '), cover: m.coverImage, group: 'On AniList',
-    run: () => navigate(`/discover/${m.id}`),
+    run: () => openAnimeView(m.id),
   })));
 
   const items = $derived([...local, ...remoteItems]);

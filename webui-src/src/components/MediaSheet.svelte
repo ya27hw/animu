@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, loadAnime } from '../lib/store.svelte';
   import { api } from '../lib/api';
-  import { navigate } from '../lib/router.svelte';
+  import { navigate, openAnimeView } from '../lib/router.svelte';
   import { toast } from '../lib/toast.svelte';
   import { titleOf, plainText, weekdayTime, tint } from '../lib/format';
   import type { Media } from '../lib/types';
@@ -26,7 +26,8 @@
     return () => ctrl.abort();
   });
 
-  const tracked = $derived(app.anime.some((a) => a.mediaId === id) || !!media?.localState?.tracked);
+  const inLibrary = $derived(app.animeLoaded ? app.anime.some((a) => a.mediaId === id) : (media?.localState?.tracked ?? false));
+  const listStatus = $derived(media?.mediaListEntry?.status);
   const title = $derived(media ? titleOf(media.title, app.titleLang) : '');
   const color = $derived(tint(media?.coverImage?.color));
   const synopsis = $derived(plainText(media?.description));
@@ -62,6 +63,11 @@
         <div class="art"><Poster cover={media.coverImage} title={title} eager /></div>
         <div class="who">
           <div class="chips">
+            {#if inLibrary}
+              <span class="chip ok-glass"><Icon name="check" size={12} stroke={2.4} />In your library</span>
+            {:else if listStatus}
+              <span class="chip info-glass"><Icon name="check" size={12} stroke={2.4} />On your AniList list ({listStatus.replaceAll('_', ' ').toLowerCase()})</span>
+            {/if}
             {#if media.format}<span class="chip glass">{media.format}</span>{/if}
             {#if media.status}<span class="chip glass">{media.status.replaceAll('_', ' ').toLowerCase()}</span>{/if}
             {#if media.averageScore}<span class="chip glass"><Icon name="star" size={12} />{media.averageScore}</span>{/if}
@@ -79,9 +85,13 @@
       </div>
 
       <div class="cta">
-        {#if tracked || added}
+        {#if inLibrary || added}
           <span class="chip ok"><Icon name="check" size={13} stroke={2.4} />{added ? 'Added to Watching' : 'In your library'}</span>
-          {#if tracked}<button class="btn" onclick={() => navigate(`/library/${media!.id}`)}>Open in Library<Icon name="chevron-right" size={15} /></button>{/if}
+          {#if inLibrary}<button class="btn" onclick={() => openAnimeView(media!.id)}>Manage in Library<Icon name="chevron-right" size={15} /></button>{/if}
+        {:else if listStatus}
+          <span class="chip info"><Icon name="check" size={13} stroke={2.4} />On your AniList list ({listStatus.replaceAll('_', ' ').toLowerCase()})</span>
+          <button class="btn btn-primary" onclick={add} disabled={adding}><Icon name="plus" size={17} />{adding ? 'Moving…' : 'Move to Watching'}</button>
+          <p class="hint">Transfers it to your Watching list so Animu can download episodes.</p>
         {:else}
           <button class="btn btn-primary btn-lg" onclick={add} disabled={adding}><Icon name="plus" size={17} />{adding ? 'Adding…' : 'Add to Watching'}</button>
           <p class="hint">Adds it to your AniList Watching list and starts looking for episodes.</p>
@@ -103,8 +113,9 @@
   .head { position: relative; display: flex; gap: 18px; align-items: flex-end; }
   .art { width: 112px; flex: none; border-radius: 12px; overflow: hidden; box-shadow: 0 14px 34px oklch(0 0 0 / 0.45); }
   .who { display: grid; gap: 8px; min-width: 0; }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .chip.glass { background: oklch(0 0 0 / 0.38); color: #fff; border-color: transparent; backdrop-filter: blur(8px); text-transform: capitalize; }
+  .chip.ok-glass { background: color-mix(in oklab, var(--ok) 35%, oklch(0 0 0 / 0.45)); color: #8ef5b5; border-color: var(--ok); backdrop-filter: blur(8px); font-weight: 560; }
+  .chip.info-glass { background: color-mix(in oklab, var(--accent) 35%, oklch(0 0 0 / 0.45)); color: #badbff; border-color: var(--accent); backdrop-filter: blur(8px); font-weight: 560; }
   .t { font-size: clamp(20px, 3.4vw, 27px); line-height: 1.12; font-weight: 660; letter-spacing: -0.03em; text-wrap: balance; }
   .alt { color: var(--text-2); font-size: 13px; }
   .body { padding: 6px 24px 36px; display: grid; gap: 20px; }

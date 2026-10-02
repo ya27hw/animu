@@ -2,7 +2,7 @@ import json
 import os
 import threading
 import time
-from typing import Optional, List, Dict, Any, Callable, Tuple
+from typing import Optional, List, Dict, Any, Callable, Tuple, Union
 from .config import get_config
 from .storage import atomic_write_json
 from .anilist_auth import execute_graphql
@@ -486,10 +486,21 @@ class AnilistClient:
                 # failed request so callers can tell the two apart.
                 return (media.get("relations") or {}).get("edges") or []
         return None
-    def search_anime(self, query_text: str, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
-        """Search anime on AniList with pagination."""
+    def search_anime(
+        self,
+        query_text: str = "",
+        page: int = 1,
+        per_page: int = 20,
+        sort: Optional[Union[str, List[str]]] = None,
+        format_in: Optional[List[str]] = None,
+        status_in: Optional[List[str]] = None,
+        genre_in: Optional[List[str]] = None,
+        season: Optional[str] = None,
+        season_year: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Search anime on AniList with pagination, sorting, and filters."""
         query = """
-        query ($search: String, $page: Int, $perPage: Int) {
+        query ($search: String, $page: Int, $perPage: Int, $sort: [MediaSort] = [POPULARITY_DESC], $format_in: [MediaFormat], $status_in: [MediaStatus], $genre_in: [String], $season: MediaSeason, $seasonYear: Int) {
           Page(page: $page, perPage: $perPage) {
             pageInfo {
               total
@@ -498,7 +509,7 @@ class AnilistClient:
               lastPage
               hasNextPage
             }
-            media(search: $search, type: ANIME, sort: [POPULARITY_DESC]) {
+            media(search: $search, type: ANIME, sort: $sort, format_in: $format_in, status_in: $status_in, genre_in: $genre_in, season: $season, seasonYear: $seasonYear) {
               id
               title {
                 romaji
@@ -538,7 +549,23 @@ class AnilistClient:
           }
         }
         """
-        resp = self._query(query, {"search": query_text, "page": page, "perPage": per_page})
+        variables: Dict[str, Any] = {"page": page, "perPage": per_page}
+        if query_text:
+            variables["search"] = query_text
+        if sort:
+            variables["sort"] = [sort] if isinstance(sort, str) else sort
+        if format_in:
+            variables["format_in"] = format_in
+        if status_in:
+            variables["status_in"] = status_in
+        if genre_in:
+            variables["genre_in"] = genre_in
+        if season:
+            variables["season"] = season
+        if season_year:
+            variables["seasonYear"] = season_year
+
+        resp = self._query(query, variables)
         if resp and "data" in resp and resp["data"] and "Page" in resp["data"]:
             return resp["data"]["Page"]
         return {"pageInfo": {"total": 0, "perPage": per_page, "currentPage": page, "lastPage": 1, "hasNextPage": False}, "media": []}
