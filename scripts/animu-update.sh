@@ -11,7 +11,7 @@
 # - Fetches and fast-forwards only (never non-ff, never merges/rebase)
 # - Exits 0 quietly if remote commit is unchanged
 # - Records rollback commit prior to modifying live checkout
-# - Validates service active state and /api/health HTTP 200
+# - Validates service active state and sustained /api/health HTTP 200 over healthy window
 # - Automatically rolls back to prior commit and restarts service on failure
 # - Safe logging without credentials or profile secrets
 # - Independent from application secrets, profile.json, and runtime state
@@ -25,7 +25,9 @@ BRANCH="${ANIMU_BRANCH:-main}"
 REMOTE="${ANIMU_REMOTE:-origin}"
 SERVICE_NAME="${ANIMU_SERVICE:-animu.service}"
 HEALTH_URL="${ANIMU_HEALTH_URL:-http://127.0.0.1:3210/api/health}"
-HEALTH_TIMEOUT="${ANIMU_HEALTH_TIMEOUT:-30}"
+HEALTH_WINDOW="${ANIMU_HEALTH_WINDOW:-30}"
+HEALTH_TIMEOUT="${ANIMU_HEALTH_TIMEOUT:-$((30 + HEALTH_WINDOW))}"
+HEALTH_INTERVAL="${ANIMU_HEALTH_INTERVAL:-2}"
 
 # Lock file management
 LOCK_FILE="${ANIMU_LOCK_FILE:-/run/lock/animu-update.lock}"
@@ -63,18 +65,23 @@ is_service_active() {
 }
 
 check_health() {
-  local url="$1"
-  local timeout="$2"
-  local elapsed=0
-  local interval=2
+  local url="${1:-$HEALTH_URL}"
+  local timeout="${2:-$HEALTH_TIMEOUT}"
+  local window="${3:-$HEALTH_WINDOW}"
+  local interval="${ANIMU_HEALTH_INTERVAL:-2}"
+  local start_time=$SECONDS
+  local healthy_start=-1
   local http_code="000"
 
-  while [ "$elapsed" -lt "$timeout" ]; do
+  while [ $((SECONDS - start_time)) -lt "$timeout" ]; do
     sleep "$interval"
-    elapsed=$((elapsed + interval))
 
     # Verify service is active before querying health
     if ! is_service_active; then
+      if [ "$healthy_start" -ge 0 ]; then
+        log "Service is not active; resetting healthy window."
+        healthy_start=-1
+      fi
       continue
     fi
 
@@ -97,12 +104,25 @@ except Exception:
     fi
 
     if [ "$http_code" = "200" ]; then
-      log "Health check passed (HTTP 200, elapsed: ${elapsed}s)."
-      return 0
+      if [ "$healthy_start" -lt 0 ]; then
+        healthy_start=$SECONDS
+      fi
+      local healthy_duration=$((SECONDS - healthy_start))
+      if [ "$healthy_duration" -ge "$window" ]; then
+        local elapsed=$((SECONDS - start_time))
+        log "Health check passed (HTTP 200 sustained for ${healthy_duration}s >= ${window}s, total elapsed: ${elapsed}s)."
+        return 0
+      fi
+    else
+      if [ "$healthy_start" -ge 0 ]; then
+        log "Health check returned HTTP $http_code; resetting healthy window."
+        healthy_start=-1
+      fi
     fi
   done
 
-  log_err "Health check timed out after ${timeout}s (last HTTP code: ${http_code})."
+  local elapsed=$((SECONDS - start_time))
+  log_err "Health check timed out after ${elapsed}s (timeout: ${timeout}s, required healthy window: ${window}s, last HTTP code: ${http_code})."
   return 1
 }
 
@@ -121,7 +141,8 @@ rollback() {
   log_err "ROLLBACK: Restarting $SERVICE_NAME on rolled-back commit..."
   restart_service || true
 
-  if check_health "$HEALTH_URL" "$HEALTH_TIMEOUT"; then
+  log_err "ROLLBACK: Verifying health endpoint at $HEALTH_URL (timeout: ${HEALTH_TIMEOUT}s, window: ${HEALTH_WINDOW}s)..."
+  if check_health "$HEALTH_URL" "$HEALTH_TIMEOUT" "$HEALTH_WINDOW"; then
     log_err "ROLLBACK: Service successfully restored to healthy state on ${target:0:8}."
   else
     log_err "ROLLBACK CRITICAL: Service remained unhealthy after rollback to ${target:0:8}."
@@ -218,8 +239,8 @@ main() {
   fi
 
   # 12. Verify health
-  log "Verifying health endpoint at $HEALTH_URL (timeout: ${HEALTH_TIMEOUT}s)..."
-  if ! check_health "$HEALTH_URL" "$HEALTH_TIMEOUT"; then
+  log "Verifying health endpoint at $HEALTH_URL (timeout: ${HEALTH_TIMEOUT}s, window: ${HEALTH_WINDOW}s)..."
+  if ! check_health "$HEALTH_URL" "$HEALTH_TIMEOUT" "$HEALTH_WINDOW"; then
     log_err "Post-update health check failed! Initiating rollback..."
     rollback "$rollback_target"
     exit 1

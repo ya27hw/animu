@@ -43,7 +43,9 @@ class TestUpdater(unittest.TestCase):
         env["ANIMU_REMOTE"] = "origin"
         env["ANIMU_SERVICE"] = "animu-test.service"
         env["ANIMU_LOCK_FILE"] = self.lock_file
-        env["ANIMU_HEALTH_TIMEOUT"] = "2"
+        env["ANIMU_HEALTH_TIMEOUT"] = "4"
+        env["ANIMU_HEALTH_WINDOW"] = "1"
+        env["ANIMU_HEALTH_INTERVAL"] = "1"
         # Mock commands by default
         env["ANIMU_RESTART_CMD"] = "true"
         env["ANIMU_CHECK_ACTIVE_CMD"] = "true"
@@ -90,7 +92,12 @@ class TestUpdater(unittest.TestCase):
         thread.start()
 
         try:
-            res = self._run_updater(extra_env={"ANIMU_HEALTH_URL": "http://127.0.0.1:39281/api/health"})
+            res = self._run_updater(extra_env={
+                "ANIMU_HEALTH_URL": "http://127.0.0.1:39281/api/health",
+                "ANIMU_HEALTH_WINDOW": "1",
+                "ANIMU_HEALTH_TIMEOUT": "4",
+                "ANIMU_HEALTH_INTERVAL": "1",
+            })
             self.assertEqual(res.returncode, 0)
             self.assertIn("Update succeeded", res.stdout)
             with open(os.path.join(self.app_dir, "version.txt"), "r") as f:
@@ -167,7 +174,9 @@ class TestUpdater(unittest.TestCase):
         # Health endpoint fails (no server listening on port 39282)
         res = self._run_updater(extra_env={
             "ANIMU_HEALTH_URL": "http://127.0.0.1:39282/api/health",
-            "ANIMU_HEALTH_TIMEOUT": "2"
+            "ANIMU_HEALTH_WINDOW": "1",
+            "ANIMU_HEALTH_TIMEOUT": "2",
+            "ANIMU_HEALTH_INTERVAL": "1",
         })
         self.assertEqual(res.returncode, 1)
         self.assertIn("Post-update health check failed! Initiating rollback", res.stderr)
@@ -177,6 +186,69 @@ class TestUpdater(unittest.TestCase):
         post_rollback_commit = subprocess.check_output(["git", "-C", self.app_dir, "rev-parse", "HEAD"]).decode().strip()
         self.assertEqual(post_rollback_commit, pre_commit)
         self.assertFalse(os.path.exists(os.path.join(self.app_dir, "broken.txt")))
+
+    def test_updater_transient_health_triggers_rollback(self):
+        """When health returns 200 initially but drops to 503 within the healthy window, update is rejected and rolled back."""
+        pre_commit = subprocess.check_output(["git", "-C", self.app_dir, "rev-parse", "HEAD"]).decode().strip()
+
+        # Push candidate commit to remote
+        clone_dir = os.path.join(self.test_dir, "clone2")
+        subprocess.run(["git", "clone", "-b", "main", self.remote_dir, clone_dir], check=True, capture_output=True)
+        subprocess.run(["git", "-C", clone_dir, "config", "user.email", "test@animu.local"], check=True)
+        subprocess.run(["git", "-C", clone_dir, "config", "user.name", "Test User"], check=True)
+        with open(os.path.join(clone_dir, "candidate.txt"), "w") as f:
+            f.write("candidate-version\n")
+        subprocess.run(["git", "-C", clone_dir, "add", "candidate.txt"], check=True)
+        subprocess.run(["git", "-C", clone_dir, "commit", "-m", "Candidate commit"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", clone_dir, "push", "origin", "main"], check=True, capture_output=True)
+
+        # Mock health endpoint: 200 on first request, 503 thereafter
+        import http.server
+        import threading
+
+        class TransientHealthHandler(http.server.BaseHTTPRequestHandler):
+            request_count = 0
+
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                TransientHealthHandler.request_count += 1
+                if TransientHealthHandler.request_count == 1:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"ok": true, "ready": true}')
+                else:
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"ok": false, "ready": false}')
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), TransientHealthHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            res = self._run_updater(extra_env={
+                "ANIMU_HEALTH_URL": f"http://127.0.0.1:{port}/api/health",
+                "ANIMU_HEALTH_WINDOW": "2",
+                "ANIMU_HEALTH_TIMEOUT": "4",
+                "ANIMU_HEALTH_INTERVAL": "1",
+            })
+            self.assertEqual(res.returncode, 1)
+            self.assertIn("Post-update health check failed! Initiating rollback", res.stderr)
+            self.assertIn("ROLLBACK: Rolling back working tree", res.stderr)
+
+            # Working tree must be restored to pre_commit
+            post_rollback_commit = subprocess.check_output(["git", "-C", self.app_dir, "rev-parse", "HEAD"]).decode().strip()
+            self.assertEqual(post_rollback_commit, pre_commit)
+            self.assertFalse(os.path.exists(os.path.join(self.app_dir, "candidate.txt")))
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
     def test_updater_lock_contention(self):
         """When another process holds the flock lock, updater exits 0 gracefully."""
