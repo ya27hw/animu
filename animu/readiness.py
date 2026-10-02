@@ -12,6 +12,7 @@ MIN_STALE_THRESHOLD_SECONDS: float = 60.0
 MAX_STALE_THRESHOLD_SECONDS: float = 86400.0
 DEFAULT_STALE_MULTIPLIER: float = 2.0
 DEFAULT_CYCLE_INTERVAL_MINUTES: int = 30
+MIN_CYCLE_GAP_SECONDS: float = 300.0
 
 _lock = threading.Lock()
 _initialized = False
@@ -55,18 +56,34 @@ def derive_cycle_interval_seconds(now: datetime | None = None) -> float:
     return float(interval) * 60.0
 
 
+def _resolve_min_cycle_gap() -> float:
+    """Return the minimum cycle gap floor, checking animu.scheduler if available."""
+    if MIN_CYCLE_GAP_SECONDS != 300.0:
+        return float(MIN_CYCLE_GAP_SECONDS)
+    try:
+        from .scheduler import MIN_CYCLE_GAP_SECONDS as scheduler_gap
+        return float(scheduler_gap)
+    except Exception:
+        return float(MIN_CYCLE_GAP_SECONDS)
+
+
 def compute_stale_threshold(
     cycle_interval_seconds: float | None = None,
     *,
     multiplier: float = DEFAULT_STALE_MULTIPLIER,
     min_bounds: float = MIN_STALE_THRESHOLD_SECONDS,
     max_bounds: float = MAX_STALE_THRESHOLD_SECONDS,
+    min_cycle_gap: float | None = None,
 ) -> float:
     """Compute a sensible staleness threshold based on cycle interval with bounds."""
     if cycle_interval_seconds is None:
         cycle_interval_seconds = derive_cycle_interval_seconds()
 
-    interval = max(1.0, float(cycle_interval_seconds))
+    if min_cycle_gap is None:
+        min_cycle_gap = _resolve_min_cycle_gap()
+
+    effective_interval = max(float(cycle_interval_seconds), float(min_cycle_gap))
+    interval = max(1.0, effective_interval)
     mult = max(1.0, float(multiplier))
     calculated = interval * mult
     return max(min_bounds, min(max_bounds, round(calculated, 1)))
@@ -88,10 +105,14 @@ def set_stale_threshold(seconds: float | None) -> None:
         SCHEDULER_HEARTBEAT_STALE_SECONDS = _stale_threshold if _stale_threshold is not None else compute_stale_threshold()
 
 
-def reconcile_threshold(cycle_interval_seconds: float | None = None) -> float:
+def reconcile_threshold(
+    cycle_interval_seconds: float | None = None,
+    *,
+    min_cycle_gap: float | None = None,
+) -> float:
     """Explicitly reconcile and update the staleness threshold with the scheduler cycle interval."""
     global _stale_threshold, SCHEDULER_HEARTBEAT_STALE_SECONDS
-    threshold = compute_stale_threshold(cycle_interval_seconds)
+    threshold = compute_stale_threshold(cycle_interval_seconds, min_cycle_gap=min_cycle_gap)
     with _lock:
         _stale_threshold = threshold
         SCHEDULER_HEARTBEAT_STALE_SECONDS = threshold
